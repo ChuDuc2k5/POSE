@@ -1,0 +1,26 @@
+{
+  "name": "pose",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "concurrently \"npm run start:backend\" \"npm run start:frontend\"",
+    "start:backend": "npm --prefix backend run start:dev",
+    "start:frontend": "npm --prefix frontend run dev"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ChuDuc2k5/POSE.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/ChuDuc2k5/POSE/issues"
+  },
+  "homepage": "https://github.com/ChuDuc2k5/POSE#readme",
+  "devDependencies": {
+    "concurrently": "^10.0.5"
+  }
+}
