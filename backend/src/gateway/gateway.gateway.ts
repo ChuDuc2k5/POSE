@@ -5,10 +5,11 @@ import {
 } from '@nestjs/websockets';
 
 import { Server, Socket } from 'socket.io';
+import { frontendUrl } from '../env.js';
 
 @WebSocketGateway({
   cors: {
-    origin: 'http://localhost:3001',
+    origin: frontendUrl,
   },
 })
 export class GatewayGateway {

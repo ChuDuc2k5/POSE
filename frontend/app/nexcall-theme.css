@@ -1,0 +1,123 @@
+/* NexCall: shared brand, surface and feedback colors. */
+:root {
+  --nx-primary: #2563eb;
+  --nx-primary-hover: #1d4ed8;
+  --nx-primary-soft: #eff6ff;
+  --nx-primary-tint: #dbeafe;
+  --nx-primary-line: #bfdbfe;
+  --nx-sky: #38bdf8;
+  --nx-sky-soft: #e0f2fe;
+  --nx-navy: #14284b;
+  --nx-navy-light: #1e3a68;
+  --nx-ink: #172b4d;
+  --nx-text: #334155;
+  --nx-muted: #64748b;
+  --nx-subtle: #94a3b8;
+  --nx-page: #f5f8ff;
+  --nx-surface: #ffffff;
+  --nx-surface-soft: #f8fafc;
+  --nx-line: #e2e8f0;
+  --nx-line-strong: #cbd5e1;
+  --nx-success: #047857;
+  --nx-success-soft: #ecfdf5;
+  --nx-success-line: #a7f3d0;
+  --nx-mint: #6ee7b7;
+  --nx-warning: #92400e;
+  --nx-warning-soft: #fffbeb;
+  --nx-warning-line: #fde68a;
+  --nx-danger: #be123c;
+  --nx-danger-soft: #fff1f2;
+  --nx-danger-line: #fecdd3;
+  --nx-shadow: 0 8px 28px #14284b08;
+  --nx-focus: 0 0 0 3px #2563eb1f;
+
+  --background: var(--nx-surface);
+  --foreground: var(--nx-ink);
+  --card: var(--nx-surface);
+  --card-foreground: var(--nx-ink);
+  --popover: var(--nx-surface);
+  --popover-foreground: var(--nx-ink);
+  --primary: var(--nx-primary);
+  --primary-foreground: var(--nx-surface);
+  --secondary: var(--nx-primary-soft);
+  --secondary-foreground: var(--nx-primary-hover);
+  --muted: var(--nx-surface-soft);
+  --muted-foreground: var(--nx-muted);
+  --accent: var(--nx-primary-soft);
+  --accent-foreground: var(--nx-primary-hover);
+  --destructive: var(--nx-danger);
+  --border: var(--nx-line);
+  --input: var(--nx-line-strong);
+  --ring: var(--nx-primary);
+  --chart-1: var(--nx-primary);
+  --chart-2: var(--nx-sky);
+  --chart-3: var(--nx-success);
+  --chart-4: #8b5cf6;
+  --chart-5: #f59e0b;
+  --sidebar: var(--nx-navy);
+  --sidebar-foreground: var(--nx-primary-tint);
+  --sidebar-primary: var(--nx-primary);
+  --sidebar-primary-foreground: var(--nx-surface);
+  --sidebar-accent: var(--nx-navy-light);
+  --sidebar-accent-foreground: var(--nx-surface);
+  --sidebar-border: #ffffff1f;
+  --sidebar-ring: var(--nx-sky);
+}
+
+::selection { color: var(--nx-primary-hover); background: var(--nx-primary-tint); }
+.brand-mark { background: var(--nx-primary); box-shadow: 0 5px 14px #2563eb24; }
+.button.primary { box-shadow: 0 5px 14px #2563eb1a; }
+.button.primary:hover { background: var(--nx-primary-hover); }
+.button.secondary:hover { background: var(--nx-primary-soft); border-color: var(--nx-primary-line); }
+.button, .favorite-button, .catalog-edit-button { transition: background .18s, border-color .18s, box-shadow .18s; }
+.hero { background: radial-gradient(ellipse at 90% 10%, #dbeafe99, transparent 55%), var(--nx-page); }
+.hero-copy h1 em, .access-story-copy h2 em { font-family: inherit; font-style: normal; font-weight: 600; }
+.workflow-preview, .profile-identity, .profile-panel, .catalog-list-panel, .catalog-stats article { box-shadow: var(--nx-shadow); }
+.workflow-preview { border-color: var(--nx-primary-line); }
+.workflow-icon, .note-icon, .benefit-icon { color: var(--nx-primary); }
+.voice-wave i { background: var(--nx-sky); }
+.cta-section { background: linear-gradient(115deg, var(--nx-navy), var(--nx-navy-light)); }
+.cta-section .eyebrow, .cta-section p { color: var(--nx-primary-tint); }
+.header-role { color: var(--nx-primary-hover); background: var(--nx-primary-soft); border-color: var(--nx-primary-line); }
+
+/* Deep navy workspaces with sky and mint accents. */
+.access-story { background: linear-gradient(145deg, var(--nx-navy), #153969); }
+.access-story::before { background: radial-gradient(ellipse at 0% 70%, #2563eb55, transparent 65%), radial-gradient(ellipse at 100% 0%, #38bdf833, transparent 55%); }
+.access-story .brand-mark, .catalog-sidebar .brand-mark { color: var(--nx-navy); background: var(--nx-sky-soft); }
+.access-story-copy h2 em { color: var(--nx-sky); }
+.access-story-copy > p, .access-story-footer small, .journey-flow small, .access-journey > p { color: var(--nx-primary-line); }
+.access-kicker, .journey-heading > span:first-child, .access-story-footer p { color: var(--nx-primary-tint); }
+.access-kicker > span, .access-journey > p > span { background: var(--nx-mint); }
+.journey-icon.active { color: var(--nx-navy); background: var(--nx-sky); border-color: var(--nx-sky); }
+.journey-wave i { background: linear-gradient(var(--nx-sky), var(--nx-mint)); }
+.access-page input:focus, .profile-page .auth-form input:not([type=checkbox]):focus, .catalog-search:focus-within { border-color: var(--nx-primary); box-shadow: var(--nx-focus); }
+.profile-cover { background: linear-gradient(120deg, var(--nx-primary-hover), var(--nx-sky)); }
+.profile-avatar, .profile-panel-icon, .access-form-icon, .catalog-admin-user > span { color: var(--nx-primary); background: var(--nx-primary-soft); border-color: var(--nx-primary-line); }
+.profile-status.verified { color: var(--nx-success); background: var(--nx-success-soft); }
+.catalog-sidebar { background: linear-gradient(175deg, var(--nx-navy), #10203d); color: var(--nx-primary-tint); }
+.catalog-sidebar nav button { color: var(--nx-primary-line); }
+.catalog-sidebar nav button.active { color: white; background: var(--nx-primary); border-color: #ffffff24; box-shadow: 0 5px 16px #00000012; }
+.catalog-sidebar nav button:hover:not(.active) { background: #ffffff0d; color: white; }
+.catalog-sidebar-label, .catalog-sidebar-note p { color: #a5bbd9; }
+.catalog-sidebar-note > svg { color: var(--nx-mint); }
+.catalog-sidebar .brand-caption, .catalog-sidebar-bottom > a, .catalog-sidebar-bottom .button { color: var(--nx-primary-line); }
+.catalog-stat-icon { color: var(--nx-primary); background: var(--nx-primary-soft); }
+.catalog-stats article:last-child .catalog-stat-icon { color: var(--nx-success); background: var(--nx-success-soft); }
+.catalog-section-tabs button[aria-pressed=true] { color: var(--nx-primary); border-color: var(--nx-primary); }
+
+/* Feedback colors keep their meaning across every workspace. */
+.publication-Published, .availability-Available, .availability-pill.Available { color: var(--nx-success); background: var(--nx-success-soft); border-color: var(--nx-success-line); }
+.publication-Hidden, .availability-Reserved, .availability-pill.Reserved { color: var(--nx-warning); background: var(--nx-warning-soft); border-color: var(--nx-warning-line); }
+.publication-Draft, .publication-Archived, .availability-Sold, .availability-Unavailable, .availability-pill.Sold, .availability-pill.Unavailable { color: var(--nx-muted); background: var(--nx-surface-soft); border-color: var(--nx-line); }
+.inquiry-status { color: var(--nx-warning); background: var(--nx-warning-soft); }
+.inquiry-status.Received { color: var(--nx-success); background: var(--nx-success-soft); }
+.inquiry-status.NeedsReview { color: var(--nx-primary-hover); background: var(--nx-primary-soft); }
+.form-alert.success { color: var(--nx-success); background: var(--nx-success-soft); border-color: var(--nx-success-line); }
+.form-alert.error { color: var(--nx-danger); background: var(--nx-danger-soft); border-color: var(--nx-danger-line); }
+.property-image-placeholder { background: linear-gradient(145deg, var(--nx-primary-tint), var(--nx-sky-soft)); color: var(--nx-primary-hover); }
+.customer-welcome { background: linear-gradient(120deg, var(--nx-primary-soft), var(--nx-sky-soft)); border-color: var(--nx-primary-line); }
+.favorite-button[aria-pressed=true] { color: var(--nx-danger); background: var(--nx-danger-soft); border-color: var(--nx-danger-line); }
+
+@media (prefers-reduced-motion: reduce) {
+  .button, .favorite-button, .catalog-edit-button { transition: none; }
+}
