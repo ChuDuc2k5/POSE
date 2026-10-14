@@ -16,7 +16,7 @@ async function terminal(call,type='completed',extra={}){await json(await f.postE
 try{
  await f.startCallingFixture();
  if(process.argv.includes('--preview-only')){
-  await f.cronCall('dispatch');console.log('PREVIEW READY: '+f.origin);await new Promise(resolve=>{process.once('message',resolve);process.once('SIGINT',resolve);process.once('SIGTERM',resolve);});
+  await f.cronCall('dispatch');await f.seedCallingUi();console.log('PREVIEW READY: '+f.origin);await new Promise(resolve=>{process.once('message',resolve);process.once('SIGINT',resolve);process.once('SIGTERM',resolve);});
  }else{
  check((await f.call('/api/calls','GET',undefined,null)).status===401,'Guest denied');
  check((await f.call('/api/calls','GET',undefined,'user')).status===403,'User denied');
