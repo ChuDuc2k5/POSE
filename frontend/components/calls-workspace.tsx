@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { socket } from '@/lib/socket';
 import { useEffect,useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { catalogRequest } from '@/lib/catalog-client';
@@ -14,9 +15,10 @@ export function CallsWorkspace({id,sales=false}:{id?:string;sales?:boolean}) {
  const params=useSearchParams();
  const [items,setItems]=useState<CallView[]>([]),[detail,setDetail]=useState<Detail|null>(null),[campaigns,setCampaigns]=useState<Campaign[]>([]);
  const [error,setError]=useState(''),[loading,setLoading]=useState(true),[status,setStatus]=useState(params.get('status')||''),[provider,setProvider]=useState(params.get('provider')||''),[campaign,setCampaign]=useState(params.get('campaign_id')||''),[revision,setRevision]=useState(0);
+ const [worker,setWorker]=useState<{redis:boolean;dispatcherEvery:number;lastError:string|null}|null>(null);
  const [action,setAction]=useState<{call:CallView;kind:'stop'|'opt-out'}|null>(null),[reason,setReason]=useState(''),[busy,setBusy]=useState(false);
  useEffect(()=>{
-  if(sales)return;const controller=new AbortController();
+  if(sales)return;catalogRequest<{redis:boolean;dispatcherEvery:number;lastError:string|null}>('/api/admin/calls/worker').then(setWorker).catch(()=>{});const controller=new AbortController();
   catalogRequest<{items:Campaign[]}>('/api/admin/campaigns?pageSize=50',{signal:controller.signal}).then(r=>setCampaigns(r.items)).catch(()=>{});
   return()=>controller.abort();
  },[sales]);
@@ -28,22 +30,22 @@ export function CallsWorkspace({id,sales=false}:{id?:string;sales?:boolean}) {
    const request=id?catalogRequest<Detail>(`/api/calls/${id}`,{signal:controller.signal}).then(setDetail):catalogRequest<{items:CallView[]}>(`/api/calls?${filter}`,{signal:controller.signal}).then(r=>setItems(r.items));
    request.then(()=>setError('')).catch(e=>{if(e.name!=='AbortError')setError(e.message);}).finally(()=>{if(!controller.signal.aborted)setLoading(false);});
   };
-  refresh();const timer=setInterval(refresh,5000);return()=>{controller.abort();clearInterval(timer);};
+  refresh();socket.on('call.status',refresh);socket.connect();const timer=setInterval(refresh,5000);return()=>{controller.abort();clearInterval(timer);socket.off('call.status',refresh);};
  },[id,status,provider,campaign,revision]);
  const campaignName=(call:CallView)=>campaigns.find(c=>c.id===call.campaign_id)?.name||(call.campaign_id?'Chiến dịch gọi tự động':'Gọi thử độc lập');
- const phone=(call:CallView)=>id&&!sales?call.phone_e164:maskedCallPhone(call.phone_e164);
+ const phone=(call:CallView)=>id&&!sales&&call.phone_e164?call.phone_e164:maskedCallPhone(call.phone_e164);
  const detailHref=(call:CallView)=>`${sales?'/sales/calls':'/admin/calls'}/${call.id}`;
  async function run(e:React.FormEvent) {
   e.preventDefault();if(!action)return;setBusy(true);
   try{await catalogRequest(action.kind==='stop'?`/api/calls/${action.call.id}/stop`:'/api/contacts/opt-out',{method:'POST',body:JSON.stringify({reason,phone:action.call.phone_e164})});setAction(null);setReason('');setRevision(x=>x+1);}
   catch(e){setError((e as Error).message);}finally{setBusy(false);}
  }
- const buttons=(call:CallView)=><div className="calls-actions">{activeCallStatuses.includes(call.status)&&<button className="button secondary" onClick={()=>{setReason('');setAction({call,kind:'stop'});}}>Dừng cuộc gọi</button>}<button className="button secondary" onClick={()=>{setReason('');setAction({call,kind:'opt-out'});}}>Không liên hệ</button></div>;
+ const buttons=(call:CallView)=><div className="calls-actions">{activeCallStatuses.includes(call.status)&&<button className="button secondary" onClick={()=>{setReason('');setAction({call,kind:'stop'});}}>Dừng cuộc gọi</button>}{call.phone_e164&&<button className="button secondary" onClick={()=>{setReason('');setAction({call,kind:'opt-out'});}}>Không liên hệ</button>}</div>;
  const badge=(call:CallView)=><span className="calls-pill">{call.provider==='simulator'?'Giả lập':call.provider}</span>;
  const title=id?'Chi tiết cuộc gọi':sales?'Cuộc gọi của khách được giao':'Cuộc gọi';
  const content=<>
   <div className="catalog-title"><div><span className="eyebrow">{sales?'KHÁCH HÀNG ĐƯỢC GIAO':'TERAVA GROUP'}</span>{sales?<h2>{title}</h2>:<h1>{title}</h1>}<p>Theo dõi kết nối, bằng chứng đồng ý và chi phí.</p></div>{!sales&&!id&&<Link className="button primary" href="/admin/calls/playground">Mô phỏng hội thoại</Link>}</div>
-  {error&&<p role="alert" className="form-alert error">{error}</p>}{loading&&<p role="status">Đang tải cuộc gọi…</p>}
+  {!sales&&!id&&worker&&<p role="status">Hàng đợi gọi: {worker.redis?'Redis đang chạy':'Điều phối thủ công'} · mỗi {worker.dispatcherEvery/1000} giây{worker.lastError?` · ${worker.lastError}`:''}</p>}{error&&<p role="alert" className="form-alert error">{error}</p>}{loading&&<p role="status">Đang tải cuộc gọi…</p>}
   {id?detail&&<section className="catalog-list-panel campaigns-panel calls-detail">
    <header className="calls-detail-heading"><h2>{phone(detail.item)}</h2><span className="calls-pill" data-call-status>{callLabels[detail.item.status]||detail.item.status}</span>{badge(detail.item)}</header>
    <p>{campaignName(detail.item)} · Bắt đầu: {callTime(detail.item.started_at)} · Thời lượng: {detail.item.duration_seconds===null?'Chưa kết thúc':`${detail.item.duration_seconds} giây`}</p>

@@ -1,3 +1,4 @@
+import { CallingModule } from './modules/calling/calling.module.js';
 import { CampaignsModule } from './modules/campaigns/campaigns.module.js';
 import { GatewayModule } from './gateway/gateway.module.js';
 import { AiModule } from './modules/ai/ai.module.js';
@@ -16,7 +17,7 @@ import { WorkspaceModule } from './modules/workspace/workspace.module.js';
 import { QueueModule } from './modules/queue/queue.module.js';
 import { HealthController } from './modules/queue/health.controller.js';
 @Module({
-  imports: [CampaignsModule, GatewayModule, AiModule, SupabaseModule, AuthModule, AccountModule, CatalogModule, CustomerModule, WorkspaceModule, QueueModule],
+  imports: [CallingModule, CampaignsModule, GatewayModule, AiModule, SupabaseModule, AuthModule, AccountModule, CatalogModule, CustomerModule, WorkspaceModule, QueueModule],
   controllers: [AppController, AccessController, HealthController],
   providers: [AppService, { provide: APP_GUARD, useClass: AuthGuard }],
 })
