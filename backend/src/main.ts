@@ -1,13 +1,14 @@
 import { NestFactory } from '@nestjs/core';
+import { frontendUrl, observeEnabled } from './env.js';
 import { AppModule, ObserveInstrument } from './app.module.js';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
-    instrument: ObserveInstrument,
+    ...(observeEnabled ? { instrument: ObserveInstrument } : {}),
   });
 
   app.enableCors({
-    origin: 'http://localhost:3000',
+    origin: frontendUrl,
     credentials: true,
   });
 

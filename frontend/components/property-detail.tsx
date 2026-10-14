@@ -1,0 +1,21 @@
+'use client';
+
+import Image from 'next/image';
+import Link from 'next/link';
+import { useState } from 'react';
+import { ArrowLeft, Building2, MapPin, Ruler, BedDouble, FileText, CalendarClock } from 'lucide-react';
+import { SiteHeader } from './site-header';
+import type { Role } from '@/lib/roles';
+import { CustomerNav } from './customer-nav';
+import { FavoriteButton, useFavoriteStatus } from './property-card';
+import { InquiryForm } from './inquiry-form';
+import { availabilityLabels, priceLabel, propertyTypeLabels } from '@/lib/catalog';
+import type { PublicProperty } from '@/lib/discovery';
+
+export type PublicMedia={id:string;name:string;media_type:'Image'|'Document';sort_order:number};
+export function PropertyDetail({item,media,role}:{item:PublicProperty;media:PublicMedia[];role:Role|null}){
+  const favorites=useFavoriteStatus([item.id]);
+  const images=media.filter(file=>file.media_type==='Image'),documents=media.filter(file=>file.media_type==='Document');
+  const [selected,setSelected]=useState<string|null>(images[0]?.id || null),[failed,setFailed]=useState<string[]>([]);
+  return <><SiteHeader role={role}/><main className="discovery-main container"><CustomerNav active="discover"/><Link href="/properties" className="text-link property-back"><ArrowLeft size={16}/> Quay lại danh sách</Link><div className="property-detail-heading"><div><span className="eyebrow">{item.project_name} {item.subdivision_name && `· ${item.subdivision_name}`}</span><h1>{item.name}</h1><p><MapPin size={17}/>{item.location}</p></div><div><span className={`availability-pill ${item.availability}`}>{availabilityLabels[item.availability || 'Unavailable']}</span><FavoriteButton id={item.id} saved={favorites.has(item.id)} customer={favorites.customer} ready={favorites.ready && !favorites.error}/></div></div>{favorites.error && <p role="alert">{favorites.error}</p>}<div className="property-detail-layout"><section><div className="property-gallery">{selected && !failed.includes(selected) ? <Image src={`/api/catalog/media/${selected}?public=true`} alt={images.find(file=>file.id===selected)?.name || item.name} width={1000} height={660} unoptimized onError={()=>setFailed([...failed,selected])}/> : <div className="property-image-placeholder"><Building2 size={56}/><span>{selected ? 'Hình ảnh tạm thời không khả dụng':'Chưa có hình ảnh được công bố'}</span></div>}</div>{images.length>1 && <div className="property-gallery-tabs" aria-label="Chọn hình ảnh">{images.map((file,index)=><button key={file.id} aria-pressed={selected===file.id} onClick={()=>setSelected(file.id)}>{file.name || `Ảnh ${index+1}`}</button>)}</div>}<section className="property-content-panel"><h2>Thông tin sản phẩm</h2><p className="property-description">{item.description || 'Chưa có mô tả bổ sung.'}</p><dl className="property-detail-facts"><div><dt>Mã sản phẩm</dt><dd>{item.code}</dd></div><div><dt>Loại bất động sản</dt><dd>{propertyTypeLabels[item.property_type || 'Apartment']}</dd></div><div><dt>Dự án</dt><dd>{item.project_name}</dd></div>{item.subdivision_name && <div><dt>Phân khu</dt><dd>{item.subdivision_name}</dd></div>}</dl>{item.amenities && <><h3>Tiện ích dự án</h3><p className="property-description">{item.amenities}</p></>}</section><section className="property-content-panel"><h2>Tài liệu công khai</h2>{documents.length ? <div className="property-documents">{documents.map(file=><a href={`/api/catalog/media/${file.id}?public=true`} key={file.id} className="text-link"><FileText size={19}/>{file.name} · PDF</a>)}</div> : <p>Chưa có tài liệu được công bố.</p>}</section></section><aside className="property-summary"><span className="eyebrow">GIÁ CÔNG BỐ</span><strong>{priceLabel(item.price)}</strong><div className="property-specs"><span><Ruler size={18}/>{item.area?.toLocaleString('vi-VN')} m²</span>{item.bedrooms!=null && <span><BedDouble size={18}/>{item.bedrooms} phòng ngủ</span>}</div><p><CalendarClock size={16}/> Cập nhật {new Date(item.updated_at).toLocaleString('vi-VN',{timeZone:'Asia/Ho_Chi_Minh'})}</p><a href="#tu-van" className="button primary">Tôi muốn được tư vấn</a><small>Tình trạng mở bán thể hiện thông tin quản lý sản phẩm. Yêu cầu tư vấn sẽ được đội ngũ tiếp nhận.</small></aside></div><InquiryForm propertyId={item.id} propertyName={item.name}/></main></>;
+}

@@ -1,5 +1,7 @@
-import { RevolandHomePage } from '@/components/real-estate/revoland-home';
+import { SystemHome } from "@/components/system-home";
+import { redirectSignedInUser } from '@/lib/auth-server';
 
-export default function Home() {
-  return <RevolandHomePage />;
+export default async function Home() {
+  await redirectSignedInUser('/');
+  return <SystemHome/>;
 }
