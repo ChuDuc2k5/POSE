@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { startStack } from './test-stack.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import sharp from 'sharp';
 
@@ -77,7 +77,9 @@ const provider=createServer(async(req,res)=>{
   return reply(404,{});
 });
 await new Promise(resolve=>provider.listen(3221,'127.0.0.1',resolve));
-const app=spawn(process.execPath,['node_modules/next/dist/bin/next','start','--port','3220'],{cwd:new URL('..',import.meta.url),env:{...process.env,SUPABASE_URL:'http://127.0.0.1:3221',SUPABASE_PUBLISHABLE_KEY:'fixture-public-key',SUPABASE_STORAGE_SECRET_KEY:'fixture-storage-key'},windowsHide:true,stdio:['ignore','pipe','pipe']});
+let stack;
+try { stack = await startStack(3220, {"SUPABASE_URL": "http://127.0.0.1:3221", "SUPABASE_PUBLISHABLE_KEY": "fixture-public-key", "SUPABASE_STORAGE_SECRET_KEY": "fixture-storage-key"}); } catch (error) { provider.close(); throw error; }
+const { app } = stack;
 let output='';app.stdout.on('data',chunk=>{output+=chunk;});app.stderr.on('data',chunk=>{output+=chunk;});
 const origin='http://localhost:3220',admin='pose-access=fixture-access';let checks=0;
 const check=(condition,message)=>{assert.ok(condition,message);checks++;};
@@ -147,4 +149,4 @@ try{
   offline=true;check((await call(`${route}/projects`)).status===503,'Provider outage fails closed');offline=false;
   console.log(`PASS: ${checks} M02 HTTP/Storage checks; fake provider only.`);
   if(process.argv.includes('--preview')){seed();if(process.argv.includes('--preview-user')){currentRole='User';profile.name='Minh Anh';}console.log(`PREVIEW READY: ${origin}; admin@example.test / safe-password-123 (fake provider only).`);await new Promise(resolve=>{process.once('SIGINT',resolve);process.once('SIGTERM',resolve);});}
-}finally{app.kill();provider.close();}
+}finally{await stack.close();provider.close();}
