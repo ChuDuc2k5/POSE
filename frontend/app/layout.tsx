@@ -7,6 +7,7 @@ import "./catalog.css";
 import "./customer.css";
 import "./discovery.css";
 import "./ai-agent.css";
+import "./campaigns.css";
 import "./nexcall-theme.css";
 import { EmailSession } from '@/components/email-session';
 
