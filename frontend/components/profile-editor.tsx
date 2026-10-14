@@ -93,7 +93,7 @@ export function ProfileEditor() {
         </aside>
         <div className="profile-main">
           <section className="profile-panel" id="personal-details">
-            <div className="profile-panel-heading"><span className="profile-panel-icon"><UserRound size={20}/></span><div><h2>Thông tin cá nhân</h2><p>Thông tin giúp NexCall kết nối với bạn tốt hơn.</p></div></div>
+            <div className="profile-panel-heading"><span className="profile-panel-icon"><UserRound size={20}/></span><div><h2>Thông tin cá nhân</h2><p>Thông tin giúp TERAVA kết nối với bạn tốt hơn.</p></div></div>
             <form onSubmit={save} className="auth-form profile-settings-form">
               <div className="profile-fields"><label>Họ và tên<input autoComplete="name" value={name} onChange={event => setName(event.target.value)} minLength={2} maxLength={80} required disabled={busy}/></label><label>Số liên hệ<input aria-label="Số liên hệ" type="tel" autoComplete="tel" value={phone} onChange={event => { setPhone(event.target.value); setOtpSent(false); }} placeholder="0912345678" maxLength={25} disabled={busy}/><small>{!profile.phone ? 'Thêm số điện thoại để thuận tiện liên hệ.' : profile.phoneVerified ? 'Số đang lưu đã được xác minh.' : 'Số đang lưu chưa được xác minh.'}</small></label></div>
               <label>Địa chỉ email<div className="profile-readonly"><Mail size={17}/><input aria-label="Địa chỉ email" type="email" value={user.email} readOnly/><span><Check size={13}/> Đã xác minh</span></div><small className="profile-field-help">Email được sử dụng để đăng nhập và nhận thông tin tài khoản.</small></label>
@@ -115,7 +115,7 @@ export function ProfileEditor() {
         </div>
       </div>}
       {error && !profile && <button className="button secondary" onClick={() => window.location.reload()}>Tải lại trang</button>}
-      <footer className="profile-footer"><span>© {new Date().getFullYear()} NexCall · Không gian cá nhân</span><Link href="/terms">Điều khoản & quyền riêng tư <ArrowRight size={13}/></Link></footer>
+      <footer className="profile-footer"><span>© {new Date().getFullYear()} TERAVA · Không gian cá nhân</span><Link href="/terms">Điều khoản & quyền riêng tư <ArrowRight size={13}/></Link></footer>
     </div>
   </main>;
 }

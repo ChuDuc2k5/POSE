@@ -48,10 +48,10 @@ export function AuthForm({ mode, verificationFailed = false }: { mode: 'signin' 
       <div className="access-story-copy">
         <span className="access-kicker"><span/> KẾT NỐI THÔNG MINH CÙNG AI</span>
         <h2>Mỗi kết nối,<br/>một <em>cơ hội mới.</em></h2>
-        <p>Từ cuộc trò chuyện đầu tiên đến hành trình chăm sóc. NexCall giúp mọi tương tác trở nên có ý nghĩa.</p>
+        <p>Từ cuộc trò chuyện đầu tiên đến hành trình chăm sóc. TERAVA giúp mọi tương tác trở nên có ý nghĩa.</p>
       </div>
       <div className="access-journey">
-        <div className="journey-heading"><span><Sparkles size={16}/> HÀNH TRÌNH CÙNG NexCall</span><span className="journey-orbit" aria-hidden="true"/></div>
+        <div className="journey-heading"><span><Sparkles size={16}/> HÀNH TRÌNH CÙNG TERAVA</span><span className="journey-orbit" aria-hidden="true"/></div>
         <div className="journey-flow">
           <div><span className="journey-icon"><UsersRound size={24}/></span><strong>Kết nối</strong><small>Tiếp nhận nhu cầu</small></div>
           <ArrowRight size={17} aria-hidden="true"/>
@@ -71,7 +71,7 @@ export function AuthForm({ mode, verificationFailed = false }: { mode: 'signin' 
       <div className="access-form-wrap">
         <nav className="access-mode" aria-label="Tài khoản"><Link href="/sign-in" aria-current={!signup ? 'page' : undefined}>Đăng nhập</Link><Link href="/sign-up" aria-current={signup ? 'page' : undefined}>Đăng ký</Link></nav>
         <span className="access-form-icon">{registered ? <Mail size={24}/> : signup ? <UserRound size={24}/> : <LockKeyhole size={24}/>}</span>
-        <h1>{registered ? 'Kiểm tra hộp thư của bạn' : signup ? 'Bắt đầu cùng NexCall' : 'Chào mừng trở lại.'}</h1>
+        <h1>{registered ? 'Kiểm tra hộp thư của bạn' : signup ? 'Bắt đầu cùng TERAVA' : 'Chào mừng trở lại.'}</h1>
         <p className="access-intro">{registered ? 'Xác minh email để hoàn tất đăng ký và bắt đầu hành trình của bạn.' : signup ? 'Một tài khoản, nhiều kết nối. Tạo tài khoản khách hàng của bạn chỉ với vài bước.' : 'Đăng nhập để tiếp tục hành trình kết nối và quản lý tài khoản của bạn.'}</p>
         {error && <div className="form-alert error" role="alert">{error}</div>}
         {notice && <div className="form-alert success" role="status"><Mail size={18}/><span>{notice}</span></div>}
@@ -92,7 +92,7 @@ export function AuthForm({ mode, verificationFailed = false }: { mode: 'signin' 
         <div className="access-switch">{signup ? 'Đã có tài khoản?' : 'Chưa có tài khoản?'} <Link href={signup ? '/sign-in' : '/sign-up'}>{signup ? 'Đăng nhập' : 'Đăng ký ngay'} <ArrowRight size={14}/></Link></div>
         <p className="access-security"><ShieldCheck size={14}/> Kết nối an toàn. Thông tin được bảo vệ.</p>
       </div>
-      <footer className="access-footer"><span>© {new Date().getFullYear()} NexCall</span><span>AI Calling & Lead Management</span></footer>
+      <footer className="access-footer"><span>© {new Date().getFullYear()} TERAVA</span><span>AI Calling & Lead Management</span></footer>
     </section>
   </main>;
 }
