@@ -21,7 +21,7 @@ export async function callAccess(request?:NextRequest,admin=false){
 async function rpc(name:string,args:Record<string,unknown>){const result=await systemClient().rpc(name,args);if(result.error)throw result.error;return result.data;}
 async function properties(script:Script&{product_source?:{property_ids:string[]}}):Promise<Evidence[]>{
  const ids=script.product_source?.property_ids||[];if(!ids.length)return [];
- const result=await authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type').in('id',ids).limit(100);if(result.error)throw result.error;
+ const result=await authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type,transaction_type,price_period').in('id',ids).limit(100);if(result.error)throw result.error;
  return (result.data||[]).map(p=>({...p,price:p.price===null?null:Number(p.price)}));
 }
 type Notify = (id:string)=>Promise<void>;

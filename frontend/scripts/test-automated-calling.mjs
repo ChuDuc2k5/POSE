@@ -18,6 +18,18 @@ try{
  if(process.argv.includes('--preview-only')){
   await f.cronCall('dispatch');await f.seedCallingUi();console.log('PREVIEW READY: '+f.origin);await new Promise(resolve=>{process.once('message',resolve);process.once('SIGINT',resolve);process.once('SIGTERM',resolve);});
  }else{
+ // Catalogue transport must bind filters and expose the current listing terms.
+ const catalog=async filters=>json(await fetch('http://127.0.0.1:3501/rest/v1/property_public_catalog?'+new URLSearchParams(filters),{headers:{Authorization:'Bearer fixture-public'}}));
+ let listings=await catalog({id:'eq.'+f.productId});
+ check(listings.length===1&&listings[0].id===f.productId&&listings[0].transaction_type==='Sale'&&listings[0].price_period==='Total','UUID equality and sale listing columns');
+ check((await catalog({id:'eq.'+f.id('60',2)})).length===0,'draft excluded by public catalogue');
+ await f.owner("update property_products set transaction_type='Rent',price_period='Month',price=12000000 where id=$1",[f.productId]);
+ listings=await catalog({transaction_type:'eq.Rent',property_type:'eq.Apartment',location:'ilike.%Chí Minh%',price:'gte.10000000'});
+ check(listings.length===1&&listings[0].id===f.productId&&listings[0].price_period==='Month','combined rental text and numeric filters');
+ check((await catalog({transaction_type:'eq.Sale'})).length===0,'transaction type excludes mismatched listings');
+ check((await catalog({price:'lte.10000000'})).length===0,'numeric upper bound excludes higher rent');
+ check((await catalog({id:'in.('+f.productId+','+f.id('60',2)+')'})).length===1,'UUID set filter preserves public visibility');
+ await f.owner("update property_products set transaction_type='Sale',price_period='Total',price=null where id=$1",[f.productId]);
  check((await f.call('/api/calls','GET',undefined,null)).status===401,'Guest denied');
  check((await f.call('/api/calls','GET',undefined,'user')).status===403,'User denied');
  check((await fetch(f.origin+'/api/system/calls/dispatch',{method:'POST'})).status===401,'cron protected');
@@ -68,9 +80,12 @@ try{
  check(await f.scalar("select count(*)::integer from campaign_events where action='budget_alert'")===1,'budget alert persisted');
  await f.owner('update campaigns set budget_limit_vnd=10000 where id=$1',[campaign]);await prepare(12);await json(await f.cronCall('dispatch'));
  const consented=(await f.owner("select * from calls where phone_e164='+84901230012'")).rows[0];await json(await f.postEvent(event(consented,'answered')));
+ await f.owner("update property_products set transaction_type='Rent',price_period='Month',price=12000000 where id=$1",[f.productId]);
  const say=async text=>json(await f.postEvent(event(consented,'answered',{utterance:{speaker:'Customer',text,at:new Date().toISOString()}})));
  for(let n=0;n<3;n++)await say('\u0111\u1ed3ng \u00fd');
  await say('Toi muon mua can ho.');
+ check(f.modelInput().listing_terms.some(p=>p.code==='M07-1'&&p.transaction_type==='Rent'&&p.price_period==='Month'),'phone conversation model receives rental terms');
+ await f.owner("update property_products set transaction_type='Sale',price_period='Total',price=null where id=$1",[f.productId]);
  check(await f.scalar('select count(*)::integer from call_turns where call_id=$1',[consented.id])>0,'transcript stored after independent grant');
  check(await f.scalar('select count(*)::integer from contact_consents where evidence like $1',[`%${consented.id}%`])===3,'three independent exact consent evidence rows');
  const bytes=Buffer.from('simulated audio bytes'),checksum=createHash('sha256').update(bytes).digest('hex');
@@ -125,6 +140,10 @@ try{
  let p=await playground();check(p.state.phase==='AIVoice','disclosure before permission');
  p=await playground(p.state,'khong');check(p.state.end_reason==='NO_AI_VOICE_CONSENT','AI voice refusal ends');
  p=await playground();for(let n=0;n<3;n++)p=await playground(p.state,'\u0111\u1ed3ng \u00fd');
+ await f.owner("update property_products set transaction_type='Rent',price_period='Month',price=12000000 where id=$1",[f.productId]);
+ p=await playground(p.state,'Tôi cần tư vấn thuê căn hộ.',{property_id:f.productId});
+ check(f.modelInput().listing_terms.some(p=>p.code==='M07-1'&&p.transaction_type==='Rent'&&p.price_period==='Month'),'playground model receives rental terms');
+ await f.owner("update property_products set transaction_type='Sale',price_period='Total',price=null where id=$1",[f.productId]);
  const modelBefore=f.modelCount();p=await playground(p.state,'kh\u00f4ng quan t\u00e2m');check(p.state.end_reason==='DECLINED'&&f.modelCount()===modelBefore,'decline stops advice');
  p=await playground();p=await playground(p.state,'yes',{speaking:true});check(p.interrupted,'barge-in stops current output');
  p=await playground();for(let n=0;n<3;n++)p=await playground(p.state,'');check(p.state.end_reason==='SILENCE','two re-prompts then end');

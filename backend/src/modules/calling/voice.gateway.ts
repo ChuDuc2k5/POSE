@@ -50,7 +50,7 @@ export class VoiceGateway implements OnApplicationShutdown {
       const script = await db.from('call_script_versions').select('content').eq('id', input.script_version_id).eq('status', 'Published').maybeSingle();
       if (script.error || !script.data) throw Error('Kịch bản chưa công bố.');
       const ids: string[] = input.property_id ? [input.property_id] : script.data.content.product_source?.property_ids || [];
-      const products = ids.length ? await authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type').in('id', ids) : { data: [], error: null };
+      const products = ids.length ? await authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type,transaction_type,price_period').in('id', ids) : { data: [], error: null };
       if (products.error) throw Error('Không thể tải sản phẩm.');
       const created = await db.rpc('pose_voice_start', { p_script: input.script_version_id, p_property: input.property_id || null });
       if (created.error) throw Error(created.error.message);

@@ -8,6 +8,7 @@ if(live){try{const r=await fetch(aiUrl.replace(/\/$/,'')+'/models',{signal:Abort
 const check=(value,label)=>{assert.ok(value,label);checks++;};
 try{
  await fixture.startCallingFixture(live?{aiUrl,model:process.env.AI_MODEL||'qwen3-4b-instruct-2507'}:{});
+ await fixture.owner("update property_products set transaction_type='Rent',price_period='Month',price=12000000 where id=$1",[fixture.productId]);
  socket=io(fixture.origin+'/voice',{transports:['websocket'],auth:{token:'fixture-admin'},addTrailingSlash:false});
  await new Promise((resolve,reject)=>{socket.once('connect',resolve);socket.once('connect_error',reject);});
  const replies=[];socket.on('reply',r=>replies.push(r));
@@ -26,6 +27,7 @@ try{
  await send('utterance',{text:'đồng ý'});await send('utterance',{text:'không'});await send('utterance',{text:'đồng ý'});
  const turn=await send('utterance',{text:'Tôi cần tư vấn căn hộ tại Thủ Đức.'});
  check(turn.text&&turn.state.phase==='needs'&&turn.latency_ms>=0,'model turn returned with timing');
+ if(!live)check(fixture.modelInput().listing_terms.some(p=>p.code==='M07-1'&&p.transaction_type==='Rent'&&p.price_period==='Month'),'browser voice model receives rental terms');
  if(live)console.log(`LIVE VOICE: ${turn.latency_ms} ms; reply: ${turn.text}`);
  await send('barge_in');
  check(await fixture.scalar('select count(*)::integer from call_turns where call_id=$1 and interrupted',[call.id])===1,'barge-in marks the stored AI turn');

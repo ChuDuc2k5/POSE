@@ -11,23 +11,23 @@ const db=await createCampaignDatabase();
 await db.exec(await readFile(new URL('../../supabase/automated-calling.sql',import.meta.url),'utf8'));
 await db.exec(await readFile(new URL('../../supabase/browser-voice.sql',import.meta.url),'utf8'));
 const fixture=await readFile(new URL('../../supabase/test-automated-calling.sql',import.meta.url),'utf8');
-await db.exec(fixture.split('-- Calling fixtures begin.')[1].split('-- Calling fixtures end.')[0]);
-await db.exec("update call_jobs j set scheduled_at=now()-interval '1 hour'+right(m.phone_e164,4)::integer*interval '1 second' from campaign_customers m where m.id=j.membership_id");
 const id=(prefix,n=1)=>`f7${prefix}0000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const publishedId=id('80'),productId=id('60');
+await db.exec(fixture.split('-- Calling fixtures begin.')[1].split('-- Calling fixtures end.')[0].replace('"property_ids":[]',`"property_ids":["${productId}"]`));
+await db.exec("update call_jobs j set scheduled_at=now()-interval '1 hour'+right(m.phone_e164,4)::integer*interval '1 second' from campaign_customers m where m.id=j.membership_id");
 const origin='http://localhost:3500',cron='m08-cron-secret-with-at-least-32-characters';
 let chain=Promise.resolve();
 function transaction(role,fn){const task=chain.then(async()=>{await db.exec('begin');try{await db.exec(`set local role ${role==='System' ? 'service_role':role==='Guest' ? 'anon':'authenticated'}`);const n=role==='Admin' ? 1:role==='Sales' ? 2:3;await db.query("select set_config('request.jwt.claims',$1,true)",[JSON.stringify(role==='System' ? {role:'service_role'}:role==='Guest' ? {}:{sub:id('10',n),session_id:id('20',n),role:'authenticated'})]);const value=await fn();await db.exec('commit');return value;}catch(e){await db.exec('rollback');throw e;}});chain=task.catch(()=>{});return task;}
-const files=new Map(),signed=new Map(),scenarios=new Map();let uploadFailure=false,llmCalls=0,modelDelay=0;
+const files=new Map(),signed=new Map(),scenarios=new Map();let uploadFailure=false,llmCalls=0,modelDelay=0,lastModelInput;
 const quote=x=>`"${String(x).replaceAll('"','""')}"`;
 const provider=createServer(async(req,res)=>{
  try {
   const url=new URL(req.url,'http://localhost'),token=req.headers.authorization?.replace('Bearer ',''),role=token==='fixture-service' ? 'System':token==='fixture-admin' ? 'Admin':token==='fixture-sales' ? 'Sales':token==='fixture-user' ? 'User':'Guest';
   const reply=(status,body)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(body));};
-  if(url.pathname==='/v1/chat/completions'){llmCalls++;if(modelDelay)await delay(modelDelay);return reply(200,{choices:[{message:{content:JSON.stringify({reply:'Xin vui lòng nói rõ nhu cầu của bạn.',intent:'real_estate',needs:[]})}}]});}
   if(url.pathname==='/fixture'){const fixtureRole=url.searchParams.get('role')==='sales'?'sales':'admin';res.writeHead(302,{'Set-Cookie':`pose-access=fixture-${fixtureRole}; Path=/; HttpOnly; SameSite=Lax`,Location:origin+(url.searchParams.get('path')||'/admin/calls')});res.end();return;}
   if(url.pathname.endsWith('/user')){const n=role==='Admin' ? 1:role==='Sales' ? 2:3;return role==='Guest' ? reply(401,{msg:'Invalid token'}):reply(200,{id:id('10',n),aud:'authenticated',role:'authenticated',email:`m07-${n}@example.test`,email_confirmed_at:new Date().toISOString(),app_metadata:{role},user_metadata:{role:'Admin'}});}
   const chunks=[];for await(const chunk of req)chunks.push(chunk);const bytes=Buffer.concat(chunks);const input=bytes.length&&req.headers['content-type']?.includes('application/json')?JSON.parse(bytes):{};
+  if(url.pathname==='/v1/chat/completions'){llmCalls++;lastModelInput=JSON.parse(input.messages.at(-1).content.split('\n').slice(1,-1).join('\n'));if(modelDelay)await delay(modelDelay);return reply(200,{choices:[{message:{content:JSON.stringify({reply:'Xin vui lòng nói rõ nhu cầu của bạn.',intent:'real_estate',needs:[]})}}]});}
 
   if(req.method==='POST'&&url.pathname.startsWith('/storage/v1/object/sign/call-recordings/')){
    const key=decodeURIComponent(url.pathname.split('/call-recordings/')[1]);
@@ -56,14 +56,15 @@ const provider=createServer(async(req,res)=>{
    const table=url.pathname.split('/').at(-1);
    if(!['account_history','lead_tasks','calls','call_events','call_turns','contact_consents','campaigns','call_scripts','call_script_versions','property_products','property_public_catalog','property_projects','property_subdivisions'].includes(table))return reply(404,{});
    const values=[],where=[];
-   for(const [key,value] of url.searchParams){if(['select','order','offset','limit'].includes(key))continue;const p=value.indexOf('.'),op=value.slice(0,p),v=value.slice(p+1);if(!['eq','ilike','in','gte','lte','gt','lt'].includes(op))throw Error('Unsupported fake filter');if(op==='in'){values.push(v.slice(1,-1).split(','));where.push(`${quote(key)}=any($${values.length}::${key==='id'||key.endsWith('_id')?'uuid':'text'}[])`);}else{values.push(v);where.push(`${quote(key)} ${({eq:'=',ilike:'ilike',gte:'>=',lte:'<=',gt:'>',lt:'<'})[op]} ${values.length}`);}}
+   for(const [key,value] of url.searchParams){if(['select','order','offset','limit'].includes(key))continue;const p=value.indexOf('.'),op=value.slice(0,p),v=value.slice(p+1);if(!['eq','ilike','in','gte','lte','gt','lt'].includes(op))throw Error('Unsupported fake filter');if(op==='in'){values.push(v.slice(1,-1).split(','));where.push(`${quote(key)}=any($${values.length}::${key==='id'||key.endsWith('_id')?'uuid':'text'}[])`);}else{values.push(v);where.push(`${quote(key)} ${({eq:'=',ilike:'ilike',gte:'>=',lte:'<=',gt:'>',lt:'<'})[op]} $${values.length}`);}}
    const result=await transaction(role,()=>db.query(`select * from public.${quote(table)}${where.length ? ' where '+where.join(' and '):''}${url.searchParams.get('order') ? ' order by '+url.searchParams.get('order').split(',').map(x=>{const [key,dir]=x.split('.');return `${quote(key)} ${dir==='desc' ? 'desc':'asc'}`;}).join(','):''}`,values));
    if(table==='lead_tasks')for(const task of result.rows){
     const lead=await transaction(role,()=>db.query('select l.*,jsonb_build_object(\'full_name\',c.full_name) customers from leads l join customers c on c.id=l.customer_id where l.id=$1',[task.lead_id]));task.leads=lead.rows[0]||null;
    }
    const offset=Number(url.searchParams.get('offset') || req.headers['range']?.split('-')[0] || 0),limit=Number(url.searchParams.get('limit') || (req.headers.range ? Number(req.headers.range.split('-')[1])-offset+1:10000));
    res.setHeader('content-range',`${offset}-${Math.max(offset,offset+limit-1)}/${result.rows.length}`);
-   const rows=result.rows.slice(offset,offset+limit);
+   const selected=url.searchParams.get('select'),columns=selected?.split(',');
+   const rows=result.rows.slice(offset,offset+limit).map(row=>columns?.every(key=>/^[a-z_]+$/.test(key))?Object.fromEntries(columns.map(key=>[key,row[key]])):row);
    return reply(200,req.headers.accept?.includes('vnd.pgrst.object') ? rows[0] || null:rows);
   }
   reply(404,{});
@@ -97,6 +98,7 @@ export const setScenario=(phone,scenario)=>scenarios.set(phone,scenario);
 export const setUploadFailure=value=>{uploadFailure=value;};
 export const expireSigned=()=>{for(const entry of signed.values())entry.expires=0;};
 export const modelCount=()=>llmCalls;
+export const modelInput=()=>lastModelInput;
 export async function seedCallingUi(){
  modelDelay=1000;
  await owner("update auth.users set raw_user_meta_data=jsonb_build_object('display_name',case when id=$1 then 'Minh Anh' else 'Thanh Lam' end) where id in ($1,$2)",[id('10',2),id('10')]);
