@@ -9,6 +9,7 @@ import { createHmac,createHash } from 'node:crypto';
 // The fake Supabase transport executes the real RPCs and RLS in isolated PostgreSQL.
 const db=await createCampaignDatabase();
 await db.exec(await readFile(new URL('../../supabase/automated-calling.sql',import.meta.url),'utf8'));
+await db.exec(await readFile(new URL('../../supabase/browser-voice.sql',import.meta.url),'utf8'));
 const fixture=await readFile(new URL('../../supabase/test-automated-calling.sql',import.meta.url),'utf8');
 await db.exec(fixture.split('-- Calling fixtures begin.')[1].split('-- Calling fixtures end.')[0]);
 await db.exec("update call_jobs j set scheduled_at=now()-interval '1 hour'+right(m.phone_e164,4)::integer*interval '1 second' from campaign_customers m where m.id=j.membership_id");
@@ -70,13 +71,13 @@ const provider=createServer(async(req,res)=>{
 });
 let app,stack,simulator,output='';
 const cronToken=cron;
-export async function startCallingFixture(){
+export async function startCallingFixture(options={}){
  await new Promise(resolve=>provider.listen(3501,'127.0.0.1',resolve));
  process.env.TELEPHONY_API_KEY='fixture-telephony';process.env.TELEPHONY_WEBHOOK_SECRET='fixture-webhook-secret';
  simulator=createSimulator({scenarioFor:input=>scenarios.get(input.to)||'hold'});
  await new Promise(resolve=>simulator.server.listen(3509,'127.0.0.1',resolve));
  await db.exec('grant select on storage.objects to authenticated');
- stack=await startStack(3500,{...process.env,SUPABASE_URL:'http://127.0.0.1:3501',SUPABASE_PUBLISHABLE_KEY:'fixture-public',SUPABASE_SECRET_KEY:'fixture-service',CRON_SECRET:cronToken,TELEPHONY_PROVIDER:'simulator',TELEPHONY_API_URL:'http://127.0.0.1:3509',TELEPHONY_CALLER_ID:'simulator',APP_PUBLIC_URL:origin,AI_API_URL:'http://127.0.0.1:3501/v1',AI_MODEL:'fixture'},{build:false,backendPort:3503});app=stack.app;
+ stack=await startStack(3500,{...process.env,SUPABASE_URL:'http://127.0.0.1:3501',SUPABASE_PUBLISHABLE_KEY:'fixture-public',SUPABASE_SECRET_KEY:'fixture-service',CRON_SECRET:cronToken,TELEPHONY_PROVIDER:'simulator',TELEPHONY_API_URL:'http://127.0.0.1:3509',TELEPHONY_CALLER_ID:'simulator',APP_PUBLIC_URL:origin,AI_API_URL:options.aiUrl||'http://127.0.0.1:3501/v1',AI_MODEL:options.model||'fixture'},{build:false,backendPort:3503});app=stack.app;
  app.stdout.on('data',x=>output+=x);app.stderr.on('data',x=>output+=x);
  for(let n=0;n<100;n++){try{if((await fetch(`${origin}/api/calls`,{headers:{Cookie:'pose-access=fixture-admin'}})).ok)return;}catch{}await delay(150);}throw Error(output);
 }

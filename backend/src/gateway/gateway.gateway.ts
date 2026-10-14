@@ -1,7 +1,7 @@
 import { SubscribeMessage, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import type { Request } from 'express';
-import { authenticatedSession } from '../modules/auth/session.js';
+import { authenticatedSession, authClient } from '../modules/auth/session.js';
 import { frontendOrigins, withCookieContext } from '../common/http.js';
 @WebSocketGateway({ path: '/socket.io', addTrailingSlash: false, cors: { origin: frontendOrigins(), credentials: true } })
 export class GatewayGateway {
@@ -35,6 +35,22 @@ export class GatewayGateway {
         client.emit('campaign.progress', { campaignIds });
       } catch { client.disconnect(true); }
     }));
+  }
+  async callStatus(call: Record<string, unknown>) {
+    if (!this.server || typeof call.id !== 'string') return;
+    const payload = Object.fromEntries(['id', 'status', 'end_reason', 'started_at', 'answered_at', 'ended_at', 'updated_at', 'recording_status', 'transcript_status'].map(key => [key, call[key]]));
+    const clients = [...await this.server.fetchSockets(), ...await this.server.of('/voice').in(`voice:${call.id}`).fetchSockets()];
+    await Promise.all(clients.map(async client => {
+      try {
+        const session = await withCookieContext({ headers: client.data.sessionHeaders } as Request, undefined, () => authenticatedSession({ writable: false }));
+        if (!session) { client.disconnect(true); return; }
+        if (!['Admin', 'Sales'].includes(session.role)) return;
+        // RLS rechecks the current assignment before each emission.
+        const visible = await authClient(session.access).from('calls').select('id').eq('id', call.id).maybeSingle();
+        if (!visible.error && visible.data?.id === call.id) client.emit('call.status', payload);
+      } catch { client.disconnect(true); }
+    }));
+    if (typeof call.campaign_id === 'string') await this.campaignProgress([call.campaign_id]);
   }
   @SubscribeMessage('message')
   async handleMessage(client: Socket, _payload: unknown) {

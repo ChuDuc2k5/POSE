@@ -1,7 +1,7 @@
-import { NextRequest } from 'next/server';
-import { callAccess } from '@/lib/calling/server';
-import { catalogDatabaseError,catalogError,catalogJson } from '@/lib/next-api-bridge';
-import { uuidPattern } from '@/lib/catalog';
+import { WebRequest as NextRequest } from '../../common/http.js';
+import { callAccess } from './server.js';
+import { catalogDatabaseError,catalogError,catalogJson } from '../catalog/catalog.service.js';
+import { uuidPattern } from '../../common/catalog.js';
 export async function GET(request:NextRequest){
  try{const access=await callAccess();if(access.error)return access.error;
   let query=access.client.from('calls').select('*').order('created_at',{ascending:false}).limit(100);

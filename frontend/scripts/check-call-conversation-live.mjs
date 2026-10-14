@@ -9,8 +9,8 @@ try{const url=new URL(process.env.AI_API_URL);url.pathname=url.pathname.replace(
 const temp=await mkdtemp(join(tmpdir(),'pose-call-live-'));
 try{
  for(const name of ['privacy','money','extraction','guard','llm','conversation']){
-  const source=await readFile(new URL(name==='conversation' ? '../lib/calling/conversation.ts' : `../../backend/src/modules/ai/${name}.ts`,import.meta.url),'utf8');
-  await writeFile(join(temp,name+'.mjs'),ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText.replace(/from '(?:\.\/|\.\.\/ai\/)([\w-]+)'/g,"from './$1.mjs'"));
+  const source=await readFile(new URL(name==='conversation' ? '../../backend/src/modules/calling/conversation.ts' : `../../backend/src/modules/ai/${name}.ts`,import.meta.url),'utf8');
+  await writeFile(join(temp,name+'.mjs'),ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText.replace(/from '(?:\.\/|\.\.\/ai\/)([\w-]+)(?:\.js|\.ts)?'/g,"from './$1.mjs'"));
  }
  const {converse,initialConversation}=await import(pathToFileURL(join(temp,'conversation.mjs')));
  const script={greeting:'Xin chào.',ai_disclosure:'Tôi là trợ lý AI TERAVA.',purpose:'Tư vấn bất động sản.',consent_prompt:{ai_voice:'Bạn đồng ý tiếp tục với thoại AI?',recording:'Bạn đồng ý lưu ghi âm?',transcript:'Bạn đồng ý lưu bản chép lời?'},needs_questions:['Bạn cần sản phẩm như thế nào?'],closing:'Cảm ơn bạn.',opt_out:{confirmation:'Đã ghi nhận không liên hệ.'}};

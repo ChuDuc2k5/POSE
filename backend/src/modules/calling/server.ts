@@ -1,19 +1,19 @@
-import 'server-only';
 import { createHash, randomUUID } from 'node:crypto';
-import { NextRequest } from 'next/server';
-import { authenticatedSession, authClient } from '../next-api-bridge';
-import { systemClient, cronAuthorized } from '../next-api-bridge';
-import { catalogDatabaseError, catalogError, catalogInput, catalogJson } from '../next-api-bridge';
-import { uuidPattern } from '../catalog';
-import { callingProvider, ProviderRejected, type CallEvent } from './provider';
-import { converse, type Conversation, type Script } from './conversation';
-import type { Evidence } from '../../../backend/src/modules/ai/guard';
-import { complete } from '../../../backend/src/modules/ai/llm';
-import { extractNeeds } from '../../../backend/src/modules/ai/extraction';
-import { scoreNeeds } from '../../../backend/src/modules/ai/lead-scoring';
+import { WebRequest as NextRequest, validOrigin } from '../../common/http.js';
+import { authenticatedSession, authClient } from '../auth/session.js';
+import { systemClient } from '../supabase/supabase.service.js';
+import { callConcurrency } from './config.js';
+import { catalogDatabaseError, catalogError, catalogInput, catalogJson } from '../catalog/catalog.service.js';
+import { uuidPattern } from '../../common/catalog.js';
+import { callingProvider, ProviderRejected, type CallEvent } from './provider.js';
+import { converse, type Conversation, type Script } from './conversation.js';
+import type { Evidence } from '../ai/guard.js';
+import { complete } from '../ai/llm.js';
+import { extractNeeds } from '../ai/extraction.js';
+import { scoreNeeds } from '../ai/lead-scoring.js';
 const unavailable=()=>catalogError('CALLS_UNAVAILABLE','Không thể xử lý cuộc gọi. Vui lòng thử lại.',503);
 export async function callAccess(request?:NextRequest,admin=false){
- if(request&&request.headers.get('origin')!==request.nextUrl.origin)return {error:catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403)} as const;
+ if(request&&!validOrigin(request))return {error:catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403)} as const;
  const session=await authenticatedSession();if(!session)return {error:catalogError('UNAUTHORIZED','Vui lòng đăng nhập.',401)} as const;
  if(!['Admin','Sales'].includes(session.role)||admin&&session.role!=='Admin')return {error:catalogError('FORBIDDEN','Bạn không có quyền truy cập.',403)} as const;
  return {session,client:authClient(session.access)} as const;
@@ -24,24 +24,24 @@ async function properties(script:Script&{product_source?:{property_ids:string[]}
  const result=await authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type').in('id',ids).limit(100);if(result.error)throw result.error;
  return (result.data||[]).map(p=>({...p,price:p.price===null?null:Number(p.price)}));
 }
-async function dispatchOne(call:Record<string,unknown>){
+type Notify = (id:string)=>Promise<void>;
+const quiet:Notify=async()=>{};
+async function dispatchOne(call:Record<string,unknown>,notify:Notify=quiet){
  const provider=callingProvider();let result;
  const current=await rpc('pose_system_call_context',{p_call:call.id});
  if(current.suppressed||current.status==='ENDING')return current;
  try{result={kind:'success',...await provider.dispatch({to:String(call.phone_e164),from:process.env.TELEPHONY_CALLER_ID!,callbackUrl:`${process.env.APP_PUBLIC_URL}/api/webhooks/telephony`,maxSeconds:Number(call.max_seconds),record:false,idempotencyKey:String(call.idempotency_key),metadata:{call_id:call.id}})};}
  catch(error){result=error instanceof ProviderRejected?{kind:'rejected',code:error.code}:{kind:'ambiguous'};}
  const saved=await rpc('pose_system_record_dispatch',{p_call:call.id,p_result:result});
+ await notify(String(call.id));
  if(saved.status==='ENDING')try{await provider.hangup(String(call.id));}catch{}
  return saved;
 }
-export async function dispatch(request:NextRequest){
- if(!cronAuthorized(request.headers.get('authorization')))return catalogError('UNAUTHORIZED','Không có quyền thực thi.',401);
- try{
-  callingProvider();const callback=new URL(process.env.APP_PUBLIC_URL||'');if(!['http:','https:'].includes(callback.protocol))throw Error();
-  const global=Math.min(2,Math.max(1,Number(process.env.TELEPHONY_MAX_CONCURRENCY)||2)),items=[];
-  for(let n=0;n<20;n++){const call=await rpc('pose_system_claim_call_job',{p_worker:randomUUID(),p_lease_seconds:30,p_now:new Date().toISOString(),p_global:global});if(!call)break;items.push(await dispatchOne(call));}
-  return catalogJson({items});
- }catch{return unavailable();}
+export async function dispatchDue(notify:Notify=quiet){
+ callingProvider();const callback=new URL(process.env.APP_PUBLIC_URL||'');if(!['http:','https:'].includes(callback.protocol))throw Error('INVALID_CALLBACK');
+ const global=callConcurrency(),items=[];
+ for(let n=0;n<20;n++){const call=await rpc('pose_system_claim_call_job',{p_worker:randomUUID(),p_lease_seconds:30,p_now:new Date().toISOString(),p_global:global});if(!call)break;await notify(String(call.id));items.push(await dispatchOne(call,notify));}
+ return {items};
 }
 async function recording(callId:string,event:CallEvent){
  if(!event.recording)return;
@@ -71,12 +71,13 @@ async function processCalls(){
   }catch{await rpc('pose_system_call_processing',{p_call:item.call_id,p_result:'Failed'});}
  }
 }
-async function apply(event:CallEvent){
+async function apply(event:CallEvent,notify:Notify=quiet){
  const applied=await rpc('pose_system_apply_call_event',{p_event:event});
  if(applied.ignored)return applied;
+ await notify(applied.call_id);
  if(applied.duplicate&&event.type==='answered'){
   const saved=await rpc('pose_system_call_response',{p_call:applied.call_id,p_event:event.event_id});if(saved)return {...applied,...saved};
- }else if(applied.duplicate){await recording(applied.call_id,event);await processCalls();return applied;}
+ }else if(applied.duplicate){await recording(applied.call_id,event);await processCalls();await notify(applied.call_id);return applied;}
  let response={};
  if(event.type==='answered'){
   for(let attempt=0;attempt<3;attempt++){
@@ -84,42 +85,46 @@ async function apply(event:CallEvent){
    if(context.status!=='ANSWERED')break;
    const result=await converse(context.conversation as Conversation,context.script,event.utterance||{text:''},await properties(context.script),context.lead);
    try{response=await rpc('pose_system_call_conversation',{p_call:applied.call_id,p_event:event.event_id,p_version:context.conversation_version,p_input:event.utterance?.text||'',p_result:result});
-    if(result.state.end_reason){await rpc('pose_system_stop_call',{p_call:applied.call_id,p_reason:result.state.end_reason});await callingProvider().hangup(event.provider_call_id);}break;
+    if(result.state.end_reason){await rpc('pose_system_stop_call',{p_call:applied.call_id,p_reason:result.state.end_reason});await notify(applied.call_id);
+     if(result.optOut||result.state.end_reason==='NO_AI_VOICE_CONSENT'){const live=await systemClient().from('calls').select('id').eq('phone_e164',context.phone_e164).eq('status','ENDING');for(const call of live.data||[])await notify(call.id);}
+     await callingProvider().hangup(event.provider_call_id);}break;
    }catch(error){if((error as {code:string}).code!=='40001')throw error;}
   }
  }
  if(applied.terminal){await recording(applied.call_id,event);await processCalls();}
+ await notify(applied.call_id);
  return {...applied,...response};
 }
-export async function webhook(request:NextRequest){
- const raw=await request.text();if(raw.length>30000000)return catalogError('TOO_LARGE','Dữ liệu quá lớn.',413);
+export async function webhook(request:NextRequest,notify:Notify=quiet){
+ const raw=Buffer.from(await request.arrayBuffer());if(raw.length>30000000)return catalogError('TOO_LARGE','Dữ liệu quá lớn.',413);
  let event:CallEvent;try{event=callingProvider().verifyWebhook(raw,request.headers,Date.now());}catch{return catalogError('INVALID_SIGNATURE','Chữ ký không hợp lệ hoặc đã hết hạn.',401);}
- try{return catalogJson(await apply(event));}catch{return unavailable();}
+ try{return catalogJson(await apply(event,notify));}catch{return unavailable();}
 }
-export async function reconcile(request:NextRequest){
- if(!cronAuthorized(request.headers.get('authorization')))return catalogError('UNAUTHORIZED','Không có quyền thực thi.',401);
- try{
-  const provider=callingProvider(),now=Date.now(),calls=await rpc('pose_system_call_reconcile_list',{p_now:new Date(now).toISOString()}),items=[];
-  for(const call of calls){
-   if(call.status==='ANSWERED'&&Date.parse(call.answered_at)+(call.max_seconds+30)*1000<now){await rpc('pose_system_stop_call',{p_call:call.id,p_reason:'MAX_DURATION'});await provider.hangup(call.provider_call_id||call.id);}
-   if(call.status==='CALLING'&&!call.provider_call_id){await rpc('pose_system_record_dispatch',{p_call:call.id,p_result:{kind:'ambiguous'}});}
-   const event=await provider.fetchStatus(call.provider_call_id||call.id);if(event)items.push(await apply({...event,event_id:`reconcile:${call.id}:${event.type}`}));
-  }
-  await processCalls();return catalogJson({items});
- }catch{return unavailable();}
+export async function reconcileDue(notify:Notify=quiet){
+ const provider=callingProvider(),now=Date.now(),calls=await rpc('pose_system_call_reconcile_list',{p_now:new Date(now).toISOString()}),items=[];
+ for(const call of calls){
+  if(call.call_type==='MOCK_CALL'&&!call.phone_e164){if(Date.parse(call.started_at)+300000<now){await rpc('pose_system_voice_finish',{p_call:call.id,p_reason:'MAX_DURATION'});await notify(call.id);}continue;}
+  if(call.status==='ANSWERED'&&Date.parse(call.answered_at)+(call.max_seconds+30)*1000<now){await rpc('pose_system_stop_call',{p_call:call.id,p_reason:'MAX_DURATION'});await notify(call.id);await provider.hangup(call.provider_call_id||call.id);}
+  if(call.status==='CALLING'&&!call.provider_call_id){await rpc('pose_system_record_dispatch',{p_call:call.id,p_result:{kind:'ambiguous'}});await notify(call.id);}
+  const event=await provider.fetchStatus(call.provider_call_id||call.id);if(event)items.push(await apply({...event,event_id:`reconcile:${call.id}:${event.type}`},notify));
+ }
+ await processCalls();return {items};
 }
-export async function stop(request:NextRequest,id:string){
+export async function stop(request:NextRequest,id:string,notify:Notify=quiet){
  try{const access=await callAccess(request);if(access.error)return access.error;const parsed=await catalogInput(request);if(parsed.error)return parsed.error;
   if(!uuidPattern.test(id)||typeof parsed.input.reason!=='string')return catalogError('INVALID_INPUT','Nhập lý do dừng.',400);
   const result=await access.client.rpc('pose_stop_call',{p_call:id,p_reason:parsed.input.reason});if(result.error)return catalogDatabaseError(result.error);
+  await notify(id);
+  if(result.data.call_type==='MOCK_CALL'&&!result.data.phone_e164&&result.data.status==='ENDING'){const item=await rpc('pose_system_voice_finish',{p_call:id,p_reason:parsed.input.reason});await notify(id);return catalogJson({item});}
   if(result.data.status==='ENDING')try{await callingProvider().hangup(result.data.provider_call_id||id);}catch{}
   return catalogJson({item:result.data});
  }catch{return unavailable();}
 }
-export async function optOut(request:NextRequest){
+export async function optOut(request:NextRequest,notify:Notify=quiet){
  try{const access=await callAccess(request);if(access.error)return access.error;const parsed=await catalogInput(request);if(parsed.error)return parsed.error;
   if(typeof parsed.input.phone!=='string'||!/^\+[1-9][0-9]{7,14}$/.test(parsed.input.phone)||typeof parsed.input.reason!=='string')return catalogError('INVALID_INPUT','Nhập số E.164 và lý do.',400);
   const result=await access.client.rpc('pose_call_opt_out',{p_phone:parsed.input.phone,p_reason:parsed.input.reason});if(result.error)return catalogDatabaseError(result.error);
+  for(const call of result.data){await notify(call.id);}
   for(const call of result.data)try{await callingProvider().hangup(call.provider_call_id||call.id);}catch{}
   return catalogJson({items:result.data});
  }catch{return unavailable();}
@@ -132,9 +137,9 @@ export async function evidence(request:NextRequest,id:string,kind:string){
   }return catalogJson(result.data);
  }catch{return unavailable();}
 }
-export async function testCall(request:NextRequest){
+export async function testCall(request:NextRequest,notify:Notify=quiet){
  try{const access=await callAccess(request,true);if(access.error)return access.error;callingProvider();const parsed=await catalogInput(request);if(parsed.error)return parsed.error;
   if(!uuidPattern.test(String(parsed.input.lead_id))||!uuidPattern.test(String(parsed.input.script_version_id)))return catalogError('INVALID_INPUT','Chọn khách hàng và kịch bản đã công bố.',400);
-  const result=await access.client.rpc('pose_test_call',{p_lead:parsed.input.lead_id,p_script:parsed.input.script_version_id});if(result.error)return catalogDatabaseError(result.error);return catalogJson({item:await dispatchOne(result.data)});
+  const result=await access.client.rpc('pose_test_call',{p_lead:parsed.input.lead_id,p_script:parsed.input.script_version_id});if(result.error)return catalogDatabaseError(result.error);await notify(result.data.id);return catalogJson({item:await dispatchOne(result.data,notify)});
  }catch{return unavailable();}
 }
