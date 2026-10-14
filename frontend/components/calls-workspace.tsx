@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useEffect,useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { catalogRequest } from '@/lib/catalog-client';
-import { activeCallStatuses,callLabels,callMoney,callTime,maskedCallPhone,type CallView } from '@/lib/calling/presentation';
+import { activeCallStatuses,callLabels,callMoney,callTime,endReasonLabel,maskedCallPhone,type CallView } from '@/lib/calling/presentation';
 import { AdminWorkspaceShell } from './admin-workspace-shell';
 import { CampaignConfirm } from './campaign-confirm';
 import { CallEvidence } from './call-evidence';
@@ -30,7 +30,7 @@ export function CallsWorkspace({id,sales=false}:{id?:string;sales?:boolean}) {
   };
   refresh();const timer=setInterval(refresh,5000);return()=>{controller.abort();clearInterval(timer);};
  },[id,status,provider,campaign,revision]);
- const campaignName=(call:CallView)=>campaigns.find(c=>c.id===call.campaign_id)?.name||(call.campaign_id?`Chiến dịch · ${call.campaign_id.slice(0,8)}`:'Gọi thử độc lập');
+ const campaignName=(call:CallView)=>campaigns.find(c=>c.id===call.campaign_id)?.name||(call.campaign_id?'Chiến dịch gọi tự động':'Gọi thử độc lập');
  const phone=(call:CallView)=>id&&!sales?call.phone_e164:maskedCallPhone(call.phone_e164);
  const detailHref=(call:CallView)=>`${sales?'/sales/calls':'/admin/calls'}/${call.id}`;
  async function run(e:React.FormEvent) {
@@ -47,7 +47,7 @@ export function CallsWorkspace({id,sales=false}:{id?:string;sales?:boolean}) {
   {id?detail&&<section className="catalog-list-panel campaigns-panel calls-detail">
    <header className="calls-detail-heading"><h2>{phone(detail.item)}</h2><span className="calls-pill" data-call-status>{callLabels[detail.item.status]||detail.item.status}</span>{badge(detail.item)}</header>
    <p>{campaignName(detail.item)} · Bắt đầu: {callTime(detail.item.started_at)} · Thời lượng: {detail.item.duration_seconds===null?'Chưa kết thúc':`${detail.item.duration_seconds} giây`}</p>
-   <p>Lý do kết thúc: {detail.item.end_reason||'Chưa kết thúc'}</p>{buttons(detail.item)}
+   <p>Lý do kết thúc: {endReasonLabel(detail.item.end_reason)}</p>{buttons(detail.item)}
    <section className="calls-cost" data-call-cost><h3>Chi phí</h3><dl><div><dt>Ước lượng</dt><dd>{callMoney(detail.item.cost_estimated_vnd)}</dd></div><div><dt>Thực tế</dt><dd>{callMoney(detail.item.cost_actual,detail.item.cost_currency||'VND')}</dd></div>{detail.item.fx_rate!==null&&<div><dt>Tỷ giá</dt><dd>{Number(detail.item.fx_rate).toLocaleString('vi-VN')}</dd></div>}{detail.item.fx_source&&<div><dt>Nguồn tỷ giá</dt><dd>{detail.item.fx_source}</dd></div>}</dl>{detail.item.cost_unknown&&<p>Chi phí chưa đối soát; đang dùng dự phòng.</p>}</section>
    <CallEvidence id={id} recordingStatus={detail.item.recording_status} transcriptStatus={detail.item.transcript_status}/>
    <section><h3>Bằng chứng đồng ý</h3>{detail.consents.length?detail.consents.map(c=><p key={c.id}>{c.purpose} · {c.status}: {c.evidence}</p>):<p>Chưa có bằng chứng đồng ý trong cuộc gọi này.</p>}</section>
@@ -56,7 +56,7 @@ export function CallsWorkspace({id,sales=false}:{id?:string;sales?:boolean}) {
    <div className="calls-filters" aria-label="Bộ lọc cuộc gọi"><label className="catalog-field">Chiến dịch{sales?<input value={campaign} onChange={e=>setCampaign(e.target.value)} placeholder="Mã chiến dịch"/>:<select value={campaign} onChange={e=>setCampaign(e.target.value)}><option value="">Tất cả chiến dịch</option>{campaigns.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>}</label><label className="catalog-field">Trạng thái<select value={status} onChange={e=>setStatus(e.target.value)}><option value="">Tất cả trạng thái</option>{Object.entries(callLabels).filter(([key])=>key===key.toUpperCase()).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label><label className="catalog-field">Nhà cung cấp<select value={provider} onChange={e=>setProvider(e.target.value)}><option value="">Tất cả nhà cung cấp</option><option value="simulator">Giả lập</option></select></label></div>
    <div className="calls-list">{items.map(call=><article className="calls-item" key={call.id} data-call-id={call.id}>
     <div className="calls-item-heading"><Link className="calls-phone" href={detailHref(call)}>{phone(call)}</Link><div className="calls-actions"><span className="calls-pill" data-call-status>{callLabels[call.status]||call.status}</span>{badge(call)}</div></div>
-    <dl className="calls-facts"><div><dt>Chiến dịch</dt><dd>{campaignName(call)}</dd></div><div><dt>Bắt đầu</dt><dd>{callTime(call.started_at)}</dd></div><div><dt>Thời lượng</dt><dd>{call.duration_seconds===null?'Chưa kết thúc':`${call.duration_seconds} giây`}</dd></div><div><dt>Lý do kết thúc</dt><dd>{call.end_reason||'Chưa kết thúc'}</dd></div></dl>
+    <dl className="calls-facts"><div><dt>Chiến dịch</dt><dd>{campaignName(call)}</dd></div><div><dt>Bắt đầu</dt><dd>{callTime(call.started_at)}</dd></div><div><dt>Thời lượng</dt><dd>{call.duration_seconds===null?'Chưa kết thúc':`${call.duration_seconds} giây`}</dd></div><div><dt>Lý do kết thúc</dt><dd>{endReasonLabel(call.end_reason)}</dd></div></dl>
     {sales&&<div className="calls-evidence-links"><p>Ghi âm: {callLabels[call.recording_status]} {call.recording_status==='Available'&&<Link href={`${detailHref(call)}#recording`}>Mở bản ghi âm</Link>}</p><p>Bản chép lời: {callLabels[call.transcript_status]} {call.transcript_status==='Available'&&<Link href={`${detailHref(call)}#transcript`}>Xem bản chép lời</Link>}</p></div>}
     <div className="calls-item-footer"><Link href={detailHref(call)}>Xem chi tiết →</Link>{buttons(call)}</div>
    </article>)}{!loading&&!items.length&&<p>Chưa có cuộc gọi phù hợp.</p>}</div>

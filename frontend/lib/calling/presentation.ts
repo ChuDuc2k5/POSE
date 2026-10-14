@@ -4,3 +4,5 @@ export const callLabels:Record<string,string>={WAITING:'Chờ gọi',CALLING:'Đ
 export const maskedCallPhone=(phone:string)=>phone?`${phone.slice(0,3)} ••• •• ${phone.slice(-3)}`:'Chưa có số';
 export const callMoney=(amount:number|null,currency='VND')=>amount===null?'Chưa biết':`${Number(amount).toLocaleString('vi-VN',{maximumFractionDigits:currency==='VND'?0:4})} ${currency}`;
 export const callTime=(value:string|null)=>value?new Date(value).toLocaleString('vi-VN'):'Chưa bắt đầu';
+const endReasons:Record<string,string>={CLOSED:'Kết thúc bình thường',COMPLETED:'Hoàn tất',DECLINED:'Khách từ chối tư vấn',SILENCE:'Khách im lặng',NO_AI_VOICE_CONSENT:'Khách không đồng ý thoại AI',OPT_OUT:'Khách yêu cầu không liên hệ',OPTED_OUT:'Khách yêu cầu không liên hệ',AI_ERROR:'Lỗi trợ lý AI',MAX_DURATION:'Vượt thời lượng tối đa',BUSY:'Máy bận',NO_ANSWER:'Không nghe máy'};
+export function endReasonLabel(reason:string|null|undefined){return !reason ? 'Chưa kết thúc':endReasons[reason] || reason;}

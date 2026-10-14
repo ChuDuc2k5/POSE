@@ -24,7 +24,7 @@ const provider=createServer(async(req,res)=>{
  try {
   const url=new URL(req.url,'http://localhost'),token=req.headers.authorization?.replace('Bearer ',''),role=token==='fixture-service' ? 'System':token==='fixture-admin' ? 'Admin':token==='fixture-sales' ? 'Sales':token==='fixture-user' ? 'User':'Guest';
   const reply=(status,body)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(body));};
-  if(url.pathname==='/v1/chat/completions'){llmCalls++;if(modelDelay)await delay(modelDelay);return reply(200,{choices:[{message:{content:JSON.stringify({reply:'Xin vui long noi ro nhu cau cua ban.',intent:'real_estate',needs:[]})}}]});}
+  if(url.pathname==='/v1/chat/completions'){llmCalls++;if(modelDelay)await delay(modelDelay);return reply(200,{choices:[{message:{content:JSON.stringify({reply:'Xin vui lòng nói rõ nhu cầu của bạn.',intent:'real_estate',needs:[]})}}]});}
   if(url.pathname==='/fixture'){const fixtureRole=url.searchParams.get('role')==='sales'?'sales':'admin';res.writeHead(302,{'Set-Cookie':`pose-access=fixture-${fixtureRole}; Path=/; HttpOnly; SameSite=Lax`,Location:origin+(url.searchParams.get('path')||'/admin/calls')});res.end();return;}
   if(url.pathname.endsWith('/user')){const n=role==='Admin' ? 1:role==='Sales' ? 2:3;return role==='Guest' ? reply(401,{msg:'Invalid token'}):reply(200,{id:id('10',n),aud:'authenticated',role:'authenticated',email:`m07-${n}@example.test`,email_confirmed_at:new Date().toISOString(),app_metadata:{role},user_metadata:{role:'Admin'}});}
   const chunks=[];for await(const chunk of req)chunks.push(chunk);const bytes=Buffer.concat(chunks);const input=bytes.length&&req.headers['content-type']?.includes('application/json')?JSON.parse(bytes):{};

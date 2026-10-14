@@ -1,5 +1,7 @@
 import { complete } from '../ai/llm';
 import { evidenceReason, outputReason, safeReply, type Evidence } from '../ai/guard';
+// Script lines are spoken back to back; give each one a sentence end.
+const sentence=(line:string)=>{const text=line.trim();return !text || /[.!?…]$/.test(text) ? text:`${text}.`;};
 export type Script={greeting:string;ai_disclosure:string;purpose:string;consent_prompt:{ai_voice:string;recording:string;transcript:string};needs_questions:string[];closing:string;opt_out:{confirmation:string};policy_version?:string};
 export type Conversation={phase:'start'|'AIVoice'|'Recording'|'Transcript'|'needs'|'ended';silences:number;turns:number;consents:Partial<Record<'AIVoice'|'Recording'|'Transcript',boolean>>;end_reason?:string};
 export type ConversationResult={state:Conversation;text:string;interrupted:boolean;optOut?:boolean;consent?:{purpose:'AIVoice'|'Recording'|'Transcript';granted:boolean};withdraw?:'Recording'|'Transcript'};
@@ -14,7 +16,7 @@ export async function converse(previous:Conversation,script:Script,input:{text:s
  if(/(?:rut|dung|khong).*(?:ghi am|luu ghi am|luu hoi thoai|luu van ban)/.test(plain)){
   const purpose=/ghi am/.test(plain)?'Recording':'Transcript';state.consents[purpose]=false;result.withdraw=purpose;result.text='Đã dừng lưu theo yêu cầu của bạn.';return result;
  }
- if(state.phase==='start'){state.phase='AIVoice';result.text=[script.greeting,script.ai_disclosure,script.purpose,script.consent_prompt.ai_voice].join(' ');return result;}
+ if(state.phase==='start'){state.phase='AIVoice';result.text=[script.greeting,script.ai_disclosure,script.purpose,script.consent_prompt.ai_voice].map(sentence).filter(Boolean).join(' ');return result;}
  if(!text){state.silences++;if(state.silences>=3)return end('SILENCE');result.text='Bạn có nghe rõ không? Xin vui lòng trả lời.';return result;}
  state.silences=0;state.turns++;
  if(['AIVoice','Recording','Transcript'].includes(state.phase)){
