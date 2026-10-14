@@ -54,6 +54,12 @@ check(!!outputReason('Giá 9 tỷ, cam kết pháp lý.',[]),'Unsupported price/
 check(!!outputReason('SUPABASE_SECRET_KEY=secret',[]),'Secret blocked');
 check(!!outputReason('Giá căn hộ là năm tỷ phải không?',[]),'Spelled unsupported price blocked');
 check(!!outputReason('AI_MODEL là gì?',[]),'Environment names blocked');
+{const now=new Date().toISOString(),open={id:'11111111-1111-4111-8111-111111111111',code:'RV-A1201',name:'Căn hộ 2 phòng ngủ Block A',price:3200000000,availability:'Available',updated_at:now,location:'Thủ Đức',property_type:'Apartment'},sold={...open,id:'22222222-2222-4222-8222-222222222222',code:'RV-A0805',name:'Căn hộ gia đình Block A',price:4100000000,availability:'Sold'};
+check(outputReason('Căn hộ phù hợp: Căn hộ 2 phòng ngủ Block A, giá 3.2 tỷ, còn bán.\nTình trạng: Chỉ giới thiệu các căn còn bán (Available). Căn Sold không được xem xét.',[open,sold],'ngân sách 3,5 tỷ')===null,'Policy sentence without a product is not attributed to a sold product');
+check(outputReason('Có căn hộ 2 phòng ngủ tại Thủ Đức với giá 3,5 tỷ (3.200.000.000 VND) còn bán.',[open,sold],'ngân sách khoảng 3,5 tỷ')==='UNSUPPORTED_PRICE','Customer budget presented as a product price is blocked');
+check(outputReason('Ngân sách 3,5 tỷ của bạn phù hợp với RV-A1201 giá 3.200.000.000 VND.',[open,sold],'ngân sách khoảng 3,5 tỷ')===null,'Budget mentioned as budget is allowed');
+check(outputReason('Căn hộ gia đình Block A vẫn còn bán.',[open,sold])==='UNSUPPORTED_AVAILABILITY','Sold product named by its name cannot be called available');
+check(outputReason('Căn hộ gia đình Block A giá 4,1 tỷ. Căn này còn bán.',[open,sold])==='UNSUPPORTED_AVAILABILITY','Follow-up sentence inherits the product named before it');}
 check(validateModel({reply:'ok',intent:'other',score:100}).reply==='ok','Only reply and intent mandatory');
 check(JSON.stringify(TURN_SCHEMA).length<1500 && SYSTEM_PROMPT.length<800,'Compact model schema and prompt');
 const normalized=validateModel({reply:'Xin chào',intent:'other',needs:[{field:'budget_min_vnd',value:0,evidence:'unknown'},{field:'locations',value:['unknown'],evidence:'không có thông tin'},{field:'timeline',value:'3to6m',evidence:'2 tháng tới'},{field:'property_types',value:['House'],evidence:'căn hộ'}],tool_calls:[{name:'read_leads',arguments:{}}]},'Tôi mua căn hộ trong 2 tháng tới');

@@ -35,7 +35,7 @@ export function toolAllowed(tool:unknown): tool is {name:string;arguments:Record
   if (tool.name==='propose_appointment') return Object.keys(args).length===2 && ['start','end'].every(k=>typeof args[k]==='string' && Number.isFinite(Date.parse(args[k] as string))) && Date.parse(args.end as string)>Date.parse(args.start as string);
   return false;
 }
-function references(text:string,evidence:Evidence[]){return evidence.filter(e=>[e.code,e.id].some(v=>new RegExp(`(?<![a-z0-9_-])${v.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?![a-z0-9_-])`,'i').test(text)));}
+function references(text:string,evidence:Evidence[]){return evidence.filter(e=>[e.code,e.id,e.name].some(v=>new RegExp(`(?<![a-z0-9_-])${v.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?![a-z0-9_-])`,'i').test(text)));}
 function moneyText(text:string,evidence:Evidence[]){
   let result=text.replace(/[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}/gi,'').replace(/(?<![a-z\d_-])\d{4}-\d{2}-\d{2}(?:T[\d:.+Z-]+)?/gi,'');
   for(const e of evidence)result=result.replace(new RegExp(`(?<![a-z0-9_-])${e.code.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?![a-z0-9_-])`,'gi'),'');
@@ -60,13 +60,16 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='') {
       if(negated(clause,room.index!) || /(?:chưa biết|chưa rõ|chưa xác nhận)/i.test(prefix) || /(?:bạn cần|bạn muốn|bạn tìm|nhu cầu|tiêu chí|yêu cầu)/i.test(prefix) && customerText.includes(room[0]))continue;
       return 'UNSUPPORTED_ROOM_COUNT';
     }
-    if(mentioned.length && /giá|price/i.test(clause) && !/ngân sách|bạn (?:đề nghị|nêu|có)|theo yêu cầu/i.test(clause) && moneyAmounts(moneyText(clause,evidence)).some(amount=>!mentioned.some(p=>p.price===amount)))return 'UNSUPPORTED_PRICE';
+    // A price stated in a clause must be a listed product price; the customer's own
+    // budget figures are only allowed when the clause talks about the budget.
+    if(/giá|price/i.test(clause) && !/ngân sách|bạn (?:đề nghị|nêu|có)|theo yêu cầu/i.test(clause) && moneyAmounts(moneyText(clause,evidence)).some(amount=>!(mentioned.length ? mentioned:evidence).some(p=>p.price===amount)))return 'UNSUPPORTED_PRICE';
     const availability=[...clause.matchAll(/\bAvailable\b|còn (?:bán|hàng|để bán)|đang (?:mở bán|bán)|mở bán|chào bán|sẵn hàng|có sẵn|có thể mua|for sale/gi)].filter(m=>!negated(clause,m.index!));
     if(!availability.length)continue;
     let related=mentioned;
-    if(!related.length)related=evidence.filter(e=>clause.toLowerCase().includes(e.name.toLowerCase()));
-    if(!related.length){const prefix=reply.slice(0,reply.indexOf(clause));const prior=references(prefix,evidence).sort((a,b)=>Math.max(prefix.lastIndexOf(b.code),prefix.lastIndexOf(b.id))-Math.max(prefix.lastIndexOf(a.code),prefix.lastIndexOf(a.id)));related=prior.length ? [prior[0]]:evidence;}
-    if(!related.length || related.some(e=>e.availability!=='Available'))return 'UNSUPPORTED_AVAILABILITY';
+    // A clause that names no product (e.g. "chỉ giới thiệu căn còn bán") states policy, not a
+    // product fact; attribute it to the closest earlier product only when there is one.
+    if(!related.length){const prefix=reply.slice(0,reply.indexOf(clause)).toLowerCase();const last=(e:Evidence)=>Math.max(...[e.code,e.id,e.name].map(v=>prefix.lastIndexOf(v.toLowerCase())));const prior=references(prefix,evidence).sort((a,b)=>last(b)-last(a));related=prior.slice(0,1);}
+    if(related.some(e=>e.availability!=='Available'))return 'UNSUPPORTED_AVAILABILITY';
   }
   return null;
 }
