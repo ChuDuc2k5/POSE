@@ -1,0 +1,6 @@
+export type CallView={id:string;campaign_id:string|null;phone_e164:string;status:string;provider:string;started_at:string|null;duration_seconds:number|null;end_reason:string|null;cost_estimated_vnd:number|null;cost_actual:number|null;cost_currency:string|null;fx_rate:number|null;fx_source:string|null;cost_unknown:boolean;recording_status:string;transcript_status:string};
+export const activeCallStatuses=['CALLING','RINGING','ANSWERED','ENDING','UNKNOWN'];
+export const callLabels:Record<string,string>={WAITING:'Chờ gọi',CALLING:'Đang gọi',RINGING:'Đổ chuông',ANSWERED:'Đã kết nối',ENDING:'Đang yêu cầu ngắt',UNKNOWN:'Cần đối soát',COMPLETED:'Hoàn tất',FAILED:'Lỗi',BUSY:'Máy bận',NO_ANSWER:'Không trả lời',CANCELED:'Đã ngắt',NotConsented:'Chưa đồng ý lưu',Processing:'Đang xử lý',Available:'Có thể xem',Failed:'Lưu thất bại'};
+export const maskedCallPhone=(phone:string)=>phone?`${phone.slice(0,3)} ••• •• ${phone.slice(-3)}`:'Chưa có số';
+export const callMoney=(amount:number|null,currency='VND')=>amount===null?'Chưa biết':`${Number(amount).toLocaleString('vi-VN',{maximumFractionDigits:currency==='VND'?0:4})} ${currency}`;
+export const callTime=(value:string|null)=>value?new Date(value).toLocaleString('vi-VN'):'Chưa bắt đầu';
