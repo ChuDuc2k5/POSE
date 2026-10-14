@@ -16,7 +16,6 @@ export class GatewayGateway {
         const session = await withCookieContext({ headers } as Request, undefined, () => authenticatedSession({ writable: false }));
         if (!session) throw new Error('UNAUTHORIZED');
         client.data.sessionHeaders = headers;
-        client.data.sessionHeaders = headers;
         client.data.principal = { id: session.user.id, role: session.role };
         next();
       } catch { next(new Error('UNAUTHORIZED')); }
@@ -25,6 +24,17 @@ export class GatewayGateway {
   async handleConnection(client: Socket) {
     await client.join(`user:${client.data.principal.id}`);
     await client.join(`role:${client.data.principal.role}`);
+  }
+  async campaignProgress(campaignIds: string[]) {
+    if (!this.server || !campaignIds.length) return;
+    const clients = await this.server.in('role:Admin').fetchSockets();
+    await Promise.all(clients.map(async client => {
+      try {
+        const session = await withCookieContext({ headers: client.data.sessionHeaders } as Request, undefined, () => authenticatedSession({ writable: false }));
+        if (session?.role !== 'Admin') { client.disconnect(true); return; }
+        client.emit('campaign.progress', { campaignIds });
+      } catch { client.disconnect(true); }
+    }));
   }
   @SubscribeMessage('message')
   async handleMessage(client: Socket, _payload: unknown) {

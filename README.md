@@ -12,8 +12,8 @@ Backend đọc `.env`; khi thiếu cấu hình Supabase trong máy phát triển
 Sao chép `frontend/.env.example` thành `frontend/.env.local`. `BACKEND_URL` mặc định
 là `http://127.0.0.1:3001`; cấu hình giá trị này lúc khởi động frontend. Proxy đọc
 địa chỉ backend cho mỗi yêu cầu, không cần build lại khi đổi địa chỉ. M01–M03 và
-M06 API được chuyển tiếp tới NestJS. Các trang server cũng gọi NestJS để đọc phiên.
-M07/M08 tạm thời vẫn chạy trong Next.js qua `lib/next-api-bridge.ts`; bridge lấy
+M06–M07 API được chuyển tiếp tới NestJS. Các trang server cũng gọi NestJS để đọc phiên.
+M08 tạm thời vẫn chạy trong Next.js qua `lib/next-api-bridge.ts`; bridge lấy
 phiên đã xác minh từ NestJS, đồng bộ cookie refresh rồi tạo client theo token đó.
 Khi chạy frontend ngoài Compose, truyền cấu hình Supabase, telephony và cron từ
 `backend/.env` vào môi trường server của frontend cho đến khi M08 được chuyển.
@@ -27,6 +27,20 @@ trên localhost. Adapter dùng `json_schema`, tối đa 600 token và một lầ
 khi JSON sai. Sau `npx nest build` trong backend, chạy live check từ frontend:
 `node scripts/check-llm-live.mjs` với các biến LLM đã đặt; script dùng NestJS LLM
 service và guard với dữ liệu BĐS giả lập công khai, không ghi dữ liệu khách hàng.
+M07 APIs run in `backend/src/modules/campaigns/` at `/api/admin/campaigns/**`
+and `POST /api/system/campaigns/tick` (Bearer `CRON_SECRET`). Apply
+`supabase/campaign-scheduler.sql` after `campaign-management.sql`. Tick adds
+internal change metadata; the HTTP response stays `{item:{jobs_created}}`.
+BullMQ queue `campaigns` uses fixed scheduler ID `campaign-tick` every 60 seconds.
+`CAMPAIGNS_QUEUE_NAME` optionally isolates queues in test/development environments.
+Redis is optional; manual ticks keep working without it. The Admin endpoint
+`GET /api/admin/campaigns/scheduler` returns `{redis,repeatEvery,lastRunAt,lastResult,lastError}`
+for the current process. Operations displays scheduler status; Monitoring uses
+`campaign.progress` over the authenticated gateway and polls every 60 seconds.
+Admin authorization is rechecked before each socket notification. Telephony
+readiness is shared at `backend/src/common/telephony.ts`; configure TELEPHONY
+variables and CRON_SECRET in the backend environment.
+
 Socket.IO dùng cùng origin qua rewrite; chỉ đặt `NEXT_PUBLIC_API_URL` nếu cần
 endpoint realtime riêng.
 

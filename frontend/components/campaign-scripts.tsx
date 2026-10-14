@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { catalogRequest } from '@/lib/catalog-client';
-import { defaultScript, scriptErrors, type ScriptContent } from '@/lib/campaigns/script';
-import type { Campaign, Script, ScriptVersion } from '@/lib/campaigns/types';
+import { defaultScript, scriptErrors, type ScriptContent } from '@/lib/campaign-script';
+import type { Campaign, Script, ScriptVersion } from '@/lib/campaign-types';
 const names:Record<string,string>={greeting:'Lời mở đầu',ai_disclosure:'Giới thiệu trợ lý AI',purpose:'Mục đích liên hệ',closing:'Lời kết',ai_voice:'Đồng ý xử lý thoại AI',recording:'Đồng ý lưu ghi âm',transcript:'Đồng ý lưu bản chép lời',prompt:'Hướng dẫn từ chối',confirmation:'Xác nhận từ chối'};
 export function CampaignScripts({campaign,onSelected}:{campaign:Campaign;onSelected:()=>void}) {
  const [scripts,setScripts]=useState<Script[]>([]),[versions,setVersions]=useState<ScriptVersion[]>([]),[script,setScript]=useState(''),[version,setVersion]=useState<ScriptVersion|null>(null),[content,setContent]=useState<ScriptContent>(structuredClone(defaultScript)),[name,setName]=useState(''),[reason,setReason]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[rev,setRev]=useState(0),[turns,setTurns]=useState<{turn:number;text:string}[]>([]),[products,setProducts]=useState<{id:string;name:string}[]>([]);

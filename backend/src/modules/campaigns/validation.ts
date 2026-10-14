@@ -1,5 +1,5 @@
-import { uuidPattern } from '../catalog';
-import { object } from './script';
+import { uuidPattern } from '../../common/catalog.ts';
+import { object } from './script.ts';
 export const campaignFields=['name','description','objective','property_ids','start_time','end_time','timezone','window_start','window_end','weekdays','max_concurrent_calls','max_call_seconds','max_attempts','retry_after_hours','daily_call_limit','budget_limit_vnd','cost_reserve_per_call_vnd','script_version_id'];
 export const labels:Record<string,string>={name:'Tên chiến dịch',description:'Mô tả',objective:'Mục tiêu',timezone:'Múi giờ IANA',start_time:'Bắt đầu',end_time:'Kết thúc',window_start:'Giờ gọi từ',window_end:'Giờ gọi đến',max_concurrent_calls:'Cuộc gọi đồng thời',max_call_seconds:'Thời lượng tối đa (giây)',max_attempts:'Số lần thử tối đa',retry_after_hours:'Khoảng cách thử lại (giờ)',daily_call_limit:'Hạn mức (cuộc/ngày)',budget_limit_vnd:'Ngân sách (VND)',cost_reserve_per_call_vnd:'Dự phòng mỗi cuộc (VND)'};
 export function campaignErrors(v:Record<string,unknown>,create=false) {
@@ -10,7 +10,7 @@ export function campaignErrors(v:Record<string,unknown>,create=false) {
  if(create && v.name===undefined || v.name!==undefined && (typeof v.name!=='string' || v.name.trim().length<2 || v.name.length>160))e.name='Tên cần 2–160 ký tự.';
  for(const k of ['description','objective'])if(v[k]!==undefined && (typeof v[k]!=='string' || (v[k] as string).length>2000))e[k]='Tối đa 2.000 ký tự.';
  for(const [k,min,max] of [['max_concurrent_calls',1,2],['max_call_seconds',30,300],['max_attempts',1,3],['retry_after_hours',24,2147483647],['daily_call_limit',1,2147483647]] as const)if(v[k]!==undefined && !(k==='daily_call_limit' && v[k]===null) && (!Number.isSafeInteger(v[k]) || Number(v[k])<min || Number(v[k])>max))e[k]=`${labels[k]}: từ ${min} đến ${max}.`;
- for(const k of ['budget_limit_vnd','cost_reserve_per_call_vnd'])if(v[k]!==undefined && v[k]!==null && (typeof v[k]!=='number' || !Number.isFinite(v[k]) || Number(v[k])<=0 || Number(v[k])>9999999999999999))e[k]='Nhập số tiền VND lớn hơn 0.';
+ for(const k of ['budget_limit_vnd','cost_reserve_per_call_vnd'])if(v[k]!==undefined && v[k]!==null && (typeof v[k]!=='number' || !Number.isFinite(v[k]) || Number(v[k])<=0 || Number(v[k])>1e16))e[k]='Nhập số tiền VND lớn hơn 0.';
  if(v.timezone!==undefined){try{if(typeof v.timezone!=='string')throw Error();new Intl.DateTimeFormat('vi',{timeZone:v.timezone});}catch{e.timezone='Múi giờ IANA không hợp lệ.';}}
  for(const k of ['window_start','window_end'])if(v[k]!==undefined && (typeof v[k]!=='string' || !/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(v[k] as string)))e[k]='Nhập giờ HH:mm.';
  if(typeof v.window_start==='string' && typeof v.window_end==='string' && v.window_end<=v.window_start)e.window_end='Giờ kết thúc phải sau giờ bắt đầu.';
@@ -27,6 +27,6 @@ export function filterErrors(v:unknown):Record<string,string> {
  const choices:Record<string,string[]>={temperature:['HOT','WARM','COLD','UNRATED'],lead_status:['NEW','CONTACTED','QUALIFIED','FOLLOW_UP','CONVERTED','LOST'],source:['Inquiry','WebChat','Call','Manual','Import']};
  for(const k of ['temperature','lead_status','source','lead_ids'])if(v[k]!==undefined && (!Array.isArray(v[k]) || v[k].length>500 || v[k].some(x=>typeof x!=='string' || (k==='lead_ids' ? !uuidPattern.test(x):!choices[k].includes(x)))))return {filter:'Kiểm tra bộ lọc; tối đa 500 Lead.'};
  for(const k of ['created_from','created_to'])if(v[k]!==undefined && (typeof v[k]!=='string' || !Number.isFinite(Date.parse(v[k] as string))))return {filter:'Ngày tạo không hợp lệ.'};
- if(v.created_from && v.created_to && Date.parse(String(v.created_from))>Date.parse(String(v.created_to)))return {filter:'Khoảng ngày tạo không hợp lệ.'};
+ if(typeof v.created_from==='string' && typeof v.created_to==='string' && Date.parse(v.created_from)>Date.parse(v.created_to))return {filter:'Khoảng ngày tạo không hợp lệ.'};
  return {};
 }

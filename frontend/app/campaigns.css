@@ -38,3 +38,5 @@
 .campaigns-confirm::backdrop { background:var(--nx-page); opacity:.85; }
 .campaigns-confirm form { width:100%; }
 @media(max-width:700px) { .campaigns-panel { padding:18px; } .campaigns-tabs { padding-inline:18px; gap:18px; } .campaigns-breakdowns { grid-template-columns:1fr; } .campaigns-list-item { align-items:start; flex-direction:column; gap:10px; } .campaigns-row .button { flex:1 1 140px; } .campaigns-row .catalog-field { flex-basis:100%; } .campaigns-confirm { padding:16px; } .campaigns-workspace .catalog-sidebar { flex-wrap:wrap; gap:12px; } .campaigns-workspace .catalog-sidebar nav { display:flex; flex-direction:row; width:100%; } .campaigns-workspace .catalog-sidebar nav a { padding:8px; font-size:10px; } }
+
+.campaigns-scheduler { padding:9px 12px; border:1px solid var(--nx-line); border-radius:8px; background:var(--nx-surface-soft); }
