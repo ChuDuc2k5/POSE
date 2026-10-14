@@ -10,7 +10,7 @@ import { uuidPattern } from '../catalog';
 import { extractNeeds, object } from './extraction';
 import { scoreNeeds, type ScoreResult, type Dimension } from './lead-scoring';
 import { complete } from './llm';
-import { disclosure, evidenceReason, GUARD_VERSION, injection, outputReason, safeReply, stripPhones, toolAllowed, type Evidence } from './guard';
+import { correctionData, disclosure, evidenceReason, GUARD_VERSION, injection, outputReason, safeReply, stripPhones, toolAllowed, type Evidence } from './guard';
 
 export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI hiện chưa khả dụng. Vui lòng thử lại hoặc gửi yêu cầu tư vấn.',retry:true,inquiry_url:'/customer/inquiries/new'},503);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -71,7 +71,9 @@ export async function chat(request:NextRequest) {
     const suspected=injection(input.message) || sanitizedHistory.some(t=>injection(t.content));
     if(suspected)log('input',source,'PROMPT_INJECTION','flagged');
     const data=()=>({customer_text:source,history:sanitizedHistory,properties:items,search_performed:searchPerformed,injection_suspected:suspected,contact_redacted:guest && source!==input.message,signed_in:!guest});
-    let result=await complete(data()),violation:string|null=null,proposals:unknown[]=[];
+    const extracted:Record<string,unknown>={};
+    const turn=async(input:unknown)=>{const result=await complete(input);Object.assign(extracted,result.needs);for(const flag of result.flags)log(flag.tool,flag.args,flag.reason,'flagged');return result;};
+    let result=await turn(data()),violation:string|null=null,proposals:unknown[]=[];
     const tools=result.tool_calls || [];
     for(const t of tools)if(!toolAllowed(t)){violation='TOOL_NOT_ALLOWED_OR_INVALID';log(object(t) && typeof t.name==='string' ? t.name:'invalid_tool',t,violation);}
     let searched=false;
@@ -84,7 +86,7 @@ export async function chat(request:NextRequest) {
       else{log(t.name,t.arguments,null);proposals.push(t);}
     }
     if(searched && !violation){
-      result=await complete({...data(),tools_complete:true});
+      result=await turn({...data(),tools_complete:true});
       if(result.tool_calls?.length){violation='TOOL_RECURSION_BLOCKED';for(const t of result.tool_calls)log('recursive_tool',t,violation);}
     }
     items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5);
@@ -92,13 +94,13 @@ export async function chat(request:NextRequest) {
     let blocked=false;
     if(violation){
       proposals=[];
-      result=await complete({...data(),regeneration:true,tools_complete:true,violations:[violation]});
+      result=await turn({...data(),regeneration:true,tools_complete:true,...correctionData(violation)});
       items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5);
       const failed=result.tool_calls?.length ? 'TOOL_RECURSION_BLOCKED':outputReason(result.reply,items,source);
       if(failed){log('final_output',result.tool_calls?.length ? result.tool_calls:result.reply,failed);blocked=true;}
       else log('regeneration',{},null);
     }
-    const fields=blocked ? {}:extractNeeds(result.needs || {},source);
+    const fields=blocked ? {}:extractNeeds(extracted,source,(key,field)=>log('invalid_need',{field:key,value:field},'invalid_need','flagged'));
     const reply=(count===0 ? `${disclosure}\n`:'')+(blocked ? safeReply:result.reply);
     const acceptedFields=guest || !input.store_transcript ? {}:fields;
     const merged:Record<string,{value:unknown;evidence?:string;confirmed_by?:unknown}>|null=scoring ? {...scoring.needs,...acceptedFields}:null;

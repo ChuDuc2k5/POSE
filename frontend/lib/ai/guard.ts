@@ -4,13 +4,19 @@ export { stripPhones } from './privacy';
 export const GUARD_VERSION='guard.v2';
 export const safeReply='Tôi chưa thể xác nhận câu trả lời an toàn từ dữ liệu hiện có. Bạn có thể yêu cầu chuyên viên tư vấn hỗ trợ.';
 export const disclosure='Tôi là trợ lý AI của TERAVA.';
+export function correctionData(reason:string){
+  const corrections:Record<string,string>={UNSUPPORTED_ROOM_COUNT:'Số phòng ngủ không có trong properties. Không mô tả căn có số phòng khách yêu cầu. Nói chưa biết số phòng, cần Sales xác nhận. Chép giá price nguyên số VND, không đổi đơn vị.',UNSUPPORTED_PRICE:'Chép đúng price nguyên số VND của căn; không đổi đơn vị hay gán giá khác.',UNSUPPORTED_COMMITMENT:'Không có dữ liệu giảm giá/pháp lý/thanh toán. Từ chối xác nhận, đề nghị Sales.',UNSUPPORTED_AVAILABILITY:'Chỉ Available còn bán; không giới thiệu trạng thái khác là còn bán.',PRIVATE_DATA_OR_SECRET:'Từ chối cung cấp dữ liệu cá nhân/secret, không trích lại nội dung đó.'};
+  return {violations:[reason],correction:corrections[reason] || 'Bỏ nội dung không có trong properties, nói rõ chưa biết và đề nghị Sales.'};
+}
 export function injection(text:string) { return /bỏ qua (?:hướng dẫn|chỉ dẫn)|ignore (?:previous|all) (?:instructions|rules)|bạn là admin|(?:đọc|xem|liệt kê).{0,25}(?:lead|khách hàng).{0,15}(?:khác|tất cả)|read (?:other|all) (?:customers?|leads?)|đổi (?:role|quyền|consent)|change (?:role|consent)|(?:reveal|show|đọc|tiết lộ).{0,15}system prompt/i.test(text); }
-const secrets=/SUPABASE_|AI_API_|AI_MODEL|AI_TIMEOUT_MS|NEXT_PUBLIC_|CRON_SECRET|sk-[a-z0-9]|service_role|process\.env|khách hàng khác|lead khác|other customer/i;
+const secrets=/SUPABASE_|AI_API_|AI_MODEL|AI_TIMEOUT_MS|NEXT_PUBLIC_|CRON_SECRET|sk-[a-z0-9]|service_role|process\.env/i;
+const privateCustomers=/khách hàng khác|lead khác|other customers?/gi;
 const links=/[\w.+-]+@[\w.-]+\.[a-z]{2,}|https?:\/\//i;
 export type Evidence={id:string;code:string;name:string;price:number|null;availability:string;updated_at:string;location:string;property_type:string};
 const clauses=(text:string)=>text.split(/\n|[;!?]|(?<!\d)[.,](?!\d)/).filter(Boolean);
 function negated(text:string,index:number){
   const prefix=text.slice(Math.max(0,index-90),index).split(/nhưng|tuy nhiên|\bbut\b|\bhowever\b/i).at(-1) || '';
+  if(/(?:không|chưa) (?:có (?:thông tin(?: xác nhận)?|xác nhận)|thể cung cấp|thể chia sẻ|được phép (?:cung cấp|chia sẻ)).{0,65}$/i.test(prefix))return true;
   return /(?:không|chưa|chẳng|not|never|cannot|no longer)(?:\s+(?:thể|được|có|xác nhận|đưa ra|tư vấn|hỗ trợ|nên|cần|còn|đang|sẵn|sàng|bất kỳ|any|confirm|offer|provide|make|currently|a|the|able|to|legal|payment|or|pháp lý|thanh toán|hoặc)){0,12}\s*$/i.test(prefix);
 }
 function commitment(text:string){
@@ -19,7 +25,7 @@ function commitment(text:string){
 }
 export function evidenceReason(item:Evidence){
   const text=`${item.code} ${item.name} ${item.location}`;
-  return secrets.test(text) || injection(text) || links.test(text) || commitment(text) ? 'UNSAFE_RETRIEVED_DATA':null;
+  return secrets.test(text) || /khách hàng khác|lead khác|other customers?/i.test(text) || injection(text) || links.test(text) || commitment(text) ? 'UNSAFE_RETRIEVED_DATA':null;
 }
 export function toolAllowed(tool:unknown): tool is {name:string;arguments:Record<string,unknown>} {
   if (!object(tool) || Object.keys(tool).some(k=>!['name','arguments'].includes(k)) || !object(tool.arguments)) return false;
@@ -36,7 +42,7 @@ function moneyText(text:string,evidence:Evidence[]){
   return result;
 }
 export function outputReason(reply:string,evidence:Evidence[],customerText='') {
-  if(secrets.test(reply))return 'PRIVATE_DATA_OR_SECRET';
+  if(secrets.test(reply) || clauses(reply).some(clause=>[...clause.matchAll(privateCustomers)].some(m=>!negated(clause,m.index!))))return 'PRIVATE_DATA_OR_SECRET';
   if(links.test(reply))return 'PRIVATE_OR_UNSUPPORTED_LINK';
   if(clauses(reply).some(commitment))return 'UNSUPPORTED_COMMITMENT';
   const uuid=/[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}/gi;
@@ -48,6 +54,12 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='') {
   if(moneyAmounts(moneyText(reply,evidence)).some(amount=>!allowed.includes(amount)))return 'UNSUPPORTED_PRICE';
   for(const clause of clauses(reply)){
     const mentioned=references(clause,evidence);
+    for(const room of clause.matchAll(/\d+\s*phòng ngủ/gi)){
+      if(evidence.some(p=>p.name.toLowerCase().includes(room[0].toLowerCase())))continue;
+      const prefix=clause.slice(0,room.index!).split(/nhưng|tuy nhiên/i).at(-1) || '';
+      if(negated(clause,room.index!) || /(?:chưa biết|chưa rõ|chưa xác nhận)/i.test(prefix) || /(?:bạn cần|bạn muốn|bạn tìm|nhu cầu|tiêu chí|yêu cầu)/i.test(prefix) && customerText.includes(room[0]))continue;
+      return 'UNSUPPORTED_ROOM_COUNT';
+    }
     if(mentioned.length && /giá|price/i.test(clause) && !/ngân sách|bạn (?:đề nghị|nêu|có)|theo yêu cầu/i.test(clause) && moneyAmounts(moneyText(clause,evidence)).some(amount=>!mentioned.some(p=>p.price===amount)))return 'UNSUPPORTED_PRICE';
     const availability=[...clause.matchAll(/\bAvailable\b|còn (?:bán|hàng|để bán)|đang (?:mở bán|bán)|mở bán|chào bán|sẵn hàng|có sẵn|có thể mua|for sale/gi)].filter(m=>!negated(clause,m.index!));
     if(!availability.length)continue;
