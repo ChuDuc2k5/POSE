@@ -1,3 +1,6 @@
+// From frontend/: set PGLITE_PATH to an external @electric-sql/pglite directory;
+// node scripts/test-campaign-management-sql.mjs (no build/server needed).
+// PowerShell: $env:PGLITE_PATH='C:/Users/Admin/AppData/Local/Temp/pose-m06-pg/node_modules/@electric-sql/pglite'
 import { readFile } from 'node:fs/promises';
 import { createCampaignDatabase } from './campaign-test-db.mjs';
 const db=await createCampaignDatabase();

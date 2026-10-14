@@ -1,9 +1,14 @@
+// From frontend/: set PGLITE_PATH to an external @electric-sql/pglite directory;
+// node scripts/test-campaign-management.mjs (requires npx next build first).
+// --preview-only serves clean disposable UI fixtures; --preview keeps HTTP fixtures.
+// PowerShell: $env:PGLITE_PATH='C:/Users/Admin/AppData/Local/Temp/pose-m06-pg/node_modules/@electric-sql/pglite'
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createCampaignDatabase } from './campaign-test-db.mjs';
+import { stopProcess } from './campaign-test-process.mjs';
 
 // The fake Supabase transport executes the real RPCs and RLS in isolated PostgreSQL.
 const db=await createCampaignDatabase();
@@ -13,6 +18,9 @@ const id=(prefix,n=1)=>`f7${prefix}0000-0000-4000-8000-${String(n).padStart(12,'
 const adminId=id('10'),publishedId=id('80'),productId=id('60');
 const origin='http://localhost:3400',base='/api/admin/campaigns',cron='m07-cron-secret-with-at-least-32-characters';
 let chain=Promise.resolve(),offline=false,tickNow=null,previewId='';
+const previewOnly=process.argv.includes('--preview-only');
+const previewReadyId='f7900000-0000-4000-8000-000000000002';
+const waitPreview=()=>new Promise(resolve=>{process.once('SIGINT',resolve);process.once('SIGTERM',resolve);process.once('message',resolve);});
 function transaction(role,fn){const task=chain.then(async()=>{await db.exec('begin');try{await db.exec(`set local role ${role==='System' ? 'service_role':role==='Guest' ? 'anon':'authenticated'}`);const n=role==='Admin' ? 1:role==='Sales' ? 2:3;await db.query("select set_config('request.jwt.claims',$1,true)",[JSON.stringify(role==='System' ? {role:'service_role'}:role==='Guest' ? {}:{sub:id('10',n),session_id:id('20',n),role:'authenticated'})]);const value=await fn();await db.exec('commit');return value;}catch(e){await db.exec('rollback');throw e;}});chain=task.catch(()=>{});return task;}
 const quote=x=>`"${String(x).replaceAll('"','""')}"`;
 const provider=createServer(async(req,res)=>{
@@ -20,7 +28,7 @@ const provider=createServer(async(req,res)=>{
   const url=new URL(req.url,'http://localhost'),token=req.headers.authorization?.replace('Bearer ',''),role=token==='fixture-service' ? 'System':token==='fixture-admin' ? 'Admin':token==='fixture-sales' ? 'Sales':token==='fixture-user' ? 'User':'Guest';
   const reply=(status,body)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(body));};
   if(offline)return reply(503,{message:'Unavailable'});
-  if(url.pathname==='/fixture' && process.argv.includes('--preview')){res.writeHead(302,{'Set-Cookie':'pose-access=fixture-admin; Path=/; HttpOnly; SameSite=Lax',Location:`${origin}/admin/campaigns${url.searchParams.has('detail') ? '/'+previewId:''}${url.searchParams.has('tab') ? '?tab='+Number(url.searchParams.get('tab')):''}`});res.end();return;}
+  if(url.pathname==='/fixture' && (previewOnly || process.argv.includes('--preview'))){res.writeHead(302,{'Set-Cookie':'pose-access=fixture-admin; Path=/; HttpOnly; SameSite=Lax',Location:`${origin}/admin/campaigns${url.searchParams.has('detail') ? '/'+(url.searchParams.has('ready') ? previewReadyId:previewId):''}${url.searchParams.has('tab') ? '?tab='+Number(url.searchParams.get('tab')):''}`});res.end();return;}
   if(url.pathname.endsWith('/user')){const n=role==='Admin' ? 1:role==='Sales' ? 2:3;return role==='Guest' ? reply(401,{msg:'Invalid token'}):reply(200,{id:id('10',n),aud:'authenticated',role:'authenticated',email:`m07-${n}@example.test`,email_confirmed_at:new Date().toISOString(),app_metadata:{role},user_metadata:{role:'Admin'}});}
   const chunks=[];for await(const chunk of req)chunks.push(chunk);const input=chunks.length ? JSON.parse(Buffer.concat(chunks).toString()):{};
   if(url.pathname.includes('/rpc/')){
@@ -48,7 +56,7 @@ await new Promise(resolve=>provider.listen(3401,'127.0.0.1',resolve));
 const appEnv={...process.env,SUPABASE_URL:'http://127.0.0.1:3401',SUPABASE_PUBLISHABLE_KEY:'fixture-public',SUPABASE_SECRET_KEY:'fixture-service',CRON_SECRET:cron};
 for(const key of ['TELEPHONY_PROVIDER','TELEPHONY_API_URL','TELEPHONY_API_KEY','TELEPHONY_CALLER_ID','TELEPHONY_WEBHOOK_SECRET'])appEnv[key]='fixture';
 let app,output='';
-async function start(configured=true){if(app){app.kill();await new Promise(resolve=>app.once('exit',resolve));}output='';const env={...appEnv,...(configured ? {}:{TELEPHONY_API_KEY:''})};app=spawn(process.execPath,['node_modules/next/dist/bin/next','start','--port','3400'],{cwd:new URL('..',import.meta.url),env,windowsHide:true,stdio:['ignore','pipe','pipe']});app.stdout.on('data',x=>output+=x);app.stderr.on('data',x=>output+=x);for(let i=0;i<80;i++){try{const r=await fetch(`${origin}/api/admin/campaigns`,{headers:{Cookie:'pose-access=fixture-admin'}});if(r.ok)return;}catch{}await delay(250);}throw Error(output);}
+async function start(configured=true){await stopProcess(app);output='';const env={...appEnv,...(configured ? {}:{TELEPHONY_API_KEY:''})};app=spawn(process.execPath,['node_modules/next/dist/bin/next','start','--port','3400'],{cwd:new URL('..',import.meta.url),env,windowsHide:true,stdio:['ignore','pipe','pipe']});app.stdout.on('data',x=>output+=x);app.stderr.on('data',x=>output+=x);for(let i=0;i<80;i++){try{const r=await fetch(`${origin}/api/admin/campaigns`,{headers:{Cookie:'pose-access=fixture-admin'}});if(r.ok)return;}catch{}await delay(250);}throw Error(output);}
 const call=(path='',method='GET',body,cookie='pose-access=fixture-admin',requestOrigin=origin)=>fetch(`${origin}${base}${path}`,{method,headers:{...(cookie ? {Cookie:cookie}:{}),...(method!=='GET' ? {Origin:requestOrigin,'Content-Type':'application/json'}:{})},...(body!==undefined ? {body:JSON.stringify(body)}:{})});
 const tick=()=>fetch(`${origin}/api/system/campaigns/tick`,{method:'POST',headers:{Authorization:`Bearer ${cron}`}});
 let checks=0;
@@ -60,6 +68,15 @@ const audience=async(c,filter={})=>(await item(await call(`/${c.id}/audience`,'P
 const config={name:'Chiến dịch HTTP',script_version_id:publishedId,property_ids:[productId],daily_call_limit:2,budget_limit_vnd:300,cost_reserve_per_call_vnd:100,version:0};
 const scalar=async(sql,params=[])=>Object.values((await db.query(sql,params)).rows[0])[0];
 try {
+ if(previewOnly){
+  await db.exec(`insert into campaigns(id,name,status,script_version_id,daily_call_limit,budget_limit_vnd,cost_reserve_per_call_vnd,start_time) values
+  ('f7900000-0000-4000-8000-000000000001','Tư vấn căn hộ — bản nháp','DRAFT','${publishedId}',10,1000000,10000,now()+interval '1 day'),
+  ('${previewReadyId}','Tư vấn nhà phố — sẵn sàng','DRAFT','${publishedId}',10,1000000,10000,now()+interval '1 day'),
+  ('f7900000-0000-4000-8000-000000000003','Chăm sóc khách hàng — tạm dừng','PAUSED','${publishedId}',10,1000000,10000,now()+interval '1 day');
+  insert into campaign_customers(campaign_id,customer_id,lead_id,phone_e164) values('${previewReadyId}','${id('30')}','${id('40')}','+84901230001');`);
+  previewId='f7900000-0000-4000-8000-000000000001';
+  await start();console.log(`PREVIEW READY: ${origin}`);await waitPreview();
+ }else{
  await start();
  check((await call('','GET',undefined,null)).status===401,'Guest denied');
  for(const role of ['sales','user'])check((await call('','GET',undefined,`pose-access=fixture-${role}`)).status===403,`${role} denied forged metadata`);
@@ -74,7 +91,7 @@ try {
  check((await call(`/${c.id}`,'PATCH',{name:'Stale',version:99})).status===409,'version conflict');
  let preview=await item(await call(`/${c.id}/audience-preview`,'POST',{filter:{}}));
  check(preview.total===12 && preview.eligible===4,'preview counts');
- check(preview.skipped.DAILY_CAP===1 && preview.skipped.WEEKLY_CAP===1 && preview.skipped.LEAD_CLOSED===2,'global caps reasons');
+ check(preview.deferred.DAILY_CAP===1 && preview.deferred.WEEKLY_CAP===1 && preview.skipped.LEAD_CLOSED===2,'temporary caps separated from exclusions');
  check(preview.sample.length<=20 && !JSON.stringify(preview.sample).includes('+849'),'masked sample');
  check((await call(`/${c.id}/audience-preview`,'POST',{filter:{lead_ids:Array(501).fill(id('40'))}})).status===400,'500 lead limit');
  c=await audience(c);c=await audience(c);
@@ -123,21 +140,25 @@ try {
  let p=await item(await call(`/${c.id}/progress`));check(Object.values(p.memberships).reduce((a,b)=>a+b,0)===p.total,'progress sum');check(p.reconciliation.length===2,'stale dispatched/unknown reconciliation');check(p.completed===1 && p.connected===0,'completed separate from connected');
  check((await call(`/${c.id}/action`,'POST',{version:c.version,action:'cancel',reason:'x'})).status===400,'cancel reason');
  c=await action(c,'cancel','Dừng chiến dịch');check(await scalar("select count(*)::integer from call_jobs where campaign_id=$1 and status in ('Pending','Claimed')",[c.id])===0,'cancel pending and claimed');check(await scalar("select count(*)::integer from call_jobs where campaign_id=$1 and status='Dispatched'",[c.id])===1,'dispatched retained');check(await scalar("select count(*)::integer from calls where campaign_id=$1 and status='UNKNOWN'",[c.id])===1,'active call retained');
+ await db.query("update call_jobs set status='Done' where campaign_id=$1",[c.id]);
  check((await call(`/${c.id}/action`,'POST',{version:c.version,action:'resume'})).status===400,'terminal resume denied');
  // Schedule rechecks the current consent, script and budget at activation.
  let scheduled=await item(await call('','POST',{...config,name:'Lịch tương lai',start_time:new Date(Date.now()+86400000).toISOString()}),201);scheduled=await audience(scheduled,{lead_ids:[id('40',10)]});scheduled=await action(scheduled,'schedule');check(scheduled.status==='SCHEDULED','scheduled transition');
  tickNow=new Date(Date.now()+2*86400000).toISOString();await item(await tick());check(await scalar('select status from campaigns where id=$1',[scheduled.id])==='RUNNING','scheduled activates');
  await db.query("update campaigns set status='SCHEDULED',budget_spent_vnd=300,start_time=now()-interval '1 hour' where id=$1",[scheduled.id]);await item(await tick());check(await scalar('select status from campaigns where id=$1',[scheduled.id])==='FAILED','scheduled preflight fails');
+ await db.query("update call_jobs set status='Done' where campaign_id=$1",[scheduled.id]);
  // New opt-outs and caps after audience selection are checked by the tick.
  let live=await item(await call('','POST',{...config,name:'Kiểm tra lại',daily_call_limit:10,budget_limit_vnd:1000}),201);live=await audience(live,{lead_ids:[id('40'),id('40',10),id('40',12)]});live=await action(live,'start');
  await db.exec("insert into contact_consents(phone_e164,purpose,status,channel,source,evidence,policy_version,recorded_at) values('+84901230001','Call','Withdrawn','Sales','Fixture','Khách rút đồng ý','v2',now()+interval '1 second')");
- await db.query("insert into calls(campaign_id,phone_e164,call_type,status) values($1,'+84901230010','AI_AUTO_CALL','FAILED')",[c.id]);
- await db.query("insert into calls(campaign_id,phone_e164,call_type,status,created_at) select $1,'+84901230012','AI_AUTO_CALL','FAILED',now()-n*interval '1 day' from generate_series(2,4) n",[c.id]);
+ await db.query("insert into calls(campaign_id,phone_e164,call_type,status,created_at) values($1,'+84901230010','AI_AUTO_CALL','FAILED','2026-10-14 02:00Z')",[c.id]);
+ await db.query("insert into calls(campaign_id,phone_e164,call_type,status,created_at) select $1,'+84901230012','AI_AUTO_CALL','FAILED','2026-10-14 03:00Z'::timestamptz-n*interval '1 day' from generate_series(2,4) n",[c.id]);
  tickNow='2026-10-14T03:00:00Z';await item(await tick());
  check(await scalar("select status from campaign_customers where campaign_id=$1 and phone_e164='+84901230001'",[live.id])==='OPTED_OUT','tick withdrawn consent');
  check(await scalar("select skip_reason from campaign_customers where campaign_id=$1 and phone_e164='+84901230010'",[live.id])==='DAILY_CAP','global daily cap across campaigns');
  check(await scalar("select skip_reason from campaign_customers where campaign_id=$1 and phone_e164='+84901230012'",[live.id])==='WEEKLY_CAP','global weekly cap across campaigns');
- check(await scalar('select status from campaigns where id=$1',[live.id])==='COMPLETED','all skipped completes');
+ check(await scalar('select status from campaigns where id=$1',[live.id])==='RUNNING','deferred members keep campaign open');
+ check(await scalar("select count(*)::integer from campaign_customers where campaign_id=$1 and status='PENDING' and next_attempt_at is not null",[live.id])===2,'temporary caps retain pending members');
+ live=await action(live,'cancel','Kết thúc kiểm tra');
  // Due retries create exactly the next attempt; future retries keep campaigns open.
  await db.exec("delete from calls where phone_e164='+84901230012'");
  let retry=await item(await call('','POST',{...config,name:'Thử lại'}),201);retry=await audience(retry,{lead_ids:[id('40',12)]});retry=await action(retry,'start');
@@ -163,6 +184,39 @@ try {
   check(r.status===(allowed[a] ? 200:400),`${state} ${a} allowed/denied`);
   if(allowed[a])check((await r.json()).item.status===allowed[a],`${state} ${a} target`);
  }
+ // Isolate temporal scheduler checks from the lifecycle matrix above.
+ await db.exec("update campaigns set status='CANCELLED' where status in ('RUNNING','PAUSED','SCHEDULED');update call_jobs set status='Cancelled' where status in ('Pending','Claimed','Dispatched');delete from calls where phone_e164='+84901230002'");
+ const t=Date.parse(await scalar("select date_trunc('second',now())")),at=offset=>new Date(t+offset).toISOString(),hour=3600000,day=24*hour;
+ const deferralConfig={...config,weekdays:[0,1,2,3,4,5,6],window_start:'00:00',window_end:'23:59',daily_call_limit:10,budget_limit_vnd:1000};
+ const makeDeferred=async name=>{let m=await item(await call('','POST',{...deferralConfig,name}),201);m=await audience(m,{lead_ids:[id('40',2)]});return m;};
+ const timedTick=async offset=>{tickNow=at(offset);return item(await tick());};
+ await db.query("insert into calls(campaign_id,phone_e164,call_type,status,created_at) values($1,'+84901230002','AI_AUTO_CALL','COMPLETED',$2)",[c.id,at(-23*hour)]);
+ let delayed=await makeDeferred('Trần 24 giờ');
+ let member=(await db.query('select * from campaign_customers where campaign_id=$1',[delayed.id])).rows[0];
+ check(member.status==='PENDING' && member.skip_reason==='DAILY_CAP' && Date.parse(member.next_attempt_at)===t+hour,'audience retains exact daily deferral');
+ delayed=await action(delayed,'start');delayed=await action(delayed,'pause');delayed=await action(delayed,'resume');
+ check(await scalar('select status from campaign_customers where campaign_id=$1',[delayed.id])==='PENDING','resume retains temporary blocked audience');
+ check((await timedTick(0)).jobs_created===0,'PENDING future deadline not selected');
+ check((await timedTick(hour)).jobs_created===1,'job after daily cap expiry using explicit clock');
+ delayed=await action(delayed,'cancel','Kiểm thử xong');await db.exec("delete from calls where phone_e164='+84901230002'");
+ await db.query("insert into calls(campaign_id,phone_e164,call_type,status,created_at) select $1,'+84901230002','AI_AUTO_CALL','FAILED',$2::timestamptz-n*interval '1 day' from generate_series(2,4) n",[c.id,at(0)]);
+ delayed=await makeDeferred('Trần 7 ngày');member=(await db.query('select * from campaign_customers where campaign_id=$1',[delayed.id])).rows[0];
+ check(member.status==='PENDING' && member.skip_reason==='WEEKLY_CAP' && Date.parse(member.next_attempt_at)===t+3*day,'weekly deadline oldest of three counted calls');
+ delayed=await action(delayed,'start');check((await timedTick(2*day)).jobs_created===0,'weekly cap retains membership');check((await timedTick(3*day)).jobs_created===1,'weekly expiry queues job');
+ delayed=await action(delayed,'cancel','Kiểm thử xong');await db.exec("delete from calls where phone_e164='+84901230002'");
+ await db.query("insert into calls(phone_e164,call_type,status,created_at) values('+84901230002','MOCK_CALL','ANSWERED',$1)",[at(0)]);
+ delayed=await makeDeferred('Cuộc gọi thử đang kết nối');delayed=await action(delayed,'start');
+ member=(await db.query('select * from campaign_customers where campaign_id=$1',[delayed.id])).rows[0];check(member.status==='PENDING' && member.skip_reason==='ACTIVE_CALL','active mock defers audience');
+ check((await timedTick(hour/2)).jobs_created===0,'active MOCK_CALL prevents job');
+ check(Date.parse(await scalar('select next_attempt_at from campaign_customers where campaign_id=$1',[delayed.id]))===t+hour*.75,'ACTIVE_CALL defers fifteen minutes from tick');
+ await db.exec("update calls set status='COMPLETED' where phone_e164='+84901230002'");check((await timedTick(hour*.75)).jobs_created===1,'completed MOCK_CALL excluded from caps');
+ delayed=await action(delayed,'cancel','Kiểm thử xong');
+ let sharedA=await makeDeferred('Cùng số — chiến dịch một'),sharedB=await makeDeferred('Cùng số — chiến dịch hai');sharedA=await action(sharedA,'start');sharedB=await action(sharedB,'start');
+ check((await timedTick(0)).jobs_created===1,'two campaigns one phone exactly one job');
+ check(await scalar("select count(*)::integer from campaign_customers where campaign_id=any($1) and status='PENDING' and skip_reason='ACTIVE_CALL'",[[sharedA.id,sharedB.id]])===1,'cross-campaign queue collision deferred');
+ check((await timedTick(0)).jobs_created===0,'repeat collision tick creates no duplicate');
+ await db.query("update call_jobs set status='Done' where campaign_id=any($1)",[[sharedA.id,sharedB.id]]);check((await timedTick(hour/4)).jobs_created===1,'deferred shared phone queues after release');
  console.log(`PASS: ${checks} M07 HTTP checks; fake Supabase gateway with real PostgreSQL rules.`);
- if(process.argv.includes('--preview')){previewId=noProvider.id;console.log(`PREVIEW READY: ${origin}; cookie pose-access=fixture-admin; campaign ${noProvider.id}`);await new Promise(resolve=>{process.once('SIGINT',resolve);process.once('SIGTERM',resolve);});}
-}finally{if(app)app.kill();provider.close();await db.close();}
+ if(process.argv.includes('--preview')){previewId=noProvider.id;console.log(`PREVIEW READY: ${origin}; cookie pose-access=fixture-admin; campaign ${noProvider.id}`);await waitPreview();}
+ }
+}finally{try{await stopProcess(app);}finally{provider.closeAllConnections();await new Promise(resolve=>provider.close(resolve));await chain;await db.close();}}

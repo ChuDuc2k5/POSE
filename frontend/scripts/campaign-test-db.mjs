@@ -1,3 +1,4 @@
+// Shared fixtures for M07 HTTP/SQL/UI tests; requires PGLITE_PATH, not standalone.
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';

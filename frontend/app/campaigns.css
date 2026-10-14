@@ -26,6 +26,10 @@
 .campaigns-days input { width:16px; min-height:16px; accent-color:var(--nx-primary); }
 .campaigns-checklist { list-style:none; padding:0; display:grid; gap:8px; }
 .campaigns-checklist li { padding:9px 12px; background:var(--nx-primary-soft); border:1px solid var(--nx-line); border-radius:8px; }
+.campaigns-checklist .preflight-met { color:var(--nx-success); background:var(--nx-success-soft); border-color:var(--nx-success-line); }
+.campaigns-checklist .preflight-unmet, .campaigns-preflight-note { color:var(--nx-warning); background:var(--nx-warning-soft); border:1px solid var(--nx-warning-line); }
+.campaigns-checklist small { display:block; margin-top:5px; }
+.campaigns-panel .campaigns-preflight-note { padding:12px; border-radius:8px; }
 .campaigns-breakdowns { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:15px; }
 .campaigns-breakdowns section { border:1px solid var(--nx-line); padding:16px; border-radius:12px; }
 .campaigns-breakdowns h3 { margin-top:0; }

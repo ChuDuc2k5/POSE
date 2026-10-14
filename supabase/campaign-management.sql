@@ -23,7 +23,7 @@ declare actor uuid:=pose_private.require_account(); begin
  if pose_private.staff_role() is distinct from 'Admin' then raise exception 'ADMIN_REQUIRED' using errcode='42501'; end if;
  return actor;
 end $$;
-create function pose_private.contact_eligibility(p_lead uuid,p_campaign uuid) returns jsonb
+create function pose_private.contact_eligibility(p_lead uuid,p_campaign uuid,p_now timestamptz default now()) returns jsonb
 language plpgsql stable security definer set search_path='' as $$
 declare l public.leads; c public.customers; reason text; begin
  select * into l from public.leads where id=p_lead;
@@ -35,10 +35,32 @@ declare l public.leads; c public.customers; reason text; begin
  when pose_private.phone_suppressed(c.phone) then 'SUPPRESSED'
  when l.archived or l.status in ('CONVERTED','LOST') then 'LEAD_CLOSED'
  when p_campaign is not null and not exists(select 1 from public.campaigns where id=p_campaign and status='RUNNING') then 'CAMPAIGN_NOT_RUNNING'
- when exists(select 1 from public.calls where phone_e164=c.phone and call_type<>'MOCK_CALL' and status in ('CALLING','RINGING','ANSWERED','ENDING','UNKNOWN')) then 'ACTIVE_CALL'
- when exists(select 1 from public.calls where phone_e164=c.phone and call_type<>'MOCK_CALL' and created_at>now()-interval '24 hours') then 'DAILY_CAP'
- when (select count(*) from public.calls where phone_e164=c.phone and call_type<>'MOCK_CALL' and created_at>now()-interval '7 days')>=3 then 'WEEKLY_CAP' end;
+ when exists(select 1 from public.calls where phone_e164=c.phone and status in ('CALLING','RINGING','ANSWERED','ENDING','UNKNOWN')) then 'ACTIVE_CALL'
+ when exists(select 1 from public.calls where phone_e164=c.phone and call_type<>'MOCK_CALL' and created_at>p_now-interval '24 hours' and created_at<=p_now) then 'DAILY_CAP'
+ when (select count(*) from public.calls where phone_e164=c.phone and call_type<>'MOCK_CALL' and created_at>p_now-interval '7 days' and created_at<=p_now)>=3 then 'WEEKLY_CAP' end;
  return jsonb_build_object('eligible',reason is null,'reason',reason);
+end $$;
+
+create function pose_private.contact_block_kind(p_reason text) returns text language sql immutable set search_path='' as $$
+ select case when p_reason in ('ACTIVE_CALL','DAILY_CAP','WEEKLY_CAP') then 'Temporary'
+ when p_reason in ('SUPPRESSED','NO_CALL_CONSENT','NO_AI_VOICE_CONSENT') then 'OptOut' else 'Permanent' end;
+$$;
+create function pose_private.contact_defer_until(p_phone text,p_reason text,p_now timestamptz) returns timestamptz
+language sql stable security definer set search_path='' as $$
+ select case p_reason when 'DAILY_CAP' then (select max(created_at)+interval '24 hours' from public.calls where phone_e164=p_phone and call_type<>'MOCK_CALL' and created_at<=p_now)
+ when 'WEEKLY_CAP' then (select min(created_at)+interval '7 days' from (select created_at from public.calls where phone_e164=p_phone and call_type<>'MOCK_CALL' and created_at>p_now-interval '7 days' and created_at<=p_now order by created_at desc limit 3) c)
+ else p_now+interval '15 minutes' end;
+$$;
+create function pose_private.campaign_contact_block(p_member uuid,p_reason text,p_now timestamptz) returns void
+language plpgsql security definer set search_path='' as $$
+begin
+ update public.campaign_customers set
+  status=case pose_private.contact_block_kind(p_reason) when 'Temporary' then status when 'OptOut' then 'OPTED_OUT' else 'SKIPPED' end,
+  next_attempt_at=case when pose_private.contact_block_kind(p_reason)='Temporary' then greatest(next_attempt_at,pose_private.contact_defer_until(phone_e164,p_reason,p_now)) end,
+  skip_reason=p_reason,version=version+1,updated_at=p_now where id=p_member;
+ if pose_private.contact_block_kind(p_reason)<>'Temporary' then
+  update public.call_jobs set status='Cancelled',cancel_reason=p_reason,updated_at=p_now where membership_id=p_member and status in ('Pending','Claimed');
+ end if;
 end $$;
 
 create function pose_private.campaign_immutable() returns trigger language plpgsql set search_path='' as $$
@@ -191,7 +213,7 @@ declare result jsonb; begin
  perform pose_private.campaign_admin(); perform pose_private.campaign_filter(p_filter);
  if not exists(select 1 from public.campaigns where id=p_campaign) then raise exception 'NOT_FOUND' using errcode='P0002'; end if;
  with a as materialized (select l.id,c.full_name,'***'||right(c.phone,4) phone,pose_private.contact_eligibility(l.id,null)->>'reason' reason from pose_private.campaign_audience(p_filter) l join public.customers c on c.id=l.customer_id)
- select jsonb_build_object('total',count(*),'eligible',count(*) filter(where reason is null),'skipped',coalesce((select jsonb_object_agg(reason,n) from (select reason,count(*) n from a where reason is not null group by reason) s),'{}'),'sample',coalesce((select jsonb_agg(to_jsonb(s)) from (select * from a limit 20) s),'[]')) into result from a;
+ select jsonb_build_object('total',count(*),'eligible',count(*) filter(where reason is null),'deferred',coalesce((select jsonb_object_agg(reason,n) from (select reason,count(*) n from a where reason is not null and pose_private.contact_block_kind(reason)='Temporary' group by reason) s),'{}'),'skipped',coalesce((select jsonb_object_agg(reason,n) from (select reason,count(*) n from a where reason is not null and pose_private.contact_block_kind(reason)<>'Temporary' group by reason) s),'{}'),'sample',coalesce((select jsonb_agg(to_jsonb(s)) from (select *,case when reason is null then 'Eligible' when pose_private.contact_block_kind(reason)='Temporary' then 'Deferred' else 'Excluded' end disposition from a limit 20) s),'[]')) into result from a;
  return result;
 end $$;
 create function pose_private.set_campaign_audience(p_campaign uuid,p_version integer,p_filter jsonb,p_reason text) returns jsonb language plpgsql security definer set search_path='' as $$
@@ -204,9 +226,9 @@ declare actor uuid:=pose_private.campaign_admin(); c public.campaigns; l public.
  if c.status not in ('DRAFT','PAUSED') then raise exception 'AUDIENCE_LOCKED' using errcode='22023'; end if;
  for l in select * from pose_private.campaign_audience(p_filter) loop
   select * into cust from public.customers where id=l.customer_id; e:=pose_private.contact_eligibility(l.id,null);
-  insert into public.campaign_customers(campaign_id,customer_id,lead_id,phone_e164,snapshot,status,skip_reason)
-  values(c.id,cust.id,l.id,case when cust.phone ~ '^\+[1-9][0-9]{7,14}$' then cust.phone end,jsonb_build_object('lead',to_jsonb(l),'customer',jsonb_build_object('id',cust.id,'full_name',cust.full_name,'phone',cust.phone,'phone_verified_at',cust.phone_verified_at)),case when (e->>'eligible')::boolean then 'PENDING' else 'SKIPPED' end,e->>'reason')
-  on conflict(campaign_id,customer_id) do update set snapshot=excluded.snapshot,phone_e164=excluded.phone_e164,skip_reason=excluded.skip_reason,status=excluded.status,version=campaign_customers.version+1,updated_at=now() where campaign_customers.status='PENDING';
+  insert into public.campaign_customers(campaign_id,customer_id,lead_id,phone_e164,snapshot,status,skip_reason,next_attempt_at)
+  values(c.id,cust.id,l.id,case when cust.phone ~ '^\+[1-9][0-9]{7,14}$' then cust.phone end,jsonb_build_object('lead',to_jsonb(l),'customer',jsonb_build_object('id',cust.id,'full_name',cust.full_name,'phone',cust.phone,'phone_verified_at',cust.phone_verified_at)),case when (e->>'eligible')::boolean or pose_private.contact_block_kind(e->>'reason')='Temporary' then 'PENDING' when pose_private.contact_block_kind(e->>'reason')='OptOut' then 'OPTED_OUT' else 'SKIPPED' end,e->>'reason',case when pose_private.contact_block_kind(e->>'reason')='Temporary' then pose_private.contact_defer_until(cust.phone,e->>'reason',now()) end)
+  on conflict(campaign_id,customer_id) do update set snapshot=excluded.snapshot,phone_e164=excluded.phone_e164,skip_reason=excluded.skip_reason,status=excluded.status,next_attempt_at=excluded.next_attempt_at,version=campaign_customers.version+1,updated_at=now() where campaign_customers.status='PENDING';
  end loop;
  update public.campaigns set version=version+1,updated_at=now() where id=c.id returning * into c;
  insert into public.campaign_events(campaign_id,actor_id,action,reason,snapshot) values(c.id,actor,'audience',coalesce(p_reason,''),p_filter);
@@ -218,7 +240,7 @@ declare c public.campaigns; missing jsonb:='[]'; begin
  select * into c from public.campaigns where id=p_campaign;
  if length(btrim(c.name))<2 then missing:=missing||'"NAME"'::jsonb; end if;
  if not exists(select 1 from public.call_script_versions where id=c.script_version_id and status='Published') then missing:=missing||'"PUBLISHED_SCRIPT"'::jsonb; end if;
- if not exists(select 1 from public.campaign_customers m where m.campaign_id=c.id and m.status in ('PENDING','RETRYING') and (pose_private.contact_eligibility(m.lead_id,null)->>'eligible')::boolean and m.phone_e164=(select phone from public.customers where id=m.customer_id)) then missing:=missing||'"ELIGIBLE_AUDIENCE"'::jsonb; end if;
+ if not exists(select 1 from public.campaign_customers m where m.campaign_id=c.id and m.status in ('PENDING','RETRYING') and ((pose_private.contact_eligibility(m.lead_id,null,p_now)->>'eligible')::boolean or pose_private.contact_block_kind(pose_private.contact_eligibility(m.lead_id,null,p_now)->>'reason')='Temporary') and m.phone_e164=(select phone from public.customers where id=m.customer_id)) then missing:=missing||'"ELIGIBLE_AUDIENCE"'::jsonb; end if;
  if c.budget_limit_vnd is null or c.cost_reserve_per_call_vnd is null or c.budget_limit_vnd-c.budget_spent_vnd-c.budget_reserved_vnd<c.cost_reserve_per_call_vnd then missing:=missing||'"BUDGET"'::jsonb; end if;
  if c.daily_call_limit is null then missing:=missing||'"DAILY_LIMIT"'::jsonb; end if;
  if c.end_time is not null and c.end_time<=p_now then missing:=missing||'"END_TIME"'::jsonb; end if;
@@ -231,8 +253,7 @@ declare m public.campaign_customers; reason text; begin
   reason:=pose_private.contact_eligibility(m.lead_id,null)->>'reason';
   if m.phone_e164 is distinct from (select phone from public.customers where id=m.customer_id) then reason:='PHONE_UNVERIFIED'; end if;
   if reason is not null then
-   update public.campaign_customers set status=case when reason in ('SUPPRESSED','NO_CALL_CONSENT','NO_AI_VOICE_CONSENT') then 'OPTED_OUT' else 'SKIPPED' end,skip_reason=reason,version=version+1,updated_at=now() where id=m.id;
-   update public.call_jobs set status='Cancelled',cancel_reason=reason,updated_at=now() where membership_id=m.id and status in ('Pending','Claimed');
+   perform pose_private.campaign_contact_block(m.id,reason,now());
   end if;
  end loop;
 end $$;
@@ -287,19 +308,24 @@ declare c public.campaigns; m public.campaign_customers; local_now timestamp; al
     if extract(dow from local_now)::smallint=any(c.weekdays) and local_now::time>=c.window_start and local_now::time<c.window_end then
      select count(*) into queued from public.call_jobs where campaign_id=c.id and status in ('Pending','Claimed');
      allowance:=least(coalesce(c.daily_call_limit,0)-(select count(*)::integer from public.call_jobs where campaign_id=c.id and (created_at at time zone c.timezone)::date=local_now::date),greatest(0,coalesce(floor((coalesce(c.budget_limit_vnd,0)-c.budget_spent_vnd-c.budget_reserved_vnd)/nullif(c.cost_reserve_per_call_vnd,0)),0)-queued))::integer;
-     for m in select * from public.campaign_customers where campaign_id=c.id and (status='PENDING' or status='RETRYING' and next_attempt_at<=p_now) order by added_at,id for update loop
-      reason:=pose_private.contact_eligibility(m.lead_id,c.id)->>'reason';
+     for m in select * from public.campaign_customers where campaign_id=c.id and (status='PENDING' and (next_attempt_at is null or next_attempt_at<=p_now) or status='RETRYING' and next_attempt_at<=p_now) order by added_at,id for update loop
+      reason:=pose_private.contact_eligibility(m.lead_id,c.id,p_now)->>'reason';
       if m.phone_e164 is distinct from (select phone from public.customers where id=m.customer_id) then reason:='PHONE_UNVERIFIED'; end if;
       if reason is not null then
-       update public.campaign_customers set status=case when reason in ('SUPPRESSED','NO_CALL_CONSENT','NO_AI_VOICE_CONSENT') then 'OPTED_OUT' else 'SKIPPED' end,skip_reason=reason,version=version+1,updated_at=p_now where id=m.id;
+       perform pose_private.campaign_contact_block(m.id,reason,p_now);
        continue;
       end if;
       n:=m.retry_count+1;
       if n>c.max_attempts then update public.campaign_customers set status='EXHAUSTED',updated_at=p_now where id=m.id; continue; end if;
       if allowance<=0 then continue; end if;
+      -- Serialize phone queue admission across concurrent campaign ticks.
+      perform pg_advisory_xact_lock(hashtextextended(m.phone_e164,7));
+      if exists(select 1 from public.call_jobs j join public.campaign_customers other on other.id=j.membership_id where other.phone_e164=m.phone_e164 and j.campaign_id<>c.id and j.status in ('Pending','Claimed','Dispatched')) then
+       perform pose_private.campaign_contact_block(m.id,'ACTIVE_CALL',p_now);continue;
+      end if;
       insert into public.call_jobs(campaign_id,membership_id,attempt_no,scheduled_at,idempotency_key,created_at,updated_at) values(c.id,m.id,n,p_now,'campaign:'||c.id||':member:'||m.id||':attempt:'||n,p_now,p_now) on conflict do nothing;
       if found then added:=added+1; allowance:=allowance-1; end if;
-      update public.campaign_customers set status='QUEUED',version=version+1,updated_at=p_now where id=m.id;
+      update public.campaign_customers set status='QUEUED',skip_reason=null,next_attempt_at=null,version=version+1,updated_at=p_now where id=m.id;
      end loop;
     end if;
    end if;
@@ -365,5 +391,5 @@ grant execute on function public.pose_campaign_progress(uuid),pose_private.campa
 create function public.pose_system_campaign_tick(p_now timestamptz) returns jsonb language sql security invoker set search_path='' as $$ select pose_private.system_campaign_tick(p_now); $$;
 revoke all on function public.pose_system_campaign_tick(timestamptz),pose_private.system_campaign_tick(timestamptz) from public,anon,authenticated;
 grant execute on function public.pose_system_campaign_tick(timestamptz),pose_private.system_campaign_tick(timestamptz) to service_role;
-revoke all on function pose_private.contact_eligibility(uuid,uuid),pose_private.campaign_admin(),pose_private.campaign_filter(jsonb),pose_private.campaign_audience(jsonb),pose_private.campaign_preflight(uuid,boolean,timestamptz),pose_private.campaign_recheck(uuid),pose_private.campaign_complete(uuid),pose_private.script_valid(jsonb),pose_private.script_checksum(jsonb),pose_private.campaign_immutable(),pose_private.script_immutable() from public,anon,authenticated;
+revoke all on function pose_private.contact_eligibility(uuid,uuid,timestamptz),pose_private.contact_block_kind(text),pose_private.contact_defer_until(text,text,timestamptz),pose_private.campaign_contact_block(uuid,text,timestamptz),pose_private.campaign_admin(),pose_private.campaign_filter(jsonb),pose_private.campaign_audience(jsonb),pose_private.campaign_preflight(uuid,boolean,timestamptz),pose_private.campaign_recheck(uuid),pose_private.campaign_complete(uuid),pose_private.script_valid(jsonb),pose_private.script_checksum(jsonb),pose_private.campaign_immutable(),pose_private.script_immutable() from public,anon,authenticated;
 commit;

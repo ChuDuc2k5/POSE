@@ -1,4 +1,5 @@
--- Real PostgreSQL tests; all fixtures are rolled back.
+-- Run via frontend/scripts/test-campaign-management-sql.mjs with PGLITE_PATH,
+-- or in psql after the module migration. All fixtures are rolled back.
 begin;
 -- Fixtures begin (also used by the isolated HTTP test gateway).
 insert into auth.users(id,aud,role,email,email_confirmed_at,raw_app_meta_data,created_at,updated_at)
@@ -54,14 +55,17 @@ do $$declare c jsonb;v jsonb;s jsonb;preview jsonb;content jsonb;cid uuid;ver in
  perform pg_temp.reject('select public.pose_save_campaign(null,0,''{"name":"Invalid","script_version_id":"f7800000-0000-4000-8000-000000000002"}'','''')','22023');
  preview:=public.pose_preview_campaign_audience(cid,'{}');
  perform pg_temp.check((preview->>'total')::integer=12 and (preview->>'eligible')::integer=4,'audience totals');
- perform pg_temp.check(preview->'skipped'='{"PHONE_UNVERIFIED":1,"NO_CALL_CONSENT":1,"NO_AI_VOICE_CONSENT":1,"SUPPRESSED":1,"LEAD_CLOSED":2,"DAILY_CAP":1,"WEEKLY_CAP":1}'::jsonb,'skip reasons');
+ perform pg_temp.check(preview->'skipped'='{"PHONE_UNVERIFIED":1,"NO_CALL_CONSENT":1,"NO_AI_VOICE_CONSENT":1,"SUPPRESSED":1,"LEAD_CLOSED":2}'::jsonb,'exclusion reasons');
+ perform pg_temp.check(preview->'deferred'='{"DAILY_CAP":1,"WEEKLY_CAP":1}'::jsonb,'temporary reasons separated');
  perform pg_temp.check((preview->'sample')::text not like '%+849%' and jsonb_array_length(preview->'sample')<=20,'masked sample');
  perform pg_temp.check((public.pose_preview_campaign_audience(cid,'{"temperature":["HOT"],"lead_status":["NEW"],"source":["Manual"]}')->>'total')::integer=11,'audience filter');
  perform pg_temp.reject(format('select public.pose_preview_campaign_audience(%L,''{"lead_ids":["bad"]}'')',cid),'22P02');
  perform public.pose_set_campaign_audience(cid,0,'{}','');
  perform public.pose_set_campaign_audience(cid,1,'{}','');
  perform pg_temp.check((select count(*)=12 from public.campaign_customers where campaign_id=cid),'audience idempotent');
- perform pg_temp.check((select count(*)=8 from public.campaign_customers where campaign_id=cid and status='SKIPPED'),'skipped memberships');
+ perform pg_temp.check((select count(*)=3 from public.campaign_customers where campaign_id=cid and status='SKIPPED'),'permanent exclusions');
+ perform pg_temp.check((select count(*)=3 from public.campaign_customers where campaign_id=cid and status='OPTED_OUT'),'opt-outs');
+ perform pg_temp.check((select count(*)=2 from public.campaign_customers where campaign_id=cid and status='PENDING' and next_attempt_at is not null),'temporary audience retained');
  perform pg_temp.check((select bool_and(lead_id is not null and snapshot ? 'lead' and snapshot ? 'customer') from public.campaign_customers where campaign_id=cid),'audience snapshots');
  s:=public.pose_save_call_script(null,'Kịch bản mới');
  select sv.content into content from public.call_script_versions sv where id='f7800000-0000-4000-8000-000000000001';
@@ -229,5 +233,63 @@ do $$begin
  perform pg_temp.reject('select public.pose_save_call_script(null,''Forbidden'')','42501');
 end $$;
 reset role;
+select set_config('request.jwt.claims','{"sub":"f7100000-0000-4000-8000-000000000001","session_id":"f7200000-0000-4000-8000-000000000001","role":"authenticated"}',true);
+savepoint temporary_contact_tests;
+do $$declare t timestamptz:=now();c jsonb;cid uuid;second uuid;cfg jsonb:='{"name":"Tạm hoãn","script_version_id":"f7800000-0000-4000-8000-000000000001","daily_call_limit":10,"budget_limit_vnd":1000,"cost_reserve_per_call_vnd":100,"weekdays":[0,1,2,3,4,5,6],"window_start":"00:00","window_end":"23:59"}';e jsonb;begin
+ delete from public.calls where phone_e164 in ('+84901230001','+84901230010','+84901230012');
+ insert into public.calls(campaign_id,phone_e164,call_type,status,created_at) values((select id from ids where kind='campaign'),'+84901230001','AI_AUTO_CALL','COMPLETED',t-interval '23 hours');
+ c:=public.pose_save_campaign(null,0,cfg,'');cid:=(c->>'id')::uuid;
+ perform public.pose_set_campaign_audience(cid,0,'{"lead_ids":["f7400000-0000-4000-8000-000000000001"]}','');
+ perform pg_temp.check((select status='PENDING' and skip_reason='DAILY_CAP' and next_attempt_at=t+interval '1 hour' from public.campaign_customers where campaign_id=cid),'23-hour call deferred exactly');
+ perform pg_temp.check(public.pose_campaign_preflight(cid,true)='[]'::jsonb,'temporary audience passes preflight');
+ perform public.pose_campaign_action(cid,1,'start','',true);
+ perform public.pose_campaign_action(cid,2,'pause','',true);
+ perform public.pose_campaign_action(cid,3,'resume','',true);
+ perform pg_temp.check((select status='PENDING' and next_attempt_at=t+interval '1 hour' from public.campaign_customers where campaign_id=cid),'resume retains deferred membership');
+ update public.campaign_customers set status='RETRYING',retry_count=1 where campaign_id=cid;
+ perform pose_private.campaign_recheck(cid);
+ perform pg_temp.check((select status='RETRYING' and retry_count=1 and next_attempt_at=t+interval '1 hour' from public.campaign_customers where campaign_id=cid),'temporary block preserves retry state and attempt count');
+ perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ perform pg_temp.check(public.pose_system_campaign_tick(t)->>'jobs_created'='0','pending future timestamp respected');
+ perform pg_temp.check(pose_private.contact_eligibility('f7400000-0000-4000-8000-000000000001',cid,t+interval '1 hour')->>'eligible'='true','explicit eligibility clock');
+ perform pg_temp.check(public.pose_system_campaign_tick(t+interval '1 hour')->>'jobs_created'='1','daily cap expiry creates job');
+ perform pg_temp.check((select attempt_no=2 from public.call_jobs where campaign_id=cid),'deferred retry queues its next attempt');
+ perform set_config('request.jwt.claims','{"sub":"f7100000-0000-4000-8000-000000000001","session_id":"f7200000-0000-4000-8000-000000000001","role":"authenticated"}',true);
+ perform public.pose_campaign_action(cid,(select version from public.campaigns where id=cid),'cancel','Kiểm thử xong',true);
+ insert into public.calls(phone_e164,call_type,status,created_at) select '+84901230010','AI_AUTO_CALL','FAILED',t-n*interval '1 day' from generate_series(2,4) n;
+ c:=public.pose_save_campaign(null,0,cfg,'');cid:=(c->>'id')::uuid;
+ perform public.pose_set_campaign_audience(cid,0,'{"lead_ids":["f7400000-0000-4000-8000-000000000010"]}','');
+ perform pg_temp.check((select status='PENDING' and skip_reason='WEEKLY_CAP' and next_attempt_at=t+interval '3 days' from public.campaign_customers where campaign_id=cid),'weekly deferral oldest counted call');
+ perform public.pose_campaign_action(cid,1,'start','',true);
+ perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ perform pg_temp.check(public.pose_system_campaign_tick(t+interval '2 days')->>'jobs_created'='0','weekly cap holds');
+ perform pg_temp.check(public.pose_system_campaign_tick(t+interval '3 days')->>'jobs_created'='1','weekly window frees');
+ perform set_config('request.jwt.claims','{"sub":"f7100000-0000-4000-8000-000000000001","session_id":"f7200000-0000-4000-8000-000000000001","role":"authenticated"}',true);
+ perform public.pose_campaign_action(cid,(select version from public.campaigns where id=cid),'cancel','Kiểm thử xong',true);
+ insert into public.calls(phone_e164,call_type,status,created_at) values('+84901230012','MOCK_CALL','ANSWERED',t);
+ perform pg_temp.check(pose_private.contact_eligibility('f7400000-0000-4000-8000-000000000012',null)->>'reason'='ACTIVE_CALL','active mock blocks phone with two-argument helper');
+ c:=public.pose_save_campaign(null,0,cfg,'');cid:=(c->>'id')::uuid;
+ perform public.pose_set_campaign_audience(cid,0,'{"lead_ids":["f7400000-0000-4000-8000-000000000012"]}','');
+ perform public.pose_campaign_action(cid,1,'start','',true);
+ perform pg_temp.check((select status='PENDING' and next_attempt_at=t+interval '15 minutes' from public.campaign_customers where campaign_id=cid),'active mock deferred');
+ perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ perform pg_temp.check(public.pose_system_campaign_tick(t+interval '15 minutes')->>'jobs_created'='0','active mock prevents dispatch');
+ perform pg_temp.check((select status='PENDING' and next_attempt_at=t+interval '30 minutes' from public.campaign_customers where campaign_id=cid),'active call deferral advances');
+ update public.calls set status='COMPLETED' where phone_e164='+84901230012';
+ perform pg_temp.check(public.pose_system_campaign_tick(t+interval '30 minutes')->>'jobs_created'='1','completed mock excluded from caps');
+ perform set_config('request.jwt.claims','{"sub":"f7100000-0000-4000-8000-000000000001","session_id":"f7200000-0000-4000-8000-000000000001","role":"authenticated"}',true);
+ perform public.pose_campaign_action(cid,(select version from public.campaigns where id=cid),'cancel','Kiểm thử xong',true);
+ c:=public.pose_save_campaign(null,0,cfg,'');cid:=(c->>'id')::uuid;
+ perform public.pose_set_campaign_audience(cid,0,'{"lead_ids":["f7400000-0000-4000-8000-000000000012"]}','');perform public.pose_campaign_action(cid,1,'start','',true);
+ c:=public.pose_save_campaign(null,0,cfg,'');second:=(c->>'id')::uuid;
+ perform public.pose_set_campaign_audience(second,0,'{"lead_ids":["f7400000-0000-4000-8000-000000000012"]}','');perform public.pose_campaign_action(second,1,'start','',true);
+ perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ perform pg_temp.check(public.pose_system_campaign_tick(t)->>'jobs_created'='1','one phone job across campaigns');
+ perform pg_temp.check((select count(*)=1 from public.campaign_customers where campaign_id in (cid,second) and status='PENDING' and skip_reason='ACTIVE_CALL' and next_attempt_at=t+interval '15 minutes'),'duplicate queue deferred');
+ perform pg_temp.check(public.pose_system_campaign_tick(t)->>'jobs_created'='0','repeat collision tick idempotent');
+ update public.call_jobs set status='Done' where campaign_id in (cid,second);
+ perform pg_temp.check(public.pose_system_campaign_tick(t+interval '15 minutes')->>'jobs_created'='1','duplicate queue can progress after release');
+end $$;
+rollback to temporary_contact_tests;
 rollback;
 select 'PASS: M07 SQL configuration, audience, scripts, eligibility, scheduler, lifecycle, progress, immutability, uniqueness and RLS checks. Fixtures rolled back.' as result;
