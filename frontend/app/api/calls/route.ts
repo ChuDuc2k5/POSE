@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { callAccess } from '@/lib/calling/server';
-import { catalogDatabaseError,catalogError,catalogJson } from '@/lib/catalog-server';
+import { catalogDatabaseError,catalogError,catalogJson } from '@/lib/next-api-bridge';
 import { uuidPattern } from '@/lib/catalog';
 export async function GET(request:NextRequest){
  try{const access=await callAccess();if(access.error)return access.error;

@@ -10,6 +10,11 @@ export class WebResponse extends Response {
 }
 type CookieOptions = { httpOnly?: boolean; secure?: boolean; sameSite?: string; path?: string; maxAge?: number };
 const context = new AsyncLocalStorage<{ request: ExpressRequest; values: Map<string,string>; changes: Map<string,string> }>();
+export function requestClientIp() {
+  const request = context.getStore()?.request;
+  if (!request) throw new Error('REQUEST_CONTEXT_REQUIRED');
+  return clientIp(request);
+}
 export function bearerToken() {
   const token = context.getStore()?.request.headers.authorization?.match(/^Bearer ([^\s]+)$/i)?.[1];
   return token && token.length <= 8192 ? token : undefined;

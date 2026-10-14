@@ -1,5 +1,5 @@
-import { complete } from '../ai/llm';
-import { evidenceReason, outputReason, safeReply, type Evidence } from '../ai/guard';
+import { complete } from '../../../backend/src/modules/ai/llm';
+import { evidenceReason, outputReason, safeReply, type Evidence } from '../../../backend/src/modules/ai/guard';
 // Script lines are spoken back to back; give each one a sentence end.
 const sentence=(line:string)=>{const text=line.trim();return !text || /[.!?…]$/.test(text) ? text:`${text}.`;};
 export type Script={greeting:string;ai_disclosure:string;purpose:string;consent_prompt:{ai_voice:string;recording:string;transcript:string};needs_questions:string[];closing:string;opt_out:{confirmation:string};policy_version?:string};

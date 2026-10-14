@@ -1,6 +1,6 @@
 import 'server-only';
 import { NextRequest } from 'next/server';
-import { catalogAdmin, catalogDatabaseError, catalogError, catalogInput, catalogJson } from '../catalog-server';
+import { catalogAdmin, catalogDatabaseError, catalogError, catalogInput, catalogJson } from '../next-api-bridge';
 import { uuidPattern } from '../catalog';
 import { telephonyConfigured } from '../calling/config';
 import { campaignErrors, filterErrors } from './validation';

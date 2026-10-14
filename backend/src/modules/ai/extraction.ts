@@ -1,5 +1,5 @@
-import { hasPhone } from './privacy';
-import { moneyAmounts } from './money';
+import { hasPhone } from './privacy.ts';
+import { moneyAmounts } from './money.ts';
 export const SCHEMA_VERSION = 'needs.v1';
 export const propertyTypes = ['Apartment','House','Land','Villa','Office','Shop'];
 export const needFields = ['budget_min_vnd','budget_max_vnd','locations','property_types','timeline','purchase_intent','contact_ready','next_step'];

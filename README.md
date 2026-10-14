@@ -11,9 +11,22 @@ Backend đọc `.env`; khi thiếu cấu hình Supabase trong máy phát triển
 
 Sao chép `frontend/.env.example` thành `frontend/.env.local`. `BACKEND_URL` mặc định
 là `http://127.0.0.1:3001`; cấu hình giá trị này lúc khởi động frontend. Proxy đọc
-địa chỉ backend cho mỗi yêu cầu, không cần build lại khi đổi địa chỉ. Frontend chỉ
-phục vụ giao diện, API và xác minh cookie được chuyển tiếp tới NestJS. Các trang
-server cũng gọi NestJS để đọc phiên.
+địa chỉ backend cho mỗi yêu cầu, không cần build lại khi đổi địa chỉ. M01–M03 và
+M06 API được chuyển tiếp tới NestJS. Các trang server cũng gọi NestJS để đọc phiên.
+M07/M08 tạm thời vẫn chạy trong Next.js qua `lib/next-api-bridge.ts`; bridge lấy
+phiên đã xác minh từ NestJS, đồng bộ cookie refresh rồi tạo client theo token đó.
+Khi chạy frontend ngoài Compose, truyền cấu hình Supabase, telephony và cron từ
+`backend/.env` vào môi trường server của frontend cho đến khi M08 được chuyển.
+Compose truyền cấu hình này lúc chạy; không đưa khóa vào `NEXT_PUBLIC_*`.
+
+M06 được triển khai trong `backend/src/modules/ai/` với các URL `/api/ai/chat`,
+`/api/ai/sessions/:id`, `/api/ai/handoff`, `/api/ai/workspace`. Đặt `AI_API_URL`,
+`AI_MODEL`, `AI_API_KEY`, `AI_TIMEOUT_MS` trong môi trường backend. LM Studio dùng
+`http://localhost:1234/v1`, model `qwen3-4b-instruct-2507`, có thể để khóa trống
+trên localhost. Adapter dùng `json_schema`, tối đa 600 token và một lần thử lại
+khi JSON sai. Sau `npx nest build` trong backend, chạy live check từ frontend:
+`node scripts/check-llm-live.mjs` với các biến LLM đã đặt; script dùng NestJS LLM
+service và guard với dữ liệu BĐS giả lập công khai, không ghi dữ liệu khách hàng.
 Socket.IO dùng cùng origin qua rewrite; chỉ đặt `NEXT_PUBLIC_API_URL` nếu cần
 endpoint realtime riêng.
 

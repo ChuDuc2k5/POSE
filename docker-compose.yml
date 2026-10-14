@@ -16,8 +16,13 @@ services:
     depends_on: [redis]
     networks: [pose]
   frontend:
-    build: ./frontend
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    # Temporary server-side M07/M08 configuration; removed with their backend ports.
+    env_file: ./backend/.env
     environment:
+      PORT: 3000
       BACKEND_URL: http://backend:3001
     ports: ["3000:3000"]
     depends_on: [backend]

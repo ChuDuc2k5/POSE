@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server';
 import { callAccess } from '@/lib/calling/server';
-import { catalogInput,catalogDatabaseError,catalogError,catalogJson } from '@/lib/catalog-server';
+import { catalogInput,catalogDatabaseError,catalogError,catalogJson } from '@/lib/next-api-bridge';
 import { converse,initialConversation,type Conversation } from '@/lib/calling/conversation';
-import { authClient } from '@/lib/auth-server';
+import { authClient } from '@/lib/next-api-bridge';
 import { uuidPattern } from '@/lib/catalog';
 export async function POST(request:NextRequest){
  try{const access=await callAccess(request,true);if(access.error)return access.error;const parsed=await catalogInput(request);if(parsed.error)return parsed.error;const i=parsed.input;

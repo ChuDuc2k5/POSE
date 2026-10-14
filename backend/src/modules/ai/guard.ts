@@ -1,6 +1,6 @@
-import { object, propertyTypes } from './extraction';
-import { moneyAmounts } from './money';
-export { stripPhones } from './privacy';
+import { object, propertyTypes } from './extraction.ts';
+import { moneyAmounts } from './money.ts';
+export { stripPhones } from './privacy.ts';
 export const GUARD_VERSION='guard.v2';
 export const safeReply='Tôi chưa thể xác nhận câu trả lời an toàn từ dữ liệu hiện có. Bạn có thể yêu cầu chuyên viên tư vấn hỗ trợ.';
 export const disclosure='Tôi là trợ lý AI của TERAVA.';
@@ -57,7 +57,9 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='') {
     for(const room of clause.matchAll(/\d+\s*phòng ngủ/gi)){
       if(evidence.some(p=>p.name.toLowerCase().includes(room[0].toLowerCase())))continue;
       const prefix=clause.slice(0,room.index!).split(/nhưng|tuy nhiên/i).at(-1) || '';
-      if(negated(clause,room.index!) || /(?:chưa biết|chưa rõ|chưa xác nhận)/i.test(prefix) || /(?:bạn cần|bạn muốn|bạn tìm|nhu cầu|tiêu chí|yêu cầu)/i.test(prefix) && customerText.includes(room[0]))continue;
+      const uncertain=/(?:không|chưa) (?:có|đủ) (?:thông tin|dữ liệu|căn cứ|bằng chứng)(?:\s+(?:để|có thể|khẳng định|xác nhận|cho biết|có)){0,6}\s*$/i.test(prefix)
+        || /(?:không|chưa)(?: thể)? (?:xác nhận|xác định|khẳng định)(?: được| có)?\s*$/i.test(prefix);
+      if(negated(clause,room.index!) || uncertain || /(?:chưa biết|chưa rõ|chưa xác nhận)/i.test(prefix) || /(?:bạn cần|bạn muốn|bạn tìm|nhu cầu|tiêu chí|yêu cầu)/i.test(prefix) && customerText.includes(room[0]))continue;
       return 'UNSUPPORTED_ROOM_COUNT';
     }
     // A price stated in a clause must be a listed product price; the customer's own

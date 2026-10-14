@@ -1,4 +1,4 @@
-import { stripPhones } from './privacy';
+import { stripPhones } from './privacy.ts';
 export function moneyAmounts(text:string):number[] {
   const amounts:number[]=[];
   const pattern=/(?<![a-z\d_])(\d{1,3}(?:[., ]\d{3})+(?:[,.]\d{1,2})?|\d+(?:[,.]\d{1,2})?)\s*(tỷ|tỉ|triệu|nghìn|ngàn|VND|đồng|đ)?(?![a-z\d])/gi;

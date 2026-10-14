@@ -1,7 +1,7 @@
-import { NextRequest } from 'next/server';
-import { authenticatedSession, authClient } from '@/lib/auth-server';
-import { catalogDatabaseError, catalogError, catalogInput, catalogJson } from '@/lib/catalog-server';
-import { uuidPattern } from '@/lib/catalog';
+import { WebRequest as NextRequest, validOrigin } from '../../common/http.js';
+import { authenticatedSession, authClient } from '../auth/session.js';
+import { catalogDatabaseError, catalogError, catalogInput, catalogJson } from '../catalog/catalog.service.js';
+import { uuidPattern } from '../../common/catalog.js';
 export async function GET(request:NextRequest){
   try{
     const session=await authenticatedSession();if(!session)return catalogError('UNAUTHORIZED','Vui lòng đăng nhập.',401);
@@ -19,7 +19,7 @@ export async function GET(request:NextRequest){
 }
 export async function POST(request:NextRequest){
   try{
-    if(request.headers.get('origin')!==request.nextUrl.origin)return catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403);
+    if(!validOrigin(request))return catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403);
     const session=await authenticatedSession();if(!session)return catalogError('UNAUTHORIZED','Vui lòng đăng nhập.',401);
     if(!['Sales','Admin'].includes(session.role))return catalogError('FORBIDDEN','Bạn không có quyền truy cập.',403);
     const parsed=await catalogInput(request);if(parsed.error)return parsed.error;const i=parsed.input;

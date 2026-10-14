@@ -1,3 +1,4 @@
+import { AiModule } from './modules/ai/ai.module.js';
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { AuthGuard } from './auth/auth.guard.js';
@@ -14,7 +15,7 @@ import { WorkspaceModule } from './modules/workspace/workspace.module.js';
 import { QueueModule } from './modules/queue/queue.module.js';
 import { HealthController } from './modules/queue/health.controller.js';
 @Module({
-  imports: [SupabaseModule, AuthModule, AccountModule, CatalogModule, CustomerModule, WorkspaceModule, QueueModule],
+  imports: [AiModule, SupabaseModule, AuthModule, AccountModule, CatalogModule, CustomerModule, WorkspaceModule, QueueModule],
   controllers: [AppController, AccessController, HealthController],
   providers: [AppService, { provide: APP_GUARD, useClass: AuthGuard }, GatewayGateway],
 })
