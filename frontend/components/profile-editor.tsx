@@ -8,7 +8,7 @@ import { Brand } from './brand';
 import { LogoutButton } from './logout-button';
 import { roleHome, roleLabels, type Role } from '@/lib/roles';
 import { validateProfile } from '@/lib/profile-validation';
-import type { Profile } from '@/lib/account-server';
+import type { Profile } from '@/lib/profile';
 
 type User = { name: string; email: string; role: Role };
 type History = { id: string; action: string; changed_fields: string[]; created_at: string };

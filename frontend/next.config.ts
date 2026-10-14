@@ -1,7 +1,8 @@
-import type { NextConfig } from "next";
-
+import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
-  /* config options here */
+  output: 'standalone',
+  outputFileTracingRoot: process.cwd(),
+  turbopack: { root: process.cwd() },
+  experimental: { proxyClientMaxBodySize: '22mb' },
 };
-
 export default nextConfig;

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { CheckCircle2, Send } from 'lucide-react';
-import type { Profile } from '@/lib/account-server';
+import type { Profile } from '@/lib/profile';
 import { CatalogRequestError, catalogRequest } from '@/lib/catalog-client';
 import { inquiryLabels } from '@/lib/discovery';
 

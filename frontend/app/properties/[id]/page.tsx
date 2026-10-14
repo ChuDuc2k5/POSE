@@ -1,5 +1,6 @@
+import { backendFetch } from '@/lib/backend';
 import { notFound } from 'next/navigation';
-import { authClient, publicPageRole } from '@/lib/auth-server';
+import { publicPageRole } from '@/lib/page-session';
 import { uuidPattern } from '@/lib/catalog';
 import { PropertyDetail } from '@/components/property-detail';
 import type { PublicProperty } from '@/lib/discovery';
@@ -9,12 +10,10 @@ export const dynamic='force-dynamic';
 export const metadata={title:'Chi tiết bất động sản | TERAVA'};
 export default async function PropertyPage({params}:{params:Promise<{id:string}>}){
   const {id}=await params;if(!uuidPattern.test(id))notFound();
-  const client=authClient();
-  const property=await client.from('property_public_catalog').select('*').eq('id',id).maybeSingle();
-  if(property.error)throw new Error('Chưa thể tải chi tiết sản phẩm.');
-  if(!property.data)notFound();
-  const media=await client.from('property_media').select('id,name,media_type,sort_order').eq('property_id',id).eq('visibility','Public').eq('visible',true).eq('removed',false).order('sort_order').order('id');
-  if(media.error)throw new Error('Chưa thể tải tài liệu sản phẩm.');
+  const response = await backendFetch(`/api/catalog/properties/${id}`);
+  if (response.status === 404) notFound();
+  if (!response.ok) throw new Error('Chưa thể tải chi tiết sản phẩm.');
+  const { item, media } = await response.json();
   const role = await publicPageRole(`/properties/${id}`);
-  return <><PropertyDetail item={property.data as PublicProperty} media={media.data} role={role}/><AiChatWidget signedIn={role==='User'} propertyId={id}/></>;
+  return <><PropertyDetail item={item as PublicProperty} media={media} role={role}/><AiChatWidget signedIn={role==='User'} propertyId={id}/></>;
 }
