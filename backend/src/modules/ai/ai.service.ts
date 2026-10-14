@@ -9,6 +9,7 @@ import { catalogDatabaseError, catalogError, catalogInput, catalogJson } from '.
 import { searchParameters } from '../../common/discovery.js';
 import { uuidPattern } from '../../common/catalog.js';
 import { object } from './extraction.js';
+import { inferSearch } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
 import { correctionData, disclosure, GUARD_VERSION, safeReply, type Evidence } from './guard.js';
 
@@ -26,11 +27,12 @@ async function readSession(id:string, who:Awaited<ReturnType<typeof identity>>) 
   return who.client ? who.client.rpc('pose_ai_read_session',{p_session:id}):systemClient().rpc('pose_system_ai_read_guest',{p_session:id,p_hash:who.guestHash});
 }
 async function retrieve(filters:Record<string,unknown>,context:string|null):Promise<Evidence[]> {
-  const params=new URLSearchParams(Object.entries(filters).map(([k,v])=>[k,String(v)]));
+  const params=new URLSearchParams(Object.entries(filters).filter(([k])=>k!=='transaction_type').map(([k,v])=>[k,String(v)]));
   const parsed=searchParameters(params);if(Object.keys(parsed.fields).length)throw new Error('INVALID_FILTER');
-  let query=authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type');
+  let query=authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type,transaction_type,price_period');
   if(context)query=query.eq('id',context);
   if(typeof filters.location==='string')query=query.ilike('location',`%${filters.location.replace(/[%_\\]/g,'\\$&')}%`);
+  if(filters.transaction_type)query=query.eq('transaction_type',filters.transaction_type);
   if(filters.type)query=query.eq('property_type',filters.type);
   if(filters.minPrice!==undefined)query=query.gte('price',filters.minPrice);
   if(filters.maxPrice!==undefined)query=query.lte('price',filters.maxPrice);
@@ -40,7 +42,7 @@ async function retrieve(filters:Record<string,unknown>,context:string|null):Prom
 }
 async function retrieveIds(ids:string[]):Promise<Evidence[]> {
   if(!ids.length)return [];
-  const result=await authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type').in('id',[...new Set(ids)].slice(0,100)).limit(100);
+  const result=await authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type,transaction_type,price_period').in('id',[...new Set(ids)].slice(0,100)).limit(100);
   if(result.error)throw new Error('RETRIEVAL_UNAVAILABLE');
   return (result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[];
 }
@@ -67,6 +69,14 @@ export class AiService {
     const sanitizedHistory=history.map(turn=>({role:turn.role,content:guest ? this.privacy.stripPhones(turn.content):turn.content}));
     let searchPerformed=input.filters!==undefined || !!input.property_id;
     let items=searchPerformed ? await retrieve(filters,input.property_id as string|null || null):[];
+    // Small models rarely ask for a search on their own; search the catalogue from the
+    // question itself, and if nothing matches widen once so the answer can compare.
+    const inferred=searchPerformed ? null:inferSearch(source);
+    if(inferred){
+      items=await retrieve(inferred,null);
+      if(!items.length && Object.keys(inferred).length){const {location,transaction_type}=inferred;items=await retrieve({...location ? {location}:{},...transaction_type ? {transaction_type}:{}},null);}
+      searchPerformed=true;
+    }
     const actions:{tool:string;args_hash:string;decision:string;reason:string;rule_version:string}[]=[];
     const log=(tool:string,args:unknown,reason:string|null,decision?:'flagged')=>actions.push({tool,args_hash:hash(JSON.stringify(args) || 'null'),decision:decision || (reason ? 'blocked':'allowed'),reason:reason || 'VALIDATED',rule_version:GUARD_VERSION});
     const safeEvidence=(list:Evidence[])=>list.filter(item=>{const reason=this.guard.evidenceReason(item);if(reason)log('retrieval',{id:item.id},reason);return !reason;});
@@ -84,7 +94,7 @@ export class AiService {
       if(!this.guard.toolAllowed(t))continue;
       if(t.name==='search_properties'){
         if(searched){violation='TOOL_LIMIT';log(t.name,t.arguments,violation);break;}
-        log(t.name,t.arguments,null);items=safeEvidence(await retrieve(t.arguments,null));searchPerformed=true;searched=true;
+        log(t.name,t.arguments,null);items=safeEvidence(await retrieve({...t.arguments,...inferred?.transaction_type ? {transaction_type:inferred.transaction_type}:{}},null));searchPerformed=true;searched=true;
       }else if(guest){violation='SIGN_IN_REQUIRED';log(t.name,t.arguments,violation);}
       else{log(t.name,t.arguments,null);proposals.push(t);}
     }

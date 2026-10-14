@@ -1,18 +1,18 @@
 import { object, propertyTypes } from './extraction.ts';
 import { moneyAmounts } from './money.ts';
 export { stripPhones } from './privacy.ts';
-export const GUARD_VERSION='guard.v2';
+export const GUARD_VERSION='guard.v3';
 export const safeReply='Tôi chưa thể xác nhận câu trả lời an toàn từ dữ liệu hiện có. Bạn có thể yêu cầu chuyên viên tư vấn hỗ trợ.';
 export const disclosure='Tôi là trợ lý AI của TERAVA.';
 export function correctionData(reason:string){
-  const corrections:Record<string,string>={UNSUPPORTED_LANGUAGE:'Chỉ viết tiếng Việt, không dùng chữ Hán hay ngôn ngữ khác.',UNSUPPORTED_ROOM_COUNT:'Số phòng ngủ không có trong properties. Không mô tả căn có số phòng khách yêu cầu. Nói chưa biết số phòng, cần Sales xác nhận. Chép giá price nguyên số VND, không đổi đơn vị.',UNSUPPORTED_PRICE:'Chép đúng price nguyên số VND của căn; không đổi đơn vị hay gán giá khác.',UNSUPPORTED_COMMITMENT:'Không có dữ liệu giảm giá/pháp lý/thanh toán. Từ chối xác nhận, đề nghị Sales.',UNSUPPORTED_AVAILABILITY:'Chỉ Available còn bán; không giới thiệu trạng thái khác là còn bán.',PRIVATE_DATA_OR_SECRET:'Từ chối cung cấp dữ liệu cá nhân/secret, không trích lại nội dung đó.'};
+  const corrections:Record<string,string>={UNSUPPORTED_PRICE_PERIOD:'Rent/Month: giá thuê VND/tháng. Sale/Total: giá bán tổng VND. Không trộn hai loại giá.',UNSUPPORTED_LANGUAGE:'Chỉ viết tiếng Việt, không dùng chữ Hán hay ngôn ngữ khác.',UNSUPPORTED_ROOM_COUNT:'Số phòng ngủ không có trong properties. Không mô tả căn có số phòng khách yêu cầu. Nói chưa biết số phòng, cần Sales xác nhận. Chép giá price nguyên số VND, không đổi đơn vị.',UNSUPPORTED_PRICE:'Chép đúng price nguyên số VND của căn; không đổi đơn vị hay gán giá khác.',UNSUPPORTED_COMMITMENT:'Không có dữ liệu giảm giá/pháp lý/thanh toán. Từ chối xác nhận, đề nghị Sales.',UNSUPPORTED_AVAILABILITY:'Chỉ Available còn bán; không giới thiệu trạng thái khác là còn bán.',PRIVATE_DATA_OR_SECRET:'Từ chối cung cấp dữ liệu cá nhân/secret, không trích lại nội dung đó.'};
   return {violations:[reason],correction:corrections[reason] || 'Bỏ nội dung không có trong properties, nói rõ chưa biết và đề nghị Sales.'};
 }
 export function injection(text:string) { return /bỏ qua (?:hướng dẫn|chỉ dẫn)|ignore (?:previous|all) (?:instructions|rules)|bạn là admin|(?:đọc|xem|liệt kê).{0,25}(?:lead|khách hàng).{0,15}(?:khác|tất cả)|read (?:other|all) (?:customers?|leads?)|đổi (?:role|quyền|consent)|change (?:role|consent)|(?:reveal|show|đọc|tiết lộ).{0,15}system prompt/i.test(text); }
 const secrets=/SUPABASE_|AI_API_|AI_MODEL|AI_TIMEOUT_MS|NEXT_PUBLIC_|CRON_SECRET|sk-[a-z0-9]|service_role|process\.env/i;
 const privateCustomers=/khách hàng khác|lead khác|other customers?/gi;
 const links=/[\w.+-]+@[\w.-]+\.[a-z]{2,}|https?:\/\//i;
-export type Evidence={id:string;code:string;name:string;price:number|null;availability:string;updated_at:string;location:string;property_type:string};
+export type Evidence={id:string;code:string;name:string;price:number|null;availability:string;updated_at:string;location:string;property_type:string;transaction_type?:'Sale'|'Rent';price_period?:'Total'|'Month'};
 const clauses=(text:string)=>text.split(/\n|[;!?]|(?<!\d)[.,](?!\d)/).filter(Boolean);
 function negated(text:string,index:number){
   const prefix=text.slice(Math.max(0,index-90),index).split(/nhưng|tuy nhiên|\bbut\b|\bhowever\b/i).at(-1) || '';
@@ -30,7 +30,7 @@ export function evidenceReason(item:Evidence){
 export function toolAllowed(tool:unknown): tool is {name:string;arguments:Record<string,unknown>} {
   if (!object(tool) || Object.keys(tool).some(k=>!['name','arguments'].includes(k)) || !object(tool.arguments)) return false;
   const args=tool.arguments;
-  if (tool.name==='search_properties') return Object.keys(args).every(k=>['location','type','minPrice','maxPrice'].includes(k)) && Object.entries(args).every(([k,v])=>k==='type' ? propertyTypes.includes(v as string):k==='location' ? typeof v==='string' && v.length>0 && v.length<=120:typeof v==='number' && Number.isFinite(v) && v>=0 && v<=1e15) && !(typeof args.minPrice==='number' && typeof args.maxPrice==='number' && args.minPrice>args.maxPrice);
+  if (tool.name==='search_properties') return Object.keys(args).every(k=>['location','type','minPrice','maxPrice','transaction_type'].includes(k)) && Object.entries(args).every(([k,v])=>k==='transaction_type' ? ['Sale','Rent'].includes(v as string):k==='type' ? propertyTypes.includes(v as string):k==='location' ? typeof v==='string' && v.length>0 && v.length<=120:typeof v==='number' && Number.isFinite(v) && v>=0 && v<=1e15) && !(typeof args.minPrice==='number' && typeof args.maxPrice==='number' && args.minPrice>args.maxPrice);
   if (tool.name==='request_handoff') return Object.keys(args).length===0;
   if (tool.name==='propose_appointment') return Object.keys(args).length===2 && ['start','end'].every(k=>typeof args[k]==='string' && Number.isFinite(Date.parse(args[k] as string))) && Date.parse(args.end as string)>Date.parse(args.start as string);
   return false;
@@ -56,6 +56,18 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='') {
   if(moneyAmounts(moneyText(reply,evidence)).some(amount=>!allowed.includes(amount)))return 'UNSUPPORTED_PRICE';
   for(const clause of clauses(reply)){
     const mentioned=references(clause,evidence);
+    const prefix=reply.slice(0,reply.indexOf(clause)).toLowerCase();
+    const last=(e:Evidence)=>Math.max(...[e.code,e.id,e.name].map(v=>prefix.lastIndexOf(v.toLowerCase())));
+    const related=mentioned.length ? mentioned:references(prefix,evidence).sort((a,b)=>last(b)-last(a)).slice(0,1);
+    const monthly=/\/\s*tháng|mỗi tháng|hàng tháng|một tháng|per month/i.test(clause);
+    const rent=/thuê/i.test(clause)||monthly,sale=/giá bán|mua|còn bán|mở bán|chào bán|for sale/i.test(clause);
+    if(related.some(p=>p.transaction_type==='Rent' && sale || p.transaction_type==='Sale' && rent))return 'UNSUPPORTED_PRICE_PERIOD';
+    for(const amount of moneyAmounts(moneyText(clause,evidence))){
+      if(/ngân sách|tiêu chí|bạn cần|bạn muốn/i.test(clause) && !/giá|price/i.test(clause))continue;
+      const matching=(related.length ? related:evidence).filter(p=>p.price===amount);
+      if(matching.some(p=>p.transaction_type==='Rent' && sale || p.transaction_type==='Sale' && rent))return 'UNSUPPORTED_PRICE_PERIOD';
+      if(matching.some(p=>p.price_period==='Month') && !monthly || matching.some(p=>p.price_period==='Total') && rent)return 'UNSUPPORTED_PRICE_PERIOD';
+    }
     for(const room of clause.matchAll(/\d+\s*phòng ngủ/gi)){
       if(evidence.some(p=>p.name.toLowerCase().includes(room[0].toLowerCase())))continue;
       const prefix=clause.slice(0,room.index!).split(/nhưng|tuy nhiên/i).at(-1) || '';
@@ -67,12 +79,8 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='') {
     // A price stated in a clause must be a listed product price; the customer's own
     // budget figures are only allowed when the clause talks about the budget.
     if(/giá|price/i.test(clause) && !/ngân sách|bạn (?:đề nghị|nêu|có)|theo yêu cầu/i.test(clause) && moneyAmounts(moneyText(clause,evidence)).some(amount=>!(mentioned.length ? mentioned:evidence).some(p=>p.price===amount)))return 'UNSUPPORTED_PRICE';
-    const availability=[...clause.matchAll(/\bAvailable\b|còn (?:bán|hàng|để bán)|đang (?:mở bán|bán)|mở bán|chào bán|sẵn hàng|có sẵn|có thể mua|for sale/gi)].filter(m=>!negated(clause,m.index!));
+    const availability=[...clause.matchAll(/\bAvailable\b|còn (?:bán|hàng|để bán|cho thuê)|đang (?:mở bán|bán|cho thuê)|mở bán|chào bán|sẵn hàng|có sẵn|có thể (?:mua|thuê)|for (?:sale|rent)/gi)].filter(m=>!negated(clause,m.index!));
     if(!availability.length)continue;
-    let related=mentioned;
-    // A clause that names no product (e.g. "chỉ giới thiệu căn còn bán") states policy, not a
-    // product fact; attribute it to the closest earlier product only when there is one.
-    if(!related.length){const prefix=reply.slice(0,reply.indexOf(clause)).toLowerCase();const last=(e:Evidence)=>Math.max(...[e.code,e.id,e.name].map(v=>prefix.lastIndexOf(v.toLowerCase())));const prior=references(prefix,evidence).sort((a,b)=>last(b)-last(a));related=prior.slice(0,1);}
     if(related.some(e=>e.availability!=='Available'))return 'UNSUPPORTED_AVAILABILITY';
   }
   return null;

@@ -18,8 +18,8 @@ export function scoreLead(input: ScoreInput) {
   return {score,classification,breakdown,unknown,rule_version:RULE_VERSION,intent:input.intent===true};
 }
 export type ScoreResult=ReturnType<typeof scoreLead>;
-export function scoreNeeds(needs:Record<string,{value:unknown;evidence?:string}>,properties:{price:number|null;location:string;property_type:string;availability:string}[],verified:boolean,previous?:ScoreResult,preserve:Dimension[]=[]) {
-  properties=properties.filter(p=>p.availability==='Available');
+export function scoreNeeds(needs:Record<string,{value:unknown;evidence?:string}>,properties:{price:number|null;location:string;property_type:string;availability:string;transaction_type?:string}[],verified:boolean,previous?:ScoreResult,preserve:Dimension[]=[]) {
+  properties=properties.filter(p=>p.availability==='Available' && p.transaction_type!=='Rent');
   const input:ScoreInput={intent:needs.purchase_intent?.value===true};
   const quote=(key:string)=>needs[key]?.evidence || '';
   const min=needs.budget_min_vnd,max=needs.budget_max_vnd;

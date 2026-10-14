@@ -1,44 +1,207 @@
 'use client';
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
+import { ArrowUp, AudioLines, Mic, MicOff, Plus, UserRound, X } from 'lucide-react';
 import { TeravaMark } from './brand';
-import { availabilityLabels, priceLabel } from '@/lib/catalog';
-type Source={id:string;code:string;name:string;updated_at:string;price:number|null;availability:keyof typeof availabilityLabels};
+import { availabilityLabels } from '@/lib/catalog';
+
+type Source={id:string;code:string;name:string;updated_at:string;price:number|null;availability:keyof typeof availabilityLabels;transaction_type:'Sale'|'Rent';price_period:'Total'|'Month'};
 type Message={role:'user'|'assistant';content:string;sources?:Source[]};
+type VoiceState='idle'|'listening'|'thinking'|'speaking';
+type Recognition={lang:string;interimResults:boolean;continuous:boolean;start():void;stop():void;abort():void;
+  onresult:((event:{resultIndex:number;results:ArrayLike<{isFinal:boolean;0:{transcript:string}}>})=>void)|null;onend:(()=>void)|null;onerror:((event:{error:string})=>void)|null};
+type RecognitionCtor=new()=>Recognition;
+
+const suggestions=['Căn hộ dưới 3,5 tỷ ở Thủ Đức','Cho thuê căn hộ 2 phòng ngủ Quận 7','Tư vấn đất nền TP.HCM'];
+const voiceLabels:Record<VoiceState,string>={idle:'Chạm để nói',listening:'Đang nghe…',thinking:'Đang suy nghĩ…',speaking:'Đang trả lời…'};
+const normalize=(value:string)=>value.toLocaleLowerCase('vi').replace(/[^\p{L}\p{N} ]/gu,'').replace(/\s+/g,' ').trim();
+
+function recognitionCtor():RecognitionCtor|null{
+  if(typeof window==='undefined')return null;
+  const w=window as unknown as {SpeechRecognition?:RecognitionCtor;webkitSpeechRecognition?:RecognitionCtor};
+  return w.SpeechRecognition || w.webkitSpeechRecognition || null;
+}
+const subscribeNever=()=>()=>{};
+function vietnameseVoice(){
+  if(typeof window==='undefined' || !window.speechSynthesis)return null;
+  return window.speechSynthesis.getVoices().find(v=>v.lang.toLowerCase().startsWith('vi')) || null;
+}
+
 export function AiChatWidget({signedIn=false,propertyId}:{signedIn?:boolean;propertyId?:string}){
-  const [open,setOpen]=useState(false),[store,setStore]=useState(false),[session,setSession]=useState<string>(),[messages,setMessages]=useState<Message[]>([]),[text,setText]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[preferred,setPreferred]=useState(''),[handoffKey,setHandoffKey]=useState<string>(),[notice,setNotice]=useState('');
-  const pending=useRef(false),[composing,setComposing]=useState(false);
-  async function send(){
-    if(!text.trim() || pending.current)return;pending.current=true;setBusy(true);setComposing(true);setError('');
+  const [open,setOpen]=useState(false),[store,setStore]=useState(false),[session,setSession]=useState<string>();
+  const [messages,setMessages]=useState<Message[]>([]),[text,setText]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [dictating,setDictating]=useState(false),[voice,setVoice]=useState<VoiceState|null>(null),[heard,setHeard]=useState('');
+  const [handoffOpen,setHandoffOpen]=useState(false),[preferred,setPreferred]=useState(''),[handoffKey,setHandoffKey]=useState<string>(),[notice,setNotice]=useState('');
+  // Speech support is a browser capability: false during server rendering, real value after hydration.
+  const speechSupported=useSyncExternalStore(subscribeNever,()=>!!recognitionCtor(),()=>false);
+  const pending=useRef(false),recognition=useRef<Recognition|null>(null),voiceOn=useRef(false),log=useRef<HTMLDivElement>(null),input=useRef<HTMLTextAreaElement>(null);
+  const history=useRef<Message[]>([]),sessionRef=useRef<string|undefined>(undefined);
+  const panel=useRef<HTMLElement>(null),launcher=useRef<HTMLButtonElement>(null),finishSpeech=useRef<(()=>void)|null>(null),voiceEpoch=useRef(0);
+  const voiceActive=voice!==null;
+
+  useEffect(()=>{history.current=messages;sessionRef.current=session;},[messages,session]);
+  useEffect(()=>{if(open){if(voiceActive)panel.current?.querySelector<HTMLButtonElement>('.ai-voice-end')?.focus();else input.current?.focus();}},[open,voiceActive]);
+  useEffect(()=>{log.current?.scrollTo({top:log.current.scrollHeight,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant':'smooth'});},[messages,busy,heard]);
+  useEffect(()=>{const el=input.current;if(el){el.style.height='auto';el.style.height=`${Math.min(el.scrollHeight,160)}px`;}},[text]);
+  useEffect(()=>()=>{voiceOn.current=false;voiceEpoch.current++;if(recognition.current){recognition.current.onend=null;recognition.current.onresult=null;recognition.current.abort();}window.speechSynthesis?.cancel();finishSpeech.current?.();},[]);
+
+  const ask=useCallback(async(message:string)=>{
+    const content=message.trim();if(!content || pending.current)return null;
+    if(content.length>2000){setError('Tin nhắn tối đa 2.000 ký tự.');return null;}
+    pending.current=true;setBusy(true);setError('');
+    setMessages(list=>[...list,{role:'user',content}]);
     try{
-      const response=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:session,message:text,history:messages.slice(-10).map(({role,content})=>({role,content})),store_transcript:store,property_id:propertyId || null})});
+      const response=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:sessionRef.current,message:content,history:history.current.slice(-10).map(({role,content})=>({role,content})),store_transcript:store,property_id:propertyId || null})});
       const result=await response.json();if(!response.ok)throw new Error(result.message);
-      setSession(result.session.id);setMessages([...messages,{role:'user',content:text},{role:'assistant',content:result.reply,sources:result.sources}]);setText('');
-    }catch(e){setError(e instanceof Error ? e.message:'Chưa thể gửi tin nhắn.');}finally{pending.current=false;setBusy(false);setComposing(false);}
+      sessionRef.current=result.session.id;setSession(result.session.id);
+      setMessages(list=>[...list,{role:'assistant',content:result.reply,sources:result.sources}]);
+      return result.reply as string;
+    }catch(e){
+      setMessages(list=>list.slice(0,-1));setText(content);
+      setError(e instanceof Error ? e.message:'Chưa thể gửi tin nhắn.');return null;
+    }finally{pending.current=false;setBusy(false);}
+  },[propertyId,store]);
+
+  async function send(){if(pending.current || dictating)return;const message=text;setText('');if(await ask(message))input.current?.focus();}
+
+  function abortRecognition(){const r=recognition.current;recognition.current=null;if(r){r.onend=null;r.onresult=null;r.onerror=null;r.abort();}}
+  function cancelSpeech(){window.speechSynthesis?.cancel();finishSpeech.current?.();finishSpeech.current=null;}
+
+  function listen(onFinal:(said:string)=>void,onInterim?:(said:string)=>void){
+    const Ctor=recognitionCtor();if(!Ctor)return false;
+    const r=new Ctor();r.lang='vi-VN';r.interimResults=true;r.continuous=false;
+    let finalText='';
+    r.onresult=event=>{let interim='';for(let i=event.resultIndex;i<event.results.length;i++){const part=event.results[i];if(part.isFinal)finalText+=part[0].transcript;else interim+=part[0].transcript;}onInterim?.(finalText+interim);};
+    r.onerror=event=>{if(event.error==='not-allowed'||event.error==='service-not-allowed')setError('Trình duyệt chưa cho phép dùng micro. Hãy cấp quyền micro hoặc gõ câu hỏi.');};
+    r.onend=()=>{if(recognition.current===r)recognition.current=null;onFinal(finalText.trim());};
+    abortRecognition();recognition.current=r;
+    try{r.start();return true;}catch{abortRecognition();setError('Chưa thể bật micro. Hãy thử lại hoặc gõ câu hỏi.');return false;}
   }
+
+  function toggleDictation(){
+    if(dictating){recognition.current?.stop();return;}
+    const base=text?`${text.trimEnd()} `:'';
+    if(listen(said=>{setDictating(false);if(said)setText(base+said);input.current?.focus();},said=>setText(base+said)))setDictating(true);
+  }
+
+  function speak(reply:string){
+    return new Promise<void>(resolve=>{
+      const synth=window.speechSynthesis;if(!synth){resolve();return;}
+      const utterance=new SpeechSynthesisUtterance(reply);
+      utterance.lang='vi-VN';const v=vietnameseVoice();if(v)utterance.voice=v;
+      finishSpeech.current=resolve;
+      utterance.onend=()=>{finishSpeech.current=null;resolve();};utterance.onerror=()=>{finishSpeech.current=null;resolve();};
+      synth.speak(utterance);
+    });
+  }
+
+  // Voice mode: listen → ask the assistant → speak the reply → listen again.
+  function voiceTurn(){
+    if(!voiceOn.current)return;
+    setVoice('listening');setHeard('');
+    const epoch=voiceEpoch.current;
+    if(!listen(said=>{if(voiceOn.current&&epoch===voiceEpoch.current)void respond(said);},setHeard))setVoice('idle');
+  }
+  async function respond(said:string){
+    if(!voiceOn.current)return;
+    if(!said){setVoice('idle');return;}
+    const epoch=voiceEpoch.current;
+    setVoice('thinking');setHeard('');
+    const reply=await ask(said);
+    if(!voiceOn.current || epoch!==voiceEpoch.current)return;
+    if(!reply){setVoice('idle');return;}
+    setVoice('speaking');
+    // Keep listening while the reply is spoken so the customer can cut in (barge-in).
+    // Words that only repeat the reply are the speaker's echo, not the customer.
+    let interrupted=false,done=false;
+    const spoken=normalize(reply);
+    listen(barge=>{if(done || !voiceOn.current || epoch!==voiceEpoch.current || !interrupted)return;done=true;if(barge)void respond(barge);else voiceTurn();},
+      partial=>{const p=normalize(partial);if(!interrupted&&p.split(' ').length>=2&&!spoken.includes(p)){interrupted=true;cancelSpeech();}if(interrupted)setHeard(partial);});
+    await speak(reply);
+    if(voiceOn.current&&epoch===voiceEpoch.current&&!interrupted&&!done){done=true;abortRecognition();voiceTurn();}
+  }
+  function startVoice(){
+    if(!speechSupported || !window.speechSynthesis){setError('Trình duyệt này chưa hỗ trợ trò chuyện giọng nói. Hãy dùng Chrome hoặc Edge, hoặc gõ câu hỏi.');return;}
+    voiceOn.current=true;window.speechSynthesis?.getVoices();voiceTurn();
+  }
+  function stopVoice(){voiceOn.current=false;voiceEpoch.current++;abortRecognition();cancelSpeech();setDictating(false);setVoice(null);setHeard('');}
+  function close(){stopVoice();setOpen(false);requestAnimationFrame(()=>launcher.current?.focus());}
+
   async function handoff(){
     if(!session || pending.current)return;pending.current=true;setBusy(true);setError('');const key=handoffKey || crypto.randomUUID();setHandoffKey(key);
     try{
       const start=preferred ? new Date(preferred):null;
       const response=await fetch('/api/ai/handoff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:session,summary:'Khách yêu cầu chuyên viên tư vấn qua hội thoại TERAVA',request_key:key,preferred_start:start?.toISOString() || null,preferred_end:start ? new Date(start.getTime()+3600000).toISOString():null})});
-      const result=await response.json();if(!response.ok)throw new Error(result.message);setNotice(result.message);
+      const result=await response.json();if(!response.ok)throw new Error(result.message);setNotice(result.message);setHandoffOpen(false);
     }catch(e){setError(e instanceof Error ? e.message:'Chưa thể bàn giao.');}finally{pending.current=false;setBusy(false);}
   }
+  function reset(){stopVoice();sessionRef.current=undefined;setSession(undefined);setMessages([]);setStore(false);setNotice('');setHandoffKey(undefined);setError('');setText('');setHandoffOpen(false);}
+
   return <aside className="ai-chat">
-    <button className="button primary ai-chat-toggle" aria-expanded={open} aria-controls="ai-chat-panel" onClick={()=>setOpen(!open)}>{open ? 'Đóng hội thoại':'Trò chuyện với trợ lý AI'}</button>
-    {open && <section id="ai-chat-panel" className="ai-chat-panel profile-panel" aria-label="Trợ lý AI TERAVA" aria-busy={busy}>
-      <header className="ai-chat-heading"><TeravaMark size={36}/><div><span>TERAVA GROUP</span><h2>Trợ lý AI</h2></div></header>
-      <p className="ai-disclosure">Tôi là trợ lý AI của TERAVA. Thông tin tham khảo dựa trên dữ liệu công bố; chuyên viên sẽ xác nhận đề nghị của bạn.</p>
-      <label><input type="checkbox" checked={store} disabled={!!session || busy} onChange={e=>setStore(e.target.checked)}/> Lưu lịch sử hội thoại</label>
-      <div className="ai-messages" role="log" aria-live="polite" aria-relevant="additions">
-        {messages.map((m,i)=><article className={`ai-message ai-${m.role}`} key={i}><strong>{m.role==='user' ? 'Bạn':'TERAVA · trợ lý AI'}</strong><p>{m.content}</p>{m.sources?.map(s=><Link className="ai-source" href={`/properties/${s.id}`} key={s.id}><strong>{s.code} · {s.name}</strong><span>{priceLabel(s.price)} · {availabilityLabels[s.availability]}</span><small>Cập nhật lúc {new Date(s.updated_at).toLocaleString('vi-VN')}</small></Link>)}</article>)}
+    {open && <section ref={panel} id="ai-chat-panel" className="ai-panel" role="dialog" aria-label="Trợ lý AI TERAVA" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close();}if(e.key==='Tab'){const nodes=panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],textarea:not(:disabled),input:not(:disabled)');if(nodes?.length){const first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}}}}>
+      <header className="ai-panel-head">
+        <span className="ai-avatar"><TeravaMark size={26}/></span>
+        <div><h2>Trợ lý TERAVA</h2><small>Trợ lý AI · tư vấn bất động sản</small></div>
+        <button type="button" className="ai-icon" disabled={busy} onClick={()=>{reset();requestAnimationFrame(()=>input.current?.focus());}} title="Cuộc trò chuyện mới" aria-label="Cuộc trò chuyện mới"><Plus size={18}/></button>
+        <button type="button" className="ai-icon" onClick={close} title="Đóng" aria-label="Đóng"><X size={18}/></button>
+      </header>
+
+      <div className="ai-log" ref={log} role="log" aria-live="polite" aria-relevant="additions">
+        {!messages.length && <div className="ai-welcome">
+          <span className="ai-welcome-mark"><TeravaMark size={44}/></span>
+          <h3>Xin chào! Tôi có thể giúp gì cho bạn?</h3>
+          <p>Tôi là trợ lý AI của TERAVA, trả lời dựa trên dữ liệu bất động sản đã công bố. Chuyên viên sẽ xác nhận mọi đề nghị.</p>
+          <div className="ai-suggestions">{suggestions.map(s=><button type="button" key={s} disabled={busy} onClick={()=>void ask(s)}>{s}</button>)}</div>
+        </div>}
+        {messages.map((m,i)=>m.role==='user'
+          ? <div className="ai-row ai-row-user" key={i}><p className="ai-bubble">{m.content}</p></div>
+          : <div className="ai-row ai-row-assistant" key={i}><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><div className="ai-answer"><p>{m.content}</p>
+              {!!m.sources?.length && <div className="ai-sources">{m.sources.map(s=><Link className="ai-source" href={`/properties/${s.id}`} key={s.id}><strong>{s.name}</strong><span>{s.code} · {s.price===null ? 'Giá chưa công bố':`${new Intl.NumberFormat('vi-VN').format(s.price)} VND${s.price_period==='Month' ? '/tháng':''}`}</span><em className={`ai-status ai-status-${s.availability}`}>{s.transaction_type==='Rent'&&s.availability==='Available' ? 'Còn cho thuê':availabilityLabels[s.availability]}</em><small>Cập nhật {new Date(s.updated_at).toLocaleString('vi-VN')}</small></Link>)}</div>}
+            </div></div>)}
+        {busy && voice!=='thinking' && <div className="ai-row ai-row-assistant"><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><span className="ai-typing" role="status" aria-label="Trợ lý đang soạn câu trả lời…"><i/><i/><i/></span></div>}
+        {notice && <p className="ai-notice" role="status">{notice}</p>}
       </div>
-      {composing && <p className="ai-pending" role="status">Trợ lý đang soạn câu trả lời…</p>}
-      <form onSubmit={e=>{e.preventDefault();void send();}}><label htmlFor="ai-message">Nhu cầu của bạn</label><textarea id="ai-message" value={text} onChange={e=>setText(e.target.value)} maxLength={2000} rows={2} disabled={busy}/><button className="button primary" disabled={busy || !text.trim()}>Gửi</button></form>
-      {error && <div role="alert"><p>{error}</p><button className="button secondary" disabled={busy || !text.trim()} onClick={()=>void send()}>Thử lại tin nhắn</button><Link href="/customer/inquiries/new">Gửi biểu mẫu tư vấn</Link></div>}
-      {signedIn ? <div className="ai-handoff"><label htmlFor="ai-time">Giờ mong muốn (không bắt buộc, giờ địa phương)</label><input id="ai-time" type="datetime-local" value={preferred} disabled={!!notice} onChange={e=>{setPreferred(e.target.value);setHandoffKey(undefined);}}/><button className="button secondary" onClick={()=>void handoff()} disabled={!session || busy || !!notice}>Yêu cầu chuyên viên tư vấn</button><small>Thời gian chỉ là đề nghị, chưa xác nhận.</small></div>:<p><Link href="/sign-in">Đăng nhập</Link> hoặc <Link href="/customer/inquiries/new">gửi biểu mẫu tư vấn</Link> để chia sẻ thông tin liên hệ.</p>}
-      {notice && <p role="status">{notice}</p>}
-      <button className="button secondary" disabled={busy} onClick={()=>{setSession(undefined);setMessages([]);setStore(false);setNotice('');setHandoffKey(undefined);setError('');}}>Bắt đầu phiên mới</button>
+
+      {error && <div className="ai-error" role="alert"><p>{error}</p><Link href="/customer/inquiries/new">Gửi biểu mẫu tư vấn</Link></div>}
+
+      {voice ? <div className="ai-voice" data-state={voice}>
+        <button type="button" className="ai-orb" onClick={()=>{if(voice==='idle')voiceTurn();}} aria-label={voiceLabels[voice]}><span/><span/><span/></button>
+        <strong role="status" aria-live="polite">{voiceLabels[voice]}</strong>
+        <p className="ai-heard">{heard || (voice==='speaking' ? 'Bạn có thể nói chen để ngắt lời.':' ')}</p>
+        <button type="button" className="ai-voice-end" onClick={stopVoice}><X size={16}/> Kết thúc trò chuyện bằng giọng nói</button>
+      </div>
+      : <form className="ai-composer" onSubmit={e=>{e.preventDefault();void send();}}>
+        <label htmlFor="ai-message" className="sr-only">Nhập câu hỏi cho trợ lý AI</label>
+        <textarea id="ai-message" ref={input} value={text} rows={1} maxLength={2000} disabled={busy} placeholder={dictating ? 'Đang nghe… hãy nói câu hỏi của bạn':'Hỏi về căn hộ, giá, khu vực…'}
+          onChange={e=>setText(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}}/>
+        <div className="ai-composer-bar">
+          <label className="ai-switch" title={session ? 'Lựa chọn áp dụng cho cả cuộc trò chuyện':'Lưu lại nội dung để chuyên viên xem'}>
+            <input type="checkbox" role="switch" checked={store} disabled={!!session || busy} onChange={e=>setStore(e.target.checked)}/><span/>Lưu lịch sử
+          </label>
+          <div className="ai-composer-actions">
+            {speechSupported && <button type="button" className={`ai-icon${dictating ? ' ai-recording':''}`} onClick={toggleDictation} disabled={busy} title={dictating ? 'Dừng ghi':'Nói thay vì gõ'} aria-label={dictating ? 'Dừng ghi':'Nói thay vì gõ'}>{dictating ? <MicOff size={18}/>:<Mic size={18}/>}</button>}
+            <button type="button" className="ai-icon" onClick={startVoice} disabled={busy || dictating} title="Trò chuyện bằng giọng nói" aria-label="Trò chuyện bằng giọng nói"><AudioLines size={18}/></button>
+            <button type="submit" className="ai-send" disabled={busy || dictating || !text.trim()} aria-label="Gửi"><ArrowUp size={18}/></button>
+          </div>
+        </div>
+      </form>}
+
+      <footer className="ai-panel-foot">
+        {handoffOpen && signedIn ? <div className="ai-handoff">
+          <label htmlFor="ai-time">Giờ mong muốn (không bắt buộc)</label>
+          <input id="ai-time" type="datetime-local" value={preferred} onChange={e=>{setPreferred(e.target.value);setHandoffKey(undefined);}}/>
+          <div><button type="button" className="ai-link" onClick={()=>setHandoffOpen(false)}>Huỷ</button><button type="button" className="ai-handoff-send" onClick={()=>void handoff()} disabled={!session || busy}>Gửi yêu cầu</button></div>
+          <small>Thời gian chỉ là đề nghị, chuyên viên sẽ liên hệ xác nhận.</small>
+        </div>
+        : <>
+          <small>Trợ lý AI có thể chưa chính xác. Hãy kiểm tra lại với chuyên viên.</small>
+          {signedIn ? <button type="button" className="ai-link" disabled={!session || !!notice} onClick={()=>setHandoffOpen(true)}><UserRound size={14}/> Gặp chuyên viên</button>
+            : <Link className="ai-link" href="/sign-in"><UserRound size={14}/> Đăng nhập để gặp chuyên viên</Link>}
+        </>}
+      </footer>
     </section>}
+    {!open && <button ref={launcher} type="button" className="ai-launcher" aria-label="Trò chuyện với trợ lý AI" aria-controls="ai-chat-panel" aria-expanded={open} onClick={()=>{setOpen(true);requestAnimationFrame(()=>input.current?.focus());}}>
+      <span className="ai-avatar"><TeravaMark size={24}/></span><span>Hỏi trợ lý AI</span>
+    </button>}
   </aside>;
 }
