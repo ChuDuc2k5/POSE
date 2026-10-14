@@ -3,8 +3,6 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --ignore-scripts
 COPY . .
-ARG BACKEND_URL=http://backend:3001
-ENV BACKEND_URL=$BACKEND_URL
 RUN npm run build
 
 FROM node:24-bookworm-slim AS runtime

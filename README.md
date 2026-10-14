@@ -10,9 +10,10 @@ Backend đọc `.env`; khi thiếu cấu hình Supabase trong máy phát triển
 `frontend/.env.local` để tương thích cấu hình cũ.
 
 Sao chép `frontend/.env.example` thành `frontend/.env.local`. `BACKEND_URL` mặc định
-là `http://127.0.0.1:3001`; cấu hình giá trị này trước khi build frontend vì Next.js
-lưu đích rewrite trong bản build. Frontend chỉ phục vụ giao diện, API và xác minh
-cookie được chuyển tiếp tới NestJS. Các trang server cũng gọi NestJS để đọc phiên.
+là `http://127.0.0.1:3001`; cấu hình giá trị này lúc khởi động frontend. Proxy đọc
+địa chỉ backend cho mỗi yêu cầu, không cần build lại khi đổi địa chỉ. Frontend chỉ
+phục vụ giao diện, API và xác minh cookie được chuyển tiếp tới NestJS. Các trang
+server cũng gọi NestJS để đọc phiên.
 Socket.IO dùng cùng origin qua rewrite; chỉ đặt `NEXT_PUBLIC_API_URL` nếu cần
 endpoint realtime riêng.
 
@@ -49,3 +50,6 @@ Kiểm thử HTTP: trong `frontend/`, chạy lần lượt `node scripts/test-au
 `node scripts/test-catalog.mjs`, `node scripts/test-discovery.mjs`. Mỗi suite build
 NestJS và Next.js, chạy provider giả cùng hai server rồi dừng trong `finally`.
 Không chạy đồng thời vì các suite sử dụng chung thư mục build.
+
+Chạy thêm `node scripts/test-proxy-runtime.mjs` để kiểm tra một bản build có thể
+chạy với địa chỉ backend khác lúc build, dùng cả `next start` và server standalone.

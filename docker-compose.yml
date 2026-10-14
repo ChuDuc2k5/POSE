@@ -16,10 +16,7 @@ services:
     depends_on: [redis]
     networks: [pose]
   frontend:
-    build:
-      context: ./frontend
-      args:
-        BACKEND_URL: http://backend:3001
+    build: ./frontend
     environment:
       BACKEND_URL: http://backend:3001
     ports: ["3000:3000"]
