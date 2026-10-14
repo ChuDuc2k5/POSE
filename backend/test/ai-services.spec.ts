@@ -64,6 +64,9 @@ describe('M06 services', () => {
     expect(body.messages[1].content).toMatch(/^BEGIN_UNTRUSTED_DATA/);
     expect(body.messages[1].content).not.toContain(evidence[0].id);
     expect(body.messages[1].content).toContain('\\u003c');
+    const data = JSON.parse(body.messages[1].content.replace(/^BEGIN_UNTRUSTED_DATA\n|\nEND_UNTRUSTED_DATA$/g,''));
+    expect(data.properties[0].location).toBe('Thủ Đức');
+    expect(data.listing_terms).toEqual([{code:'RV-A0805',transaction_type:'Sale',price_period:'Total'}]);
     expect(JSON.stringify(TURN_SCHEMA).length).toBeLessThan(1500); expect(SYSTEM_PROMPT.length).toBeLessThan(800);
     vi.stubEnv('AI_API_URL', 'https://provider.example/v1'); expect(() => providerConfig()).toThrow('AI_UNAVAILABLE');
   });
@@ -77,5 +80,31 @@ describe('M06 services', () => {
     await expect(new AiLlmService().complete({})).rejects.toThrow('INVALID_MODEL_JSON'); expect(fetcher).toHaveBeenCalledTimes(2);
     fetcher.mockReset().mockRejectedValue(new Error('timeout'));
     await expect(new AiLlmService().complete({})).rejects.toThrow('timeout'); expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('inferSearch', () => {
+  it('keeps monthly rental prices separate from total sale prices', async () => {
+    const { outputReason } = await import('../src/modules/ai/guard.js');
+    const rental = {...evidence[0],code:'Q7-R01',name:'Căn hộ 2 phòng ngủ',price:25000000,transaction_type:'Rent' as const,price_period:'Month' as const};
+    const sale = {...evidence[0],transaction_type:'Sale' as const,price_period:'Total' as const};
+    expect(outputReason('Q7-R01 giá thuê 25.000.000 VND/tháng.',[rental])).toBeNull();
+    expect(outputReason('Q7-R01 giá bán 25.000.000 VND.',[rental])).toBe('UNSUPPORTED_PRICE_PERIOD');
+    expect(outputReason('Q7-R01 giá 25.000.000 VND.',[rental])).toBe('UNSUPPORTED_PRICE_PERIOD');
+    expect(outputReason('Q7-R01 giá thuê 25.000.000 VND.',[rental])).toBe('UNSUPPORTED_PRICE_PERIOD');
+    expect(outputReason('Giá bán 25.000.000 VND/tháng.',[rental])).toBe('UNSUPPORTED_PRICE_PERIOD');
+    expect(outputReason('Q7-R01 còn cho thuê.',[{...rental,availability:'Reserved'}])).toBe('UNSUPPORTED_AVAILABILITY');
+    expect(outputReason('RV-A0805 giá thuê 3,5 tỷ/tháng.',[sale])).toBe('UNSUPPORTED_PRICE_PERIOD');
+    expect(outputReason('RV-A0805 giá bán 3,5 tỷ.',[sale])).toBeNull();
+    expect(toolAllowed({name:'search_properties',arguments:{transaction_type:'Rent'}})).toBe(true);
+    expect(toolAllowed({name:'search_properties',arguments:{transaction_type:'Lease'}})).toBe(false);
+    const score = new AiScoringService().scoreNeeds({purchase_intent:field(true,'mua'),budget_max_vnd:field(3500000000,'3,5 tỷ')},[rental],true);
+    expect(score.unknown).toContain('budget');
+  });
+  it('turns a property question into catalogue filters', async () => {
+    const { inferSearch } = await import('../src/modules/ai/infer-search.js');
+    expect(inferSearch('Căn hộ dưới 3,5 tỷ ở Thủ Đức')).toEqual({ location: 'Thủ Đức', type: 'Apartment', maxPrice: 3500000000 });
+    expect(inferSearch('cho thuê nhà quận 7 từ 10 triệu')).toEqual({ location: 'Quận 7', type: 'House', minPrice: 10000000, transaction_type: 'Rent' });
+    expect(inferSearch('xin chào')).toBeNull();
   });
 });
