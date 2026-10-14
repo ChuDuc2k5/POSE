@@ -134,9 +134,10 @@ h1, h2, h3, h4 { color: var(--nx-ink); }
 /* Gold skyline decoration for landing and sign-in panels. */
 .hero, .cta-section { position: relative; isolation: isolate; }
 .hero::after, .cta-section::after, .access-story::after {
-  content: ""; position: absolute; inset: auto 0 0 0; height: 190px; z-index: -1; pointer-events: none;
-  background: url("/skyline-gold.svg") center bottom / cover no-repeat; opacity: .38;
-  -webkit-mask-image: linear-gradient(to top, #000 55%, transparent); mask-image: linear-gradient(to top, #000 55%, transparent);
+  content: ""; position: absolute; inset: auto 0 0 0; height: 440px; z-index: -1; pointer-events: none;
+  background: url("/skyline-gold.svg") center bottom / cover no-repeat; opacity: .62;
+  -webkit-mask-image: linear-gradient(to top, #000 60%, transparent), linear-gradient(to right, #00000038 0%, #00000059 38%, #000 62%);
+  -webkit-mask-composite: source-in; mask-image: linear-gradient(to top, #000 60%, transparent), linear-gradient(to right, #00000038 0%, #00000059 38%, #000 62%); mask-composite: intersect;
 }
-.cta-section::after { height: 120px; opacity: .35; }
-.access-story::after { height: 150px; opacity: .45; }
+.cta-section::after { height: 100%; opacity: .4; }
+.access-story::after { height: 300px; opacity: .5; -webkit-mask-image: linear-gradient(to top, #000 50%, transparent); mask-image: linear-gradient(to top, #000 50%, transparent); }
