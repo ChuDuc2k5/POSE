@@ -31,6 +31,9 @@ do $$ begin
 end $$;
 reset role;
 do $$ begin
+ if pose_private.ai_strip_phones('Ngân sách 3.000.000.000 đ và 3 200 000 000, 850000000 VND')<>'Ngân sách 3.000.000.000 đ và 3 200 000 000, 850000000 VND' then raise exception 'BUDGET_REDACTED';end if;
+ if pose_private.ai_strip_phones('0900000000 đ')<>'0900000000 đ' then raise exception 'CURRENCY_NUMBER_REDACTED';end if;
+ if pose_private.ai_strip_phones('090 123 4567, +84 901 234 567, +12025550123') not like '%[đã ẩn số liên hệ]%' or pose_private.ai_strip_phones('090 123 4567, +84 901 234 567, +12025550123') ~ '[0-9]' then raise exception 'PHONE_NOT_REDACTED';end if;
  if exists(select 1 from public.ai_chat_messages where content like '%0901234567%') then raise exception 'GUEST_PHONE_STORED'; end if;
  if exists(select 1 from public.ai_chat_messages where session_id='f6300000-0000-4000-8000-000000000003') then raise exception 'NO_CONSENT_TRANSCRIPT'; end if;
  if exists(select 1 from public.leads l join public.customers c on c.id=l.customer_id where c.auth_user_id='f6100000-0000-4000-8000-000000000001') then raise exception 'AUTOMATIC_LEAD'; end if;
@@ -94,10 +97,15 @@ select set_config('request.jwt.claims','{"role":"service_role"}',true);
  perform public.pose_system_apply_lead_score(lead,result||'{"source_kind":"Call","source_id":"f6600000-0000-4000-8000-000000000001"}','call-score-01');
  if (select count(*) from public.ai_analyses where idempotency_key='call-score-01')<>1 or not exists(select 1 from public.ai_analyses where lead_id=lead and lead_score=85 and temperature='HOT' and raw_analysis->>'rule_version'='BR-04.v1') then raise exception 'CALL_ANALYSIS_REPLAY';end if;
  select message_count into before_count from public.ai_chat_sessions where id='f6300000-0000-4000-8000-000000000002';
- begin perform public.pose_system_ai_commit_chat('f6300000-0000-4000-8000-000000000002','f6100000-0000-4000-8000-000000000001',null,true,'Không ghi khi xung đột','Không ghi khi xung đột','[]','[]','{}',result||'{"needs_version":-1}');raise exception 'STALE_CHAT_SCORE';exception when serialization_failure then null;end;
+ begin perform public.pose_system_ai_commit_chat('f6300000-0000-4000-8000-000000000002','f6100000-0000-4000-8000-000000000001',null,true,'Tôi sẵn sàng','Không ghi khi xung đột','[]','[]','{"contact_ready":{"value":true,"confidence":0.9,"evidence":"sẵn sàng"}}',result||'{"needs_version":-1}');raise exception 'STALE_CHAT_SCORE';exception when serialization_failure then null;end;
  if (select message_count from public.ai_chat_sessions where id='f6300000-0000-4000-8000-000000000002')<>before_count or exists(select 1 from public.ai_chat_messages where content='Không ghi khi xung đột') then raise exception 'PARTIAL_CHAT_WRITE';end if;
- perform public.pose_system_ai_commit_chat('f6300000-0000-4000-8000-000000000002','f6100000-0000-4000-8000-000000000001',null,true,'Tôi cần tư vấn','Tôi là trợ lý AI của TERAVA.','[]','[]','{}',result||jsonb_build_object('needs_version',(select version from public.leads where id=lead)));
+ perform public.pose_system_ai_commit_chat('f6300000-0000-4000-8000-000000000002','f6100000-0000-4000-8000-000000000001',null,true,'Tôi sẵn sàng','Tôi là trợ lý AI của TERAVA.','[{"id":"f6800000-0000-4000-8000-000000000001"}]','[]','{"contact_ready":{"value":true,"confidence":0.9,"evidence":"sẵn sàng"}}',result||jsonb_build_object('needs_version',(select version from public.leads where id=lead)));
  if (select message_count from public.ai_chat_sessions where id='f6300000-0000-4000-8000-000000000002')<>before_count+2 then raise exception 'CHAT_SCORE_ATOMIC_COMMIT';end if;
+ perform public.pose_system_ai_commit_chat('f6300000-0000-4000-8000-000000000002','f6100000-0000-4000-8000-000000000001',null,true,'xin chào','Xin chào!','[]','[{"tool":"input","args_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","decision":"flagged","reason":"PROMPT_INJECTION","rule_version":"guard.v2"}]','{}','{"needs_version":-1,"score":0,"classification":"Unrated"}');
+ if not exists(select 1 from public.leads where id=lead and lead_score=85 and temperature='HOT' and score_evidence=result||'{"source_kind":"Call","source_id":"f6600000-0000-4000-8000-000000000001"}') then
+  if not exists(select 1 from public.leads where id=lead and lead_score=85 and temperature='HOT' and score_evidence=result) then raise exception 'GREETING_CHANGED_HOT_SCORE';end if;
+ end if;
+ if not exists(select 1 from public.ai_chat_sessions where id='f6300000-0000-4000-8000-000000000002' and 'f6800000-0000-4000-8000-000000000001'=any(property_ids)) then raise exception 'INTEREST_SET_LOST';end if;
  perform public.pose_system_apply_lead_score('f6700000-0000-4000-8000-000000000002','{"score":20,"classification":"Unrated","rule_version":"BR-04.v1","intent":true,"unknown":["budget","area_type","next_step"],"breakdown":{"budget":{"points":0,"value":null,"evidence":null},"area_type":{"points":0,"value":null,"evidence":null},"timeline":{"points":20,"value":"lt3m","evidence":"tháng tới"},"contact":{"points":0,"value":"none","evidence":"không có số xác minh"},"next_step":{"points":0,"value":null,"evidence":null}}}','unrated-score-01');
  if not exists(select 1 from public.leads where id='f6700000-0000-4000-8000-000000000002' and temperature is null and lead_score=20 and status='FOLLOW_UP') then raise exception 'UNRATED_NULL_TEMPERATURE';end if;
 end $$;
@@ -160,4 +168,4 @@ do $$ begin
  begin perform * from public.ai_action_log;raise exception 'GUEST_LOG';exception when insufficient_privilege then null;end;
 end $$;
 rollback;
-select 'PASS: M06 SQL legacy identity, M03 lead reuse, verified-phone handoff, collision denial, directory assignments, SCHEDULED proposals, field/call provenance, typed/human preservation, idempotency, score re-validation, null Unrated, overrides and RLS. Fixtures rolled back.' as result;
+select 'PASS: M06 SQL legacy identity, phone/budget privacy, flagged actions, persistent interests, Hot greeting stability, handoff idempotency, field/call provenance, human preservation, score validation, overrides and RLS. Fixtures rolled back.' as result;
