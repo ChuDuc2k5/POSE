@@ -20,8 +20,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "NexCall | Quản lý bất động sản & khách hàng",
-  description: "NexCall kết nối thông tin bất động sản, khách hàng và đội ngũ tư vấn trong một không gian làm việc thống nhất.",
+  title: "TERAVA Group | Nền tảng bất động sản, dữ liệu & AI",
+  description: "TERAVA kết nối thông tin bất động sản, khách hàng và đội ngũ tư vấn trong một không gian làm việc thống nhất.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

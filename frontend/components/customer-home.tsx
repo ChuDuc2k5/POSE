@@ -30,6 +30,6 @@ export function CustomerHome({ name, role }: { name: string; role: Role }) {
     <section id="customer-properties" className="customer-properties"><div className="customer-section-heading"><div><span className="eyebrow">KHÁM PHÁ</span><h2>Bất động sản đang mở bán</h2></div><Link href="/properties?availability=Available" className="text-link">Xem tất cả <ArrowUpRight size={17}/></Link></div>
       {favorites.error && <p className="discovery-field-error" role="alert">{favorites.error}</p>}<div aria-live="polite">{error ? <div className="customer-empty"><p>Chưa thể tải danh sách bất động sản.</p><button className="button secondary" onClick={() => { setError(false); setItems(null); setAttempt(attempt + 1); }}>Thử lại</button></div> : items === null ? <p className="customer-empty">Đang tải bất động sản…</p> : items.length === 0 ? <div className="customer-empty"><Building2 size={32}/><h3>Chưa có sản phẩm đang mở bán</h3><p>Bất động sản mới sẽ xuất hiện tại đây khi được công bố.</p></div> : <div className="customer-product-grid">{items.map(item => <PropertyCard key={item.id} item={item} saved={favorites.has(item.id)} customer={favorites.customer} ready={favorites.ready && !favorites.error}/>)}</div>}</div>
     </section>
-    <footer className="customer-footer">NexCall · Kết nối bất động sản và khách hàng</footer>
+    <footer className="customer-footer">TERAVA · Kết nối bất động sản và khách hàng</footer>
   </main></>;
 }
