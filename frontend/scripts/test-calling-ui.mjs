@@ -82,6 +82,19 @@ try {
   }
   if(page==='detail'){await evaluate("Array.from(document.querySelectorAll('.calls-detail .calls-actions button')).find(b=>b.innerText==='Không liên hệ').click()");await waitFor("document.querySelector('dialog[open]')?.innerText.includes('Ghi nhận không liên hệ')",'opt-out reason dialog');await press('Escape',{code:'Escape',windowsVirtualKeyCode:27});}
  }
+ // Check the catalog's expanded, collapsed and mobile navigation using the real page.
+ for (const width of [1280,840,380]) {
+  await send('Emulation.setDeviceMetricsOverride',{width,height:1100,screenWidth:width,screenHeight:1100,deviceScaleFactor:1,mobile:width===380});
+  await send('Page.navigate',{url:'http://localhost:3501/fixture?role=admin&path=/admin'});
+  await waitFor("!!document.querySelector('.catalog-workspace .catalog-sidebar')",'catalog sidebar '+width);
+  const nav=await evaluate(`(()=>{const links=Array.from(document.querySelectorAll('.catalog-sidebar nav a'));return {overflow:document.documentElement.scrollWidth>innerWidth,display:getComputedStyle(document.querySelector('.catalog-sidebar nav')).display,links:links.map(a=>({icon:!!a.querySelector('svg'),title:!!a.title,width:a.getBoundingClientRect().width,overflow:getComputedStyle(a).overflow}))};})()`);
+  assert.equal(nav.overflow,false,'catalog no horizontal overflow '+width);
+  assert.equal(nav.links.length,2);assert.ok(nav.links.every(a=>a.icon&&a.title),'catalog links have icons and accessible titles');
+  if(width===840)assert.ok(nav.links.every(a=>a.width===49&&a.overflow==='hidden'),'catalog links collapse to icons');
+  if(width===380)assert.equal(nav.display,'none','mobile navigation follows catalog layout');
+  await shot('catalog-sidebar-'+width,false);
+ }
+ console.log('PASS: catalog sidebar icons and responsive layout at 840px, 1280px and 380px.');
  console.log(`PASS: ${checks} M08 rendered UI views at 1280px and 380px; page content, shared shell, modal focus and RLS verified; no horizontal overflow.`);
  console.log('Screenshots:\n'+screenshots.join('\n'));
 
