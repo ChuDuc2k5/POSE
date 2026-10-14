@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { PropertyBrowser } from '@/components/property-browser';
-import { publicPageRole } from '@/lib/auth-server';
+import { publicPageRole } from '@/lib/page-session';
 
 export const metadata: Metadata={title:'Khám phá bất động sản | TERAVA'};
 export default async function PropertiesPage({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}){
