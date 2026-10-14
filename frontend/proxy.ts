@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
-// Temporary Next.js endpoints until the M07/M08 ports are complete.
-const nextServedApi = ['/api/admin/campaigns', '/api/system/campaigns', '/api/admin/calls', '/api/calls', '/api/contacts', '/api/system/calls', '/api/webhooks'];
+// Temporary Next.js endpoints until the M08 ports are complete.
+const nextServedApi = ['/api/admin/calls', '/api/calls', '/api/contacts', '/api/system/calls', '/api/webhooks'];
 
 export function proxy(request: NextRequest) {
   if (nextServedApi.some(prefix => request.nextUrl.pathname === prefix || request.nextUrl.pathname.startsWith(prefix + '/'))) return NextResponse.next();

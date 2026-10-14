@@ -6,7 +6,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { backendFetch } from './backend';
 import type { Role } from './roles';
 
-// Temporary M07/M08 bridge. NestJS remains the sole session verifier.
+// Temporary M08 bridge. NestJS remains the sole session verifier.
 export async function authenticatedSession() {
   const response = await backendFetch('/api/auth/session');
   if (!response.ok) throw new Error('AUTH_UNAVAILABLE');

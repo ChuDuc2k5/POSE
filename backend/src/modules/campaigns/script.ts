@@ -1,4 +1,4 @@
-import { uuidPattern } from '../catalog';
+import { uuidPattern } from '../../common/catalog.ts';
 export const object=(v:unknown):v is Record<string,unknown>=>!!v && typeof v==='object' && !Array.isArray(v);
 const text=(v:unknown)=>typeof v==='string' && v.trim().length>0 && v.length<=4000;
 export type ScriptContent={greeting:string;ai_disclosure:string;purpose:string;consent_prompt:{ai_voice:string;recording:string;transcript:string};needs_questions:string[];product_source:{property_ids:string[]};objections:{trigger:string;response:string}[];opt_out:{prompt:string;confirmation:string};closing:string};

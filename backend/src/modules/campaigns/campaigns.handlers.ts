@@ -1,10 +1,9 @@
-import 'server-only';
-import { NextRequest } from 'next/server';
-import { catalogAdmin, catalogDatabaseError, catalogError, catalogInput, catalogJson } from '../next-api-bridge';
-import { uuidPattern } from '../catalog';
-import { telephonyConfigured } from '../calling/config';
-import { campaignErrors, filterErrors } from './validation';
-import { conversation, scriptErrors, type ScriptContent } from './script';
+import { WebRequest as NextRequest } from '../../common/http.js';
+import { catalogAdmin, catalogDatabaseError, catalogError, catalogInput, catalogJson } from '../catalog/catalog.service.js';
+import { uuidPattern } from '../../common/catalog.js';
+import { telephonyConfigured } from '../../common/telephony.js';
+import { campaignErrors, filterErrors } from './validation.js';
+import { conversation, scriptErrors, type ScriptContent } from './script.js';
 
 export function campaignDatabaseError(error:{code?:string;message?:string;details?:string}) {
  if(error.message?.includes('PREFLIGHT_FAILED')){
@@ -15,12 +14,13 @@ export function campaignDatabaseError(error:{code?:string;message?:string;detail
  return catalogDatabaseError(error);
 }
 const unavailable=()=>catalogError('CAMPAIGN_UNAVAILABLE','Không thể xử lý chiến dịch. Vui lòng thử lại.',503);
-export async function campaignRoute(request:NextRequest,path:string[]=[]) {
+export async function campaignRoute(request:NextRequest,path:string[]=[],scheduler?:()=>object) {
  try {
   const mutate=request.method!=='GET',access=await catalogAdmin(mutate ? request:undefined);if(access.error)return access.error;
   const client=access.client;
   const rpc=async(name:string,args:Record<string,unknown>,status=200)=>{const r=await client.rpc(name,args);return r.error ? campaignDatabaseError(r.error):catalogJson({item:r.data},status);};
   if(!mutate){
+   if(path.length===1 && path[0]==='scheduler' && scheduler)return catalogJson(scheduler());
    if(!path.length){
     const search=request.nextUrl.searchParams.get('search') || '',page=Number(request.nextUrl.searchParams.get('page') || 1);
     if(search.length>160 || !Number.isSafeInteger(page) || page<1 || page>10000)return catalogError('INVALID_INPUT','Từ khóa hoặc trang không hợp lệ.',400);

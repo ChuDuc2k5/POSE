@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AdminWorkspaceShell } from './admin-workspace-shell';
 import { catalogRequest } from '@/lib/catalog-client';
-import { statusLabels, type Campaign } from '@/lib/campaigns/types';
+import { statusLabels, type Campaign } from '@/lib/campaign-types';
 import { CampaignDetail } from './campaign-detail';
 export function CampaignWorkspace({id}:{id?:string}) {
  const router=useRouter();

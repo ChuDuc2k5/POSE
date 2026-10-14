@@ -1,4 +1,4 @@
-import type { ScriptContent } from './script';
+import type { ScriptContent } from './script.ts';
 export type Campaign={id:string;name:string;description:string|null;objective:string;status:string;status_reason:string;version:number;config_version:number;property_ids:string[];script_version_id:string|null;start_time:string|null;end_time:string|null;timezone:string;window_start:string;window_end:string;weekdays:number[];max_concurrent_calls:number;max_call_seconds:number;max_attempts:number;retry_after_hours:number;daily_call_limit:number|null;budget_limit_vnd:number|null;cost_reserve_per_call_vnd:number|null;budget_reserved_vnd:number;budget_spent_vnd:number};
 export type Script={id:string;name:string};
 export type ScriptVersion={id:string;script_id:string;version_no:number;status:string;checksum:string;content:ScriptContent};
