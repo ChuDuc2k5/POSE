@@ -1,16 +1,16 @@
 import 'server-only';
 import { createHash, randomUUID } from 'node:crypto';
 import { NextRequest } from 'next/server';
-import { authenticatedSession, authClient } from '../auth-server';
-import { systemClient, cronAuthorized } from '../system-server';
-import { catalogDatabaseError, catalogError, catalogInput, catalogJson } from '../catalog-server';
+import { authenticatedSession, authClient } from '../next-api-bridge';
+import { systemClient, cronAuthorized } from '../next-api-bridge';
+import { catalogDatabaseError, catalogError, catalogInput, catalogJson } from '../next-api-bridge';
 import { uuidPattern } from '../catalog';
 import { callingProvider, ProviderRejected, type CallEvent } from './provider';
 import { converse, type Conversation, type Script } from './conversation';
-import type { Evidence } from '../ai/guard';
-import { complete } from '../ai/llm';
-import { extractNeeds } from '../ai/extraction';
-import { scoreNeeds } from '../ai/lead-scoring';
+import type { Evidence } from '../../../backend/src/modules/ai/guard';
+import { complete } from '../../../backend/src/modules/ai/llm';
+import { extractNeeds } from '../../../backend/src/modules/ai/extraction';
+import { scoreNeeds } from '../../../backend/src/modules/ai/lead-scoring';
 const unavailable=()=>catalogError('CALLS_UNAVAILABLE','Không thể xử lý cuộc gọi. Vui lòng thử lại.',503);
 export async function callAccess(request?:NextRequest,admin=false){
  if(request&&request.headers.get('origin')!==request.nextUrl.origin)return {error:catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403)} as const;

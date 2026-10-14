@@ -1,4 +1,4 @@
-import { normalizePhone, validatePassword, validateProfile } from '../../frontend/lib/profile-validation.js';
+import { normalizePhone, validatePassword, validateProfile } from '../src/common/profile-validation.js';
 
 describe('M01 profile and recovery validation', () => {
   const profile = { name: 'Khách hàng', phone: '0912345678', notificationsEnabled: true, version: 0 };

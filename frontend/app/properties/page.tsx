@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { PropertyBrowser } from '@/components/property-browser';
-import { publicPageRole } from '@/lib/auth-server';
+import { publicPageRole } from '@/lib/page-session';
 import { AiChatWidget } from '@/components/ai-chat-widget';
 
 export const metadata: Metadata={title:'Khám phá bất động sản | TERAVA'};

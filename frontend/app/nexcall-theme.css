@@ -104,9 +104,9 @@ h1, h2, h3, h4 { color: var(--nx-ink); }
 .profile-avatar, .profile-panel-icon, .access-form-icon, .catalog-admin-user > span { color: var(--nx-primary); background: var(--nx-primary-soft); border-color: var(--nx-primary-line); }
 .profile-status.verified { color: var(--nx-success); background: var(--nx-success-soft); }
 .catalog-sidebar { background: linear-gradient(175deg, #0d0c0a, #050505); color: var(--nx-primary-tint); border-right: 1px solid var(--nx-primary-line); }
-.catalog-sidebar nav button { color: var(--nx-on-dark-muted); }
-.catalog-sidebar nav button.active { color: var(--nx-on-primary); background: var(--nx-gold-gradient); border-color: #f3e3b040; box-shadow: 0 5px 16px #d4af3726; }
-.catalog-sidebar nav button:hover:not(.active) { background: #d4af3714; color: var(--nx-on-dark); }
+.catalog-sidebar nav :is(button,a) { color: var(--nx-on-dark-muted); }
+.catalog-sidebar nav :is(button,a).active { color: var(--nx-on-primary); background: var(--nx-gold-gradient); border-color: #f3e3b040; box-shadow: 0 5px 16px #d4af3726; }
+.catalog-sidebar nav :is(button,a):hover:not(.active) { background: #d4af3714; color: var(--nx-on-dark); }
 .catalog-sidebar-label, .catalog-sidebar-note p { color: #9d927a; }
 .catalog-sidebar-note > svg { color: var(--nx-primary); }
 .catalog-sidebar .brand-caption, .catalog-sidebar-bottom > a, .catalog-sidebar-bottom .button { color: var(--nx-on-dark-muted); }

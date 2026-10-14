@@ -3,7 +3,7 @@ import { Roles, type AuthorizedRequest } from './auth.guard.js';
 
 @Controller('auth')
 export class AccessController {
-  @Get('me')
+  @Get('principal')
   me(@Req() request: AuthorizedRequest) { return { user: request.principal }; }
 
   @Get('admin')

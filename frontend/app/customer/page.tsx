@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
-import { requirePageSession } from '@/lib/auth-server';
-import { readProfile } from '@/lib/account-server';
+import { requirePageSession } from '@/lib/page-session';
+import { readProfile } from '@/lib/page-profile';
 import { CustomerHome } from '@/components/customer-home';
 import { AiChatWidget } from '@/components/ai-chat-widget';
 
@@ -8,6 +8,6 @@ export const metadata: Metadata = { title: 'Trang chủ khách hàng | TERAVA', 
 
 export default async function CustomerPage() {
   const session = await requirePageSession('/customer', ['User']);
-  const profile = await readProfile(session.access);
+  const profile = await readProfile();
   return <><CustomerHome name={profile.name} role={session.role}/><AiChatWidget signedIn/></>;
 }

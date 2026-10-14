@@ -1,4 +1,4 @@
-import { requirePageSession } from '@/lib/auth-server';
+import { requirePageSession } from '@/lib/page-session';
 import { CampaignWorkspace } from '@/components/campaign-workspace';
 import { uuidPattern } from '@/lib/catalog';
 import { notFound } from 'next/navigation';

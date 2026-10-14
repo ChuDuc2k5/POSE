@@ -5,10 +5,9 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { startStack } from './test-stack.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createCampaignDatabase } from './campaign-test-db.mjs';
-import { stopProcess } from './campaign-test-process.mjs';
 
 // The fake Supabase transport executes the real RPCs and RLS in isolated PostgreSQL.
 const db=await createCampaignDatabase();
@@ -55,8 +54,8 @@ const provider=createServer(async(req,res)=>{
 await new Promise(resolve=>provider.listen(3401,'127.0.0.1',resolve));
 const appEnv={...process.env,SUPABASE_URL:'http://127.0.0.1:3401',SUPABASE_PUBLISHABLE_KEY:'fixture-public',SUPABASE_SECRET_KEY:'fixture-service',CRON_SECRET:cron};
 for(const key of ['TELEPHONY_PROVIDER','TELEPHONY_API_URL','TELEPHONY_API_KEY','TELEPHONY_CALLER_ID','TELEPHONY_WEBHOOK_SECRET'])appEnv[key]='fixture';
-let app,output='';
-async function start(configured=true){await stopProcess(app);output='';const env={...appEnv,...(configured ? {}:{TELEPHONY_API_KEY:''})};app=spawn(process.execPath,['node_modules/next/dist/bin/next','start','--port','3400'],{cwd:new URL('..',import.meta.url),env,windowsHide:true,stdio:['ignore','pipe','pipe']});app.stdout.on('data',x=>output+=x);app.stderr.on('data',x=>output+=x);for(let i=0;i<80;i++){try{const r=await fetch(`${origin}/api/admin/campaigns`,{headers:{Cookie:'pose-access=fixture-admin'}});if(r.ok)return;}catch{}await delay(250);}throw Error(output);}
+let app,stack,output='';
+async function start(configured=true){await stack?.close();output='';const env={...appEnv,...(configured ? {}:{TELEPHONY_API_KEY:''})};stack=await startStack(3400,env,{build:false,backendPort:3403});app=stack.app;app.stdout.on('data',x=>output+=x);app.stderr.on('data',x=>output+=x);for(let i=0;i<80;i++){try{const r=await fetch(`${origin}/api/admin/campaigns`,{headers:{Cookie:'pose-access=fixture-admin'}});if(r.ok)return;}catch{}await delay(250);}throw Error(output);}
 const call=(path='',method='GET',body,cookie='pose-access=fixture-admin',requestOrigin=origin)=>fetch(`${origin}${base}${path}`,{method,headers:{...(cookie ? {Cookie:cookie}:{}),...(method!=='GET' ? {Origin:requestOrigin,'Content-Type':'application/json'}:{})},...(body!==undefined ? {body:JSON.stringify(body)}:{})});
 const tick=()=>fetch(`${origin}/api/system/campaigns/tick`,{method:'POST',headers:{Authorization:`Bearer ${cron}`}});
 let checks=0;
@@ -219,4 +218,4 @@ try {
  console.log(`PASS: ${checks} M07 HTTP checks; fake Supabase gateway with real PostgreSQL rules.`);
  if(process.argv.includes('--preview')){previewId=noProvider.id;console.log(`PREVIEW READY: ${origin}; cookie pose-access=fixture-admin; campaign ${noProvider.id}`);await waitPreview();}
  }
-}finally{try{await stopProcess(app);}finally{provider.closeAllConnections();await new Promise(resolve=>provider.close(resolve));await chain;await db.close();}}
+}finally{try{await stack?.close();}finally{provider.closeAllConnections();await new Promise(resolve=>provider.close(resolve));await chain;await db.close();}}
