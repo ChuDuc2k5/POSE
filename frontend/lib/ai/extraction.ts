@@ -1,3 +1,5 @@
+import { hasPhone } from './privacy';
+import { moneyAmounts } from './money';
 export const SCHEMA_VERSION = 'needs.v1';
 export const propertyTypes = ['Apartment','House','Land','Villa','Office','Shop'];
 export type Field = { value: unknown; confidence: number; evidence: string };
@@ -16,12 +18,13 @@ export function extractNeeds(raw: unknown, source: string): Needs {
   for (const [key, field] of Object.entries(raw)) {
     if (!object(field) || Object.keys(field).some(k=>!['value','confidence','evidence'].includes(k)) || !validValue(key,field.value) || typeof field.confidence!=='number' || !Number.isFinite(field.confidence) || field.confidence<0 || field.confidence>1 || typeof field.evidence!=='string') throw new Error('INVALID_NEEDS');
     const quote=field.evidence.trim(), index=source.indexOf(quote);
-    if (!quote || index<0 || /\+?\d[\d .()-]{7,}\d/.test(quote.replace(/\d+\s*(tỷ|triệu|VND)/gi,''))) continue;
-    const sentence=source.slice(Math.max(0,source.lastIndexOf('.',index)+1),source.indexOf('.',index+quote.length)<0 ? source.length:source.indexOf('.',index+quote.length));
+    if (!quote || index<0 || hasPhone(quote)) continue;
+    const boundaries=[...source.matchAll(/(?<!\d)[.!?](?!\d)|\n/g)].map(m=>m.index!);
+    const start=boundaries.filter(i=>i<index).at(-1) ?? -1,end=boundaries.find(i=>i>=index+quote.length) ?? source.length;
+    const sentence=source.slice(start+1,end);
     if (/ví dụ|không phải|chưa|giả sử|không muốn|không có|không mua|example|not my|don't|haven't/i.test(sentence)) continue;
     if (key.startsWith('budget_')) {
-      const numbers=[...quote.matchAll(/(\d+(?:[.,]\d+)?)\s*(tỷ|triệu|VND)/gi)].map(m=>Number(m[1].replace(',','.'))*(m[2].toLowerCase()==='tỷ' ? 1e9:m[2].toLowerCase()==='triệu' ? 1e6:1));
-      if (!numbers.includes(field.value as number)) continue;
+      if (!moneyAmounts(quote).includes(field.value as number)) continue;
     }
     result[key as keyof Needs]={value:field.value,confidence:field.confidence,evidence:quote};
   }

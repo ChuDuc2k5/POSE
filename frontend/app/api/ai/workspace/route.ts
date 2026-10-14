@@ -9,7 +9,7 @@ export async function GET(request:NextRequest){
     const client=authClient(session.access);
     if(request.nextUrl.searchParams.get('logs')==='true'){
       if(session.role!=='Admin')return catalogError('FORBIDDEN','Chỉ quản trị viên được xem nhật ký.',403);
-      const result=await client.from('ai_action_log').select('*').eq('decision','blocked').order('created_at',{ascending:false}).limit(50);
+      const result=await client.from('ai_action_log').select('*').in('decision',['blocked','flagged']).order('created_at',{ascending:false}).limit(50);
       return result.error ? catalogDatabaseError(result.error):catalogJson({items:result.data});
     }
     const result=await client.from('lead_tasks').select('*,leads(id,version,lead_score,temperature,score_rule_version,score_evidence,customers(full_name))').in('kind',['Handoff','Review']).eq('status','Open').order('created_at',{ascending:false}).limit(50);

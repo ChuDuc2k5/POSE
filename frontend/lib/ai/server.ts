@@ -8,9 +8,9 @@ import { catalogDatabaseError, catalogError, catalogInput, catalogJson } from '.
 import { searchParameters } from '../discovery';
 import { uuidPattern } from '../catalog';
 import { extractNeeds, object } from './extraction';
-import { scoreNeeds } from './lead-scoring';
+import { scoreNeeds, type ScoreResult, type Dimension } from './lead-scoring';
 import { complete } from './llm';
-import { disclosure, evidenceReason, evidenceReply, GUARD_VERSION, injection, outputReason, safeReply, stripPhones, toolAllowed, type Evidence } from './guard';
+import { disclosure, evidenceReason, GUARD_VERSION, injection, outputReason, safeReply, stripPhones, toolAllowed, type Evidence } from './guard';
 
 export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI hiện chưa khả dụng. Vui lòng thử lại hoặc gửi yêu cầu tư vấn.',retry:true,inquiry_url:'/customer/inquiries/new'},503);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -38,6 +38,12 @@ async function retrieve(filters:Record<string,unknown>,context:string|null):Prom
   if(result.error)throw new Error('RETRIEVAL_UNAVAILABLE');
   return (result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[];
 }
+async function retrieveIds(ids:string[]):Promise<Evidence[]> {
+  if(!ids.length)return [];
+  const result=await authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type').in('id',[...new Set(ids)].slice(0,100)).limit(100);
+  if(result.error)throw new Error('RETRIEVAL_UNAVAILABLE');
+  return (result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[];
+}
 export async function chat(request:NextRequest) {
   try {
     if(request.headers.get('origin')!==request.nextUrl.origin)return catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403);
@@ -50,51 +56,66 @@ export async function chat(request:NextRequest) {
     if(!object(filters) || !toolAllowed({name:'search_properties',arguments:filters}))return catalogError('INVALID_FILTER','Bộ lọc không hợp lệ.',400);
     const who=await identity(request);if(who.error)return who.error;
     const id=typeof input.session_id==='string' ? input.session_id:randomUUID();
-    let count=0, scoring:{needs:Record<string,{value:unknown;evidence?:string;confirmed_by?:unknown}>;verified:boolean;version:number}|null=null;
-    if(input.session_id){const prior=await readSession(id,who);if(prior.error)return catalogDatabaseError(prior.error);count=prior.data.message_count;scoring=prior.data.scoring;if(prior.data.store_transcript!==input.store_transcript || prior.data.status==='Closed')return catalogError('SESSION_CONFLICT','Lựa chọn lưu áp dụng cho cả phiên; hãy bắt đầu phiên mới để thay đổi.',409);}
+    let count=0,interestIds:string[]=[],scoring:{needs:Record<string,{value:unknown;evidence?:string;confirmed_by?:unknown}>;verified:boolean;version:number;interest_ids?:string[];score_result?:ScoreResult}|null=null;
+    if(input.session_id){const prior=await readSession(id,who);if(prior.error)return catalogDatabaseError(prior.error);count=prior.data.message_count;scoring=prior.data.scoring;interestIds=prior.data.property_ids || [];if(prior.data.store_transcript!==input.store_transcript || prior.data.status==='Closed')return catalogError('SESSION_CONFLICT','Lựa chọn lưu áp dụng cho cả phiên; hãy bắt đầu phiên mới để thay đổi.',409);}
     else if(who.client){const context=await who.client.rpc('pose_ai_score_context');if(context.error)return catalogDatabaseError(context.error);scoring=context.data;}
     if(!consumeAttempt('ai-ip',request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'local',100) || !consumeAttempt('ai-session',id,40))return catalogError('RATE_LIMIT','Bạn đã gửi nhiều tin nhắn. Vui lòng thử lại sau.',429);
-    if(!process.env.AI_API_URL || !process.env.AI_API_KEY || !process.env.AI_MODEL)return unavailable();
     const guest=!who.session, source=guest ? stripPhones(input.message):input.message;
     const sanitizedHistory=history.map(turn=>({role:turn.role,content:guest ? stripPhones(turn.content):turn.content}));
-    let items=await retrieve(filters,input.property_id as string|null || null);
+    let searchPerformed=input.filters!==undefined || !!input.property_id;
+    let items=searchPerformed ? await retrieve(filters,input.property_id as string|null || null):[];
     const actions:{tool:string;args_hash:string;decision:string;reason:string;rule_version:string}[]=[];
-    const log=(tool:string,args:unknown,reason:string|null)=>actions.push({tool,args_hash:hash(JSON.stringify(args) || 'null'),decision:reason ? 'blocked':'allowed',reason:reason || 'VALIDATED',rule_version:GUARD_VERSION});
+    const log=(tool:string,args:unknown,reason:string|null,decision?:'flagged')=>actions.push({tool,args_hash:hash(JSON.stringify(args) || 'null'),decision:decision || (reason ? 'blocked':'allowed'),reason:reason || 'VALIDATED',rule_version:GUARD_VERSION});
     const safeEvidence=(list:Evidence[])=>list.filter(item=>{const reason=evidenceReason(item);if(reason)log('retrieval',{id:item.id},reason);return !reason;});
     items=safeEvidence(items);
-    let reply:string, fields={}, proposals:unknown[]=[];
-    if(injection(input.message) || sanitizedHistory.some(t=>injection(t.content))) { log('input',source,'PROMPT_INJECTION');reply=safeReply;items=[]; }
-    else {
-      let result=await complete({customer_text:source,history:sanitizedHistory,properties:items});
-      fields=extractNeeds(result.needs || {},source);
-      const tools=result.tool_calls || [];
-      const invalid=tools.filter(t=>!toolAllowed(t));
-      if(invalid.length){for(const t of invalid)log(object(t) && typeof t.name==='string' ? t.name:'invalid_tool',t,'TOOL_NOT_ALLOWED_OR_INVALID');reply=safeReply;items=[];fields={};}
-      else {
-        for(const t of tools){if(!toolAllowed(t))continue;if(t.name==='search_properties'){log(t.name,t.arguments,null);items=safeEvidence(await retrieve(t.arguments,null));}else if(guest){log(t.name,t.arguments,'SIGN_IN_REQUIRED');}else{log(t.name,t.arguments,null);proposals.push(t);}}
-        if(tools.some(t=>toolAllowed(t) && t.name==='search_properties')) {
-          result=await complete({customer_text:source,history:sanitizedHistory,properties:items,tools_complete:true});
-          fields=extractNeeds(result.needs || {},source);
-          if((result.tool_calls || []).length){for(const t of result.tool_calls!)log('recursive_tool',t,'TOOL_RECURSION_BLOCKED');reply=safeReply;items=[];fields={};proposals=[];}
-          else reply=result.reply;
-        }else reply=result.reply;
-        const reason=outputReason(reply!,items);if(reason){log('output',reply!,reason);reply=safeReply;fields={};proposals=[];}
-      }
+    const suspected=injection(input.message) || sanitizedHistory.some(t=>injection(t.content));
+    if(suspected)log('input',source,'PROMPT_INJECTION','flagged');
+    const data=()=>({customer_text:source,history:sanitizedHistory,properties:items,search_performed:searchPerformed,injection_suspected:suspected,contact_redacted:guest && source!==input.message,signed_in:!guest});
+    let result=await complete(data()),violation:string|null=null,proposals:unknown[]=[];
+    const tools=result.tool_calls || [];
+    for(const t of tools)if(!toolAllowed(t)){violation='TOOL_NOT_ALLOWED_OR_INVALID';log(object(t) && typeof t.name==='string' ? t.name:'invalid_tool',t,violation);}
+    let searched=false;
+    if(!violation)for(const t of tools){
+      if(!toolAllowed(t))continue;
+      if(t.name==='search_properties'){
+        if(searched){violation='TOOL_LIMIT';log(t.name,t.arguments,violation);break;}
+        log(t.name,t.arguments,null);items=safeEvidence(await retrieve(t.arguments,null));searchPerformed=true;searched=true;
+      }else if(guest){violation='SIGN_IN_REQUIRED';log(t.name,t.arguments,violation);}
+      else{log(t.name,t.arguments,null);proposals.push(t);}
     }
-    if(guest && source!==input.message)reply+=' Vui lòng đăng nhập hoặc dùng biểu mẫu tư vấn để chia sẻ thông tin liên hệ.';
-    if(items.length){
-      const refreshed=await authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type').in('id',items.map(p=>p.id)).limit(5);
-      if(refreshed.error)throw new Error('RETRIEVAL_UNAVAILABLE');
-      items=safeEvidence((refreshed.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[]);
+    if(searched && !violation){
+      result=await complete({...data(),tools_complete:true});
+      if(result.tool_calls?.length){violation='TOOL_RECURSION_BLOCKED';for(const t of result.tool_calls)log('recursive_tool',t,violation);}
     }
-    reply=(count===0 ? `${disclosure}\n`:'')+reply+(items.length ? `\n${evidenceReply(items)}`:actions.some(a=>a.decision==='blocked') ? '':`\n${evidenceReply([])}`);
+    items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5);
+    if(!violation){violation=outputReason(result.reply,items,source);if(violation)log('output',result.reply,violation);}
+    let blocked=false;
+    if(violation){
+      proposals=[];
+      result=await complete({...data(),regeneration:true,tools_complete:true,violations:[violation]});
+      items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5);
+      const failed=result.tool_calls?.length ? 'TOOL_RECURSION_BLOCKED':outputReason(result.reply,items,source);
+      if(failed){log('final_output',result.tool_calls?.length ? result.tool_calls:result.reply,failed);blocked=true;}
+      else log('regeneration',{},null);
+    }
+    const fields=blocked ? {}:extractNeeds(result.needs || {},source);
+    const reply=(count===0 ? `${disclosure}\n`:'')+(blocked ? safeReply:result.reply);
     const acceptedFields=guest || !input.store_transcript ? {}:fields;
     const merged:Record<string,{value:unknown;evidence?:string;confirmed_by?:unknown}>|null=scoring ? {...scoring.needs,...acceptedFields}:null;
     if(merged && scoring)for(const [k,f] of Object.entries(scoring.needs))if(object(f) && Object.hasOwn(f,'confirmed_by'))merged[k]=f;
-    const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:reply,p_sources:items,p_actions:actions,p_fields:acceptedFields,p_score:merged && scoring ? {...scoreNeeds(merged,items,scoring.verified),needs_version:scoring.version}:null});
+    const changed=merged && scoring ? Object.keys(acceptedFields).filter(k=>JSON.stringify(merged[k]?.value)!==JSON.stringify(scoring!.needs[k]?.value)):[];
+    let score:object|null=null;
+    if(merged && scoring && changed.length){
+      const interest=safeEvidence(await retrieveIds([...interestIds,...scoring.interest_ids || [],...items.map(p=>p.id)]));
+      const preserve:Dimension[]=[];
+      if(!changed.some(k=>k.startsWith('budget_')))preserve.push('budget');
+      if(!changed.some(k=>['locations','property_types'].includes(k)))preserve.push('area_type');
+      score={...scoreNeeds(merged,interest,scoring.verified,scoring.score_result,preserve),needs_version:scoring.version};
+    }
+    const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:reply,p_sources:items,p_actions:actions,p_fields:acceptedFields,p_score:score});
     if(committed.error)return catalogDatabaseError(committed.error);
     if(guest)(await cookies()).set('pose-ai-session',who.token,{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',path:'/',maxAge:86400*7});
-    return catalogJson({session:committed.data,reply,sources:items,blocked:actions.some(a=>a.decision==='blocked'),proposals,inquiry_url:'/customer/inquiries/new'});
+    return catalogJson({session:committed.data,reply,sources:items,blocked,proposals,inquiry_url:'/customer/inquiries/new'});
   }catch{return unavailable();}
 }
 export async function getChat(request:NextRequest,id:string) {

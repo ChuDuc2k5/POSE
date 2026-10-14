@@ -4,7 +4,7 @@ create table public.ai_chat_sessions (
  id uuid primary key default gen_random_uuid(), user_id uuid references auth.users(id), guest_token_hash text,
  store_transcript boolean not null default false, lead_id uuid references public.leads(id),
  status text not null default 'Active' check(status in ('Active','HandedOff','Closed')),
- message_count integer not null default 0 check(message_count>=0), created_at timestamptz not null default now(), last_message_at timestamptz,
+ message_count integer not null default 0 check(message_count>=0), property_ids uuid[] not null default '{}', created_at timestamptz not null default now(), last_message_at timestamptz,
  check ((user_id is null) <> (guest_token_hash is null)), check(guest_token_hash is null or guest_token_hash ~ '^[a-f0-9]{64}$'),
  check(user_id is not null or lead_id is null)
 );
@@ -30,7 +30,7 @@ create policy ai_preferences_staff on public.ai_extracted_preferences for select
 create policy ai_analyses_staff on public.ai_analyses for select to authenticated using((select pose_private.staff_role())='Admin' or (select pose_private.staff_role())='Sales' and pose_private.lead_assigned_to_me(lead_id));
 create table public.ai_action_log (
  id uuid primary key default gen_random_uuid(), session_id uuid references public.ai_chat_sessions(id), tool text not null,
- args_hash text not null check(args_hash ~ '^[a-f0-9]{64}$'), decision text not null check(decision in ('allowed','blocked')),
+ args_hash text not null check(args_hash ~ '^[a-f0-9]{64}$'), decision text not null check(decision in ('allowed','blocked','flagged')),
  reason text not null, rule_version text not null, created_at timestamptz not null default now()
 );
 create table pose_private.ai_operations (key text primary key, lead_id uuid not null references public.leads(id), kind text not null, result jsonb);
@@ -64,6 +64,25 @@ create function pose_private.ai_lead_assignee(p_lead uuid) returns uuid language
  select sales_id from public.lead_assignments where lead_id=p_lead and is_active order by assigned_at desc,id limit 1;
 $$;
 revoke all on function pose_private.ai_lead_assignee(uuid) from public,anon,authenticated;
+create function pose_private.ai_interest_ids(p_lead uuid) returns uuid[] language sql stable security definer set search_path='' as $$
+ select coalesce(array(select distinct unnest(s.property_ids) from public.ai_chat_sessions s where s.lead_id=p_lead limit 100),'{}'::uuid[]);
+$$;
+revoke all on function pose_private.ai_interest_ids(uuid) from public,anon,authenticated;
+create function pose_private.ai_strip_phones(p_text text) returns text language plpgsql immutable security invoker set search_path='' as $$
+declare remaining text:=p_text; result text:=''; parts text[]; candidate text; at_pos integer; after_text text; grouped boolean; vn_mobile boolean;
+begin
+ loop
+  parts:=regexp_match(remaining,'(^|[^0-9+])((?:\+84[ .()-]?[35789](?:[ .()-]?[0-9]){8}|0[35789](?:[ .()-]?[0-9]){8}|\+[1-9](?:[ .()-]?[0-9]){7,14}))(?![0-9])');
+  exit when parts is null;
+  candidate:=parts[2]; at_pos:=strpos(remaining,parts[1]||candidate)+char_length(parts[1]); after_text:=substring(remaining from at_pos+char_length(candidate));
+  grouped:=candidate ~ '^\+?[0-9]{1,3}([ .][0-9]{3})+$';
+  vn_mobile:=regexp_replace(candidate,'[ .()-]','','g') ~ '^\+84[35789][0-9]{8}$';
+  result:=result||substring(remaining from 1 for at_pos-1)||case when after_text ~* '^\s*(VND|đồng|đ|tỷ|tỉ|triệu)(?![a-z])' or grouped and not vn_mobile then candidate else '[đã ẩn số liên hệ]' end;
+  remaining:=after_text;
+ end loop;
+ return result||remaining;
+end $$;
+revoke all on function pose_private.ai_strip_phones(text) from public,anon,authenticated;
 
 create function pose_private.ai_read_session(p_session uuid,p_hash text default null) returns jsonb
 language plpgsql security definer set search_path='' as $$
@@ -75,14 +94,14 @@ begin
   actor:=pose_private.require_account(); select * into s from public.ai_chat_sessions where id=p_session and user_id=actor;
  end if;
  if s.id is null then raise exception 'SESSION_NOT_FOUND' using errcode='P0002'; end if;
- return (to_jsonb(s)-'guest_token_hash'-'user_id'-'lead_id') || jsonb_build_object('scoring',case when s.user_id is not null then (select jsonb_build_object('needs',l.needs,'verified',c.phone_verified_at is not null,'version',l.version) from public.leads l join public.customers c on c.id=l.customer_id where l.id=s.lead_id and c.auth_user_id=s.user_id) else null end,'messages',coalesce((select jsonb_agg(to_jsonb(m)-'session_id' order by m.created_at,m.id) from public.ai_chat_messages m where m.session_id=s.id),'[]'));
+ return (to_jsonb(s)-'guest_token_hash'-'user_id'-'lead_id') || jsonb_build_object('scoring',case when s.user_id is not null then (select jsonb_build_object('needs',l.needs,'verified',c.phone_verified_at is not null,'version',l.version,'interest_ids',pose_private.ai_interest_ids(l.id),'score_result',l.score_evidence) from public.leads l join public.customers c on c.id=l.customer_id where l.id=s.lead_id and c.auth_user_id=s.user_id) else null end,'messages',coalesce((select jsonb_agg(to_jsonb(m)-'session_id' order by m.created_at,m.id) from public.ai_chat_messages m where m.session_id=s.id),'[]'));
 end $$;
 create function public.pose_ai_read_session(p_session uuid) returns jsonb language sql security invoker set search_path='' as $$ select pose_private.ai_read_session(p_session); $$;
 create function public.pose_system_ai_read_guest(p_session uuid,p_hash text) returns jsonb language sql security invoker set search_path='' as $$ select pose_private.ai_read_session(p_session,p_hash); $$;
 create function pose_private.ai_score_context() returns jsonb language plpgsql security definer set search_path='' as $$
 declare actor uuid:=pose_private.require_account();
 begin
- return (select jsonb_build_object('needs',l.needs,'verified',c.phone_verified_at is not null,'version',l.version) from public.leads l join public.customers c on c.id=l.customer_id where c.auth_user_id=actor and not l.archived and l.status not in ('CONVERTED','LOST'));
+ return (select jsonb_build_object('needs',l.needs,'verified',c.phone_verified_at is not null,'version',l.version,'interest_ids',pose_private.ai_interest_ids(l.id),'score_result',l.score_evidence) from public.leads l join public.customers c on c.id=l.customer_id where c.auth_user_id=actor and not l.archived and l.status not in ('CONVERTED','LOST'));
 end $$;
 create function public.pose_ai_score_context() returns jsonb language sql security invoker set search_path='' as $$ select pose_private.ai_score_context(); $$;
 revoke all on function pose_private.ai_score_context(),public.pose_ai_score_context() from public,anon;
@@ -113,7 +132,8 @@ begin
    or k in ('purchase_intent','contact_ready') and jsonb_typeof(f->'value') is distinct from 'boolean' then raise exception 'INVALID_VALUE' using errcode='22023'; end if;
   if k in ('locations','property_types') and exists(select 1 from jsonb_array_elements(f->'value') v where jsonb_typeof(v)<>'string' or char_length(v#>>'{}') not between 1 and 120 or k='property_types' and v#>>'{}' not in ('Apartment','House','Land','Villa','Office','Shop')) then raise exception 'INVALID_VALUE' using errcode='22023'; end if;
   quote:=f->>'evidence';
-  if k in ('locations','property_types') and (quote ~ '\+?[0-9][0-9 .()-]{6,}[0-9]' or exists(select 1 from jsonb_array_elements_text(f->'value') v where v ~ '\+?[0-9][0-9 .()-]{6,}[0-9]')) then continue; end if;
+  if pose_private.ai_strip_phones(quote)<>quote then continue; end if;
+  if k in ('locations','property_types') and exists(select 1 from jsonb_array_elements_text(f->'value') v where pose_private.ai_strip_phones(v)<>v) then continue; end if;
   if quote ~* '(ví dụ|không phải|chưa|giả sử|không muốn|không có|không mua)' then continue; end if;
   if p_source_kind='Chat' and exists(select 1 from public.ai_chat_sessions where id=p_source_id and store_transcript) and not exists(select 1 from public.ai_chat_messages where session_id=p_source_id and role='user' and position(quote in content)>0) then continue; end if;
   if p_source_kind='Call' and not exists(select 1 from public.call_transcripts where call_id=p_source_id and position(quote in transcript)>0) then continue; end if;
@@ -194,7 +214,7 @@ create function public.pose_system_apply_lead_score(p_lead uuid,p_result jsonb,p
 
 create function pose_private.ai_commit_chat(p_session uuid,p_user uuid,p_hash text,p_store boolean,p_message text,p_reply text,p_sources jsonb,p_actions jsonb,p_fields jsonb,p_score jsonb) returns jsonb
 language plpgsql security definer set search_path='' as $$
-declare s public.ai_chat_sessions; a jsonb;
+declare s public.ai_chat_sessions; a jsonb; before_needs jsonb; merged_needs jsonb; lead_version integer; needs_changed boolean:=false;
 begin
  if auth.role() is distinct from 'service_role' then raise exception 'SYSTEM_REQUIRED' using errcode='42501'; end if;
  if p_message is null or char_length(p_message) not between 1 and 2000 or p_reply is null or char_length(p_reply) not between 1 and 8000 or p_store is null then raise exception 'INVALID_INPUT' using errcode='22023'; end if;
@@ -204,12 +224,9 @@ begin
  else
   insert into public.ai_chat_sessions(id,user_id,guest_token_hash,store_transcript,lead_id) values(p_session,p_user,p_hash,p_store,(select l.id from public.leads l join public.customers c on c.id=l.customer_id where c.auth_user_id=p_user and not l.archived and l.status not in ('CONVERTED','LOST'))) returning * into s;
  end if;
- if s.lead_id is not null and p_score is not null then
-  perform 1 from public.leads where id=s.lead_id and version=(p_score->>'needs_version')::integer for update;
-  if not found then raise exception 'VERSION_CONFLICT' using errcode='40001'; end if;
- end if;
+ if s.lead_id is not null then select needs,version into before_needs,lead_version from public.leads where id=s.lead_id for update; end if;
  if s.user_id is null then
-  p_message:=regexp_replace(p_message,'\+?[0-9][0-9 .()-]{6,}[0-9]','[đã ẩn số liên hệ]','g');
+  p_message:=pose_private.ai_strip_phones(p_message);
  end if;
  if s.store_transcript then
   insert into public.ai_chat_messages(session_id,role,content,sources,blocked) values(s.id,'user',p_message,'[]',false),(s.id,'assistant',p_reply,p_sources,exists(select 1 from jsonb_array_elements(p_actions) x where x->>'decision'='blocked'));
@@ -217,11 +234,15 @@ begin
  for a in select * from jsonb_array_elements(p_actions) loop
   insert into public.ai_action_log(session_id,tool,args_hash,decision,reason,rule_version) values(s.id,a->>'tool',a->>'args_hash',a->>'decision',a->>'reason',a->>'rule_version');
  end loop;
- update public.ai_chat_sessions set message_count=message_count+2,last_message_at=now() where id=s.id;
+ update public.ai_chat_sessions set message_count=message_count+2,last_message_at=now(),property_ids=array(select distinct x from unnest(s.property_ids||array(select (v->>'id')::uuid from jsonb_array_elements(p_sources) v)) x limit 100) where id=s.id;
  if s.lead_id is not null and s.store_transcript and p_fields<>'{}'::jsonb then
-  perform pose_private.ai_record_extraction(s.lead_id,'Chat',s.id,'needs.v1',p_fields,'chat-extract:'||s.id||':'||s.message_count);
+  merged_needs:=pose_private.ai_record_extraction(s.lead_id,'Chat',s.id,'needs.v1',p_fields,'chat-extract:'||s.id||':'||s.message_count);
+  needs_changed:=exists(select 1 from jsonb_object_keys(p_fields) k where before_needs->k->'value' is distinct from merged_needs->k->'value');
  end if;
- if s.lead_id is not null and p_score is not null then perform pose_private.ai_apply_score(s.lead_id,p_score-'needs_version','chat-score:'||s.id||':'||s.message_count); end if;
+ if needs_changed and p_score is not null then
+  if (p_score->>'needs_version')::integer is distinct from lead_version then raise exception 'VERSION_CONFLICT' using errcode='40001'; end if;
+  perform pose_private.ai_apply_score(s.lead_id,p_score-'needs_version','chat-score:'||s.id||':'||s.message_count);
+ end if;
  return jsonb_build_object('id',s.id,'message_count',s.message_count+2,'store_transcript',s.store_transcript);
 end $$;
 create function public.pose_system_ai_commit_chat(p_session uuid,p_user uuid,p_hash text,p_store boolean,p_message text,p_reply text,p_sources jsonb,p_actions jsonb,p_fields jsonb,p_score jsonb) returns jsonb language sql security invoker set search_path='' as $$ select pose_private.ai_commit_chat(p_session,p_user,p_hash,p_store,p_message,p_reply,p_sources,p_actions,p_fields,p_score); $$;

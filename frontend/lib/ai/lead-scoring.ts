@@ -17,7 +17,8 @@ export function scoreLead(input: ScoreInput) {
   const classification=classifyScore(score,5-unknown.length,input.intent===true);
   return {score,classification,breakdown,unknown,rule_version:RULE_VERSION,intent:input.intent===true};
 }
-export function scoreNeeds(needs:Record<string,{value:unknown;evidence?:string}>,properties:{price:number|null;location:string;property_type:string;availability:string}[],verified:boolean) {
+export type ScoreResult=ReturnType<typeof scoreLead>;
+export function scoreNeeds(needs:Record<string,{value:unknown;evidence?:string}>,properties:{price:number|null;location:string;property_type:string;availability:string}[],verified:boolean,previous?:ScoreResult,preserve:Dimension[]=[]) {
   properties=properties.filter(p=>p.availability==='Available');
   const input:ScoreInput={intent:needs.purchase_intent?.value===true};
   const quote=(key:string)=>needs[key]?.evidence || '';
@@ -35,5 +36,11 @@ export function scoreNeeds(needs:Record<string,{value:unknown;evidence?:string}>
   if(needs.timeline)input.timeline={value:needs.timeline.value as NonNullable<ScoreInput['timeline']>['value'],evidence:quote('timeline')};
   input.contact={value:verified ? needs.contact_ready?.value===true ? 'ready':'verified':'none',evidence:verified ? quote('contact_ready') || 'Số tài khoản đã xác minh':'Tài khoản chưa có số đã xác minh'};
   if(needs.next_step)input.next_step={value:needs.next_step.value as NonNullable<ScoreInput['next_step']>['value'],evidence:quote('next_step')};
+  for(const key of preserve){
+    const saved=previous?.breakdown[key];
+    if(!input[key] && previous?.rule_version===RULE_VERSION && saved?.value && saved.evidence && Object.hasOwn(points[key],saved.value)){
+      Object.assign(input,{[key]:{value:saved.value,evidence:saved.evidence}});
+    }
+  }
   return scoreLead(input);
 }
