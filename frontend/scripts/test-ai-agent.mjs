@@ -124,13 +124,24 @@ const assigned=(lead,sales)=>assignments.some(a=>a.lead_id===lead && a.sales_id=
 const scoringFor=lead=>lead ? {needs:lead.needs,verified:customers.get(lead.customer_id).phone_verified_at!==null,version:lead.version,score_result:lead.score_evidence,interest_ids:[...new Set([...sessions.values()].filter(s=>s.lead_id===lead.id).flatMap(s=>s.property_ids || []))]}:null;
 const properties=['Available','Sold','Reserved','Unavailable'].map((availability,i)=>({id:`f6300000-0000-4000-8000-00000000000${i+1}`,code:`P-${i+1}`,name:'Căn hộ công bố',price:i===1 ? null:3e9,availability,updated_at:'2026-10-14T01:00:00Z',location:'Hồ Chí Minh',property_type:'Apartment',publication:'Published',archived:false,area:80,bedrooms:2,project_name:'TERAVA',subdivision_name:null,amenities:'Công viên',cover_id:null,description:'Căn hộ có thông tin công bố để tham khảo.'}));
 properties.push({...properties[0],id:randomUUID(),publication:'Draft'}, {...properties[0],id:randomUUID(),archived:true});
+const previewOnly=process.argv.includes('--preview-only'),live=process.argv.includes('--live');
+if(previewOnly || live){
+ properties[0]={...properties[0],code:'TD-A01',name:'Căn hộ Thủ Đức',location:'Thủ Đức',price:3200000000,transaction_type:'Sale',price_period:'Total'};
+ properties[2]={...properties[2],code:'Q7-R01',name:'Căn hộ 2 phòng ngủ Quận 7',location:'Quận 7',price:25000000,availability:'Available',transaction_type:'Rent',price_period:'Month'};
+}
 const provider=createServer(async(req,res)=>{
  const chunks=[];for await(const chunk of req)chunks.push(chunk);const input=chunks.length ? JSON.parse(Buffer.concat(chunks)):{};
  const url=new URL(req.url,'http://localhost'),token=req.headers.authorization?.slice(7),who=token?.replace('fixture-',''),role=who==='Other' ? 'User':who,uid=users[who];
  const reply=(status,body)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(body));};
  const error=(code,message,status=400)=>reply(status,{code,message});
  if(providerOffline)return reply(503,{message:'Unavailable'});
+ if(previewOnly && url.pathname.endsWith('/pose_search_properties'))return reply(200,{items:[],total:0,page:1,pageSize:12,snapshot:randomUUID(),expiresAt:'2027-01-01T00:00:00Z'});
+ if(previewOnly && url.pathname.endsWith('/property_projects'))return reply(200,[]);
  if(url.pathname==='/v1/chat/completions'){
+  if(live){
+   const response=await fetch('http://localhost:1234/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.timeout(60000)});
+   const body=await response.json();modelOutputs.push(body.choices?.[0]?.message?.content);return reply(response.status,body);
+  }
   modelCalls++;prompt=input;
   check(input.response_format.type==='json_schema' && input.response_format.json_schema.name==='assistant_turn' && input.response_format.json_schema.strict && input.response_format.json_schema.schema.additionalProperties===false,'Strict provider JSON Schema');
   check(!req.headers.authorization,'Local provider accepts empty key without Authorization');
@@ -220,7 +231,7 @@ const provider=createServer(async(req,res)=>{
   searchReads++;
   check(token==='fixture-public','Retrieval uses anon publishable key');
   let rows=properties.filter(p=>p.publication==='Published' && !p.archived);
-  for(const [k,v] of url.searchParams){if(v.startsWith('eq.'))rows=rows.filter(p=>String(p[k])===v.slice(3));if(v.startsWith('in.'))rows=rows.filter(p=>v.slice(4,-1).split(',').includes(String(p[k])));if(v.startsWith('gte.'))rows=rows.filter(p=>p[k]!==null && p[k]>=Number(v.slice(4)));if(v.startsWith('lte.'))rows=rows.filter(p=>p[k]!==null && p[k]<=Number(v.slice(4)));}
+  for(const [k,v] of url.searchParams){if(v.startsWith('ilike.'))rows=rows.filter(p=>String(p[k]).toLocaleLowerCase('vi').includes(v.slice(7,-1).toLocaleLowerCase('vi')));if(v.startsWith('eq.'))rows=rows.filter(p=>String(p[k])===v.slice(3));if(v.startsWith('in.'))rows=rows.filter(p=>v.slice(4,-1).split(',').includes(String(p[k])));if(v.startsWith('gte.'))rows=rows.filter(p=>p[k]!==null && p[k]>=Number(v.slice(4)));if(v.startsWith('lte.'))rows=rows.filter(p=>p[k]!==null && p[k]<=Number(v.slice(4)));}
   return reply(200,req.headers.accept?.includes('application/vnd.pgrst.object+json') ? rows[0] || null:rows.slice(0,5));
  }
  if(url.pathname.endsWith('/property_media'))return reply(200,[]);
@@ -232,7 +243,7 @@ const provider=createServer(async(req,res)=>{
  return reply(404,{});
 });
 await new Promise(resolve=>provider.listen(3301,'127.0.0.1',resolve));
-const stack=await startStack(3300,{SUPABASE_URL:'http://127.0.0.1:3301',SUPABASE_PUBLISHABLE_KEY:'fixture-public',SUPABASE_SECRET_KEY:'fixture-secret',AI_API_URL:'http://127.0.0.1:3301/v1/',AI_API_KEY:'',AI_MODEL:'fixture',AI_TIMEOUT_MS:'5000'},{build:false,backendPort:3303});
+const stack=await startStack(3300,{SUPABASE_URL:'http://127.0.0.1:3301',SUPABASE_PUBLISHABLE_KEY:'fixture-public',SUPABASE_SECRET_KEY:'fixture-secret',AI_API_URL:'http://127.0.0.1:3301/v1/',AI_API_KEY:'',AI_MODEL:live ? 'qwen3-4b-instruct-2507':'fixture',AI_TIMEOUT_MS:live ? '60000':'5000'},{build:false,backendPort:3303});
 const app=stack.app;
 let unconfigured;
 let output='';app.stdout.on('data',c=>output+=c);app.stderr.on('data',c=>output+=c);
@@ -241,6 +252,21 @@ const call=(path,body,cookie='',method=body ? 'POST':'GET',requestOrigin=origin)
 const base={message:'Tôi muốn tìm căn hộ',store_transcript:false,history:[]};
 try{
  let ready=false;for(let i=0;i<60;i++){try{if((await fetch(origin)).ok){ready=true;break;}}catch{}await delay(250);}assert.ok(ready,output);
+ if(previewOnly){
+  console.log(`PREVIEW READY: ${origin}`);
+  await new Promise(resolve=>{process.once('message',message=>{if(message==='stop')resolve();});process.once('SIGINT',resolve);process.once('SIGTERM',resolve);});
+ }else if(live){
+  for(const [message,code,period] of [['Căn hộ dưới 3,5 tỷ ở Thủ Đức','TD-A01','Total'],['Cho thuê căn hộ 2 phòng ngủ Quận 7','Q7-R01','Month']]){
+   const started=performance.now(),response=await call('/api/ai/chat',{...base,message});
+   const raw=await response.text();assert.ok(response.headers.get('content-type')?.includes('application/json'),`${response.status}: ${raw}; ${output}`);const data=JSON.parse(raw);
+   console.log(`LIVE: ${message}; ${Math.round(performance.now()-started)} ms`);console.log(`reply: ${data.reply || data.message}`);console.log(`sources: ${JSON.stringify(data.sources)}`);
+   if(data.blocked){console.log(`guard: ${JSON.stringify(logs.filter(l=>l.session_id===data.session.id))}`);console.log(`model: ${JSON.stringify(modelOutputs)}`);}
+   assert.equal(response.status,200);assert.equal(data.blocked,false);
+   const source=data.sources.find(p=>p.code===code && p.price_period===period);assert.ok(source);assert.ok(moneyAmounts(data.reply).includes(source.price));
+   assert.ok(data.sources.every(p=>p.price_period===period));
+  }
+  console.log('PASS: 2/2 live Qwen chat turns grounded with sale/rental sources.');
+ }else{
  check((await call('/api/ai/chat',base,'','POST','https://other.test')).status===403,'Origin denied');
  check((await call('/api/ai/chat',{...base,message:'x'.repeat(2001)})).status===400,'Length limit');
  check((await call('/api/ai/chat',{...base,history:Array(11).fill({role:'user',content:'test'})})).status===400,'History limit');
@@ -336,4 +362,5 @@ try{
  const noModel=await fetch('http://localhost:3302/api/ai/chat',{method:'POST',headers:{Origin:'http://localhost:3302','Content-Type':'application/json'},body:JSON.stringify(base)});check(noModel.status===503 && (await noModel.json()).code==='AI_UNAVAILABLE' && sessions.size===beforeUnconfigured,'Unconfigured LLM no writes');
  console.log(`PASS: ${checks} M06 checks; fake provider and pure logic.`);
  if(process.argv.includes('--preview')){mode='ok';console.log(`PREVIEW READY: ${origin}`);await new Promise(resolve=>{process.once('SIGINT',resolve);process.once('SIGTERM',resolve);});}
+ }
 }finally{await stack.close();await unconfigured?.close();provider.closeAllConnections();await new Promise(resolve=>provider.close(resolve));await rm(temp,{recursive:true,force:true});}

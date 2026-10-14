@@ -4,6 +4,6 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   outputFileTracingRoot: path.resolve(process.cwd(), '..'),
   turbopack: { root: path.resolve(process.cwd(), '..') },
-  experimental: { proxyClientMaxBodySize: '22mb' },
+  experimental: { proxyClientMaxBodySize: '22mb', proxyTimeout: 250000 },
 };
 export default nextConfig;
