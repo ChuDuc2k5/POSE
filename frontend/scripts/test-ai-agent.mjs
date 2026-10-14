@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createHash,randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { startStack } from './test-stack.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { mkdtemp,readFile,writeFile,rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -11,8 +11,8 @@ import ts from 'typescript';
 
 const temp=await mkdtemp(join(tmpdir(),'pose-m06-'));
 for(const name of ['privacy','money','extraction','lead-scoring','guard','llm']){
- const source=await readFile(new URL(`../lib/ai/${name}.ts`,import.meta.url),'utf8');
- await writeFile(join(temp,`${name}.mjs`),ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText.replace(/from '\.\/([\w-]+)'/g,"from './$1.mjs'"));
+ const source=await readFile(new URL(`../../backend/src/modules/ai/${name}.ts`,import.meta.url),'utf8');
+ await writeFile(join(temp,`${name}.mjs`),ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText.replace(/from '\.\/([\w-]+)(?:\.(?:js|ts))?'/g,"from './$1.mjs'"));
 }
 const {scoreLead,classifyScore,scoreNeeds}=await import(pathToFileURL(join(temp,'lead-scoring.mjs')));
 const {extractNeeds}=await import(pathToFileURL(join(temp,'extraction.mjs')));
@@ -168,6 +168,7 @@ const provider=createServer(async(req,res)=>{
  }
  if(url.pathname.endsWith('/user'))return uid ? reply(200,{id:uid,aud:'authenticated',role:'authenticated',email:'fixture@example.test',email_confirmed_at:new Date().toISOString()}):reply(401,{});
  if(url.pathname.endsWith('/pose_access_context'))return reply(200,{user_id:uid,role,active:true,session_valid:true});
+ if(url.pathname.endsWith('/account_history'))return reply(200,[]);
  if(url.pathname.endsWith('/pose_read_profile'))return reply(200,{name:'Khách hàng kiểm thử',phone:who==='User' && verifiedPhone ? '+84901234561':'',phoneVerified:who==='User' && verifiedPhone});
  if(url.pathname.endsWith('/pose_ai_score_context'))return reply(200,scoringFor(leadFor(uid)));
  if(url.pathname.endsWith('/pose_ai_read_session') || url.pathname.endsWith('/pose_system_ai_read_guest')){
@@ -231,7 +232,8 @@ const provider=createServer(async(req,res)=>{
  return reply(404,{});
 });
 await new Promise(resolve=>provider.listen(3301,'127.0.0.1',resolve));
-const app=spawn(process.execPath,['node_modules/next/dist/bin/next','start','--port','3300'],{cwd:new URL('..',import.meta.url),env:{...process.env,SUPABASE_URL:'http://127.0.0.1:3301',SUPABASE_PUBLISHABLE_KEY:'fixture-public',SUPABASE_SECRET_KEY:'fixture-secret',AI_API_URL:'http://127.0.0.1:3301/v1/',AI_API_KEY:'',AI_MODEL:'fixture',AI_TIMEOUT_MS:'5000'},windowsHide:true,stdio:['ignore','pipe','pipe']});
+const stack=await startStack(3300,{SUPABASE_URL:'http://127.0.0.1:3301',SUPABASE_PUBLISHABLE_KEY:'fixture-public',SUPABASE_SECRET_KEY:'fixture-secret',AI_API_URL:'http://127.0.0.1:3301/v1/',AI_API_KEY:'',AI_MODEL:'fixture',AI_TIMEOUT_MS:'5000'},{build:false,backendPort:3303});
+const app=stack.app;
 let unconfigured;
 let output='';app.stdout.on('data',c=>output+=c);app.stderr.on('data',c=>output+=c);
 const origin='http://localhost:3300';
@@ -328,10 +330,10 @@ try{
  for(let i=0;i<41;i++){rate=await call('/api/ai/chat',{...base,session_id:limitId},limitCookie);if(rate.status===429)break;assert.equal(rate.status,200);}
  check(rate.status===429,'Per-session rate limit');
  providerOffline=true;const snapshot=sessions.size;check((await call('/api/ai/chat',base)).status===503 && sessions.size===snapshot,'Database failure fails closed');providerOffline=false;
- unconfigured=spawn(process.execPath,['node_modules/next/dist/bin/next','start','--port','3302'],{cwd:new URL('..',import.meta.url),env:{...process.env,SUPABASE_URL:'http://127.0.0.1:3301',SUPABASE_PUBLISHABLE_KEY:'fixture-public',SUPABASE_SECRET_KEY:'fixture-secret',AI_API_URL:'',AI_API_KEY:'',AI_MODEL:''},windowsHide:true,stdio:'ignore'});
+ unconfigured=await startStack(3302,{SUPABASE_URL:'http://127.0.0.1:3301',SUPABASE_PUBLISHABLE_KEY:'fixture-public',SUPABASE_SECRET_KEY:'fixture-secret',AI_API_URL:'',AI_API_KEY:'',AI_MODEL:''},{build:false,backendPort:3304});
  let reachable=false;for(let i=0;i<50;i++){try{if((await fetch('http://localhost:3302')).ok){reachable=true;break;}}catch{}await delay(250);}check(reachable,'Unconfigured app starts');
  const beforeUnconfigured=sessions.size;
  const noModel=await fetch('http://localhost:3302/api/ai/chat',{method:'POST',headers:{Origin:'http://localhost:3302','Content-Type':'application/json'},body:JSON.stringify(base)});check(noModel.status===503 && (await noModel.json()).code==='AI_UNAVAILABLE' && sessions.size===beforeUnconfigured,'Unconfigured LLM no writes');
  console.log(`PASS: ${checks} M06 checks; fake provider and pure logic.`);
  if(process.argv.includes('--preview')){mode='ok';console.log(`PREVIEW READY: ${origin}`);await new Promise(resolve=>{process.once('SIGINT',resolve);process.once('SIGTERM',resolve);});}
-}finally{app.kill();unconfigured?.kill();provider.close();await rm(temp,{recursive:true,force:true});}
+}finally{await stack.close();await unconfigured?.close();provider.closeAllConnections();await new Promise(resolve=>provider.close(resolve));await rm(temp,{recursive:true,force:true});}

@@ -33,7 +33,7 @@ export async function startStack(port, providerEnv, options = {}) {
       await delay(100);
     }
     if (!ready) throw new Error(`Backend did not start: ${output}`);
-    const args = options.standalone ? ['.next/standalone/server.js'] : ['node_modules/next/dist/bin/next','start','--port',String(port)];
+    const args = options.standalone ? ['.next/standalone/frontend/server.js'] : ['node_modules/next/dist/bin/next','start','--port',String(port)];
     app = spawn(process.execPath, args, { cwd: frontend, env: { ...env, PORT: String(port), HOSTNAME: '127.0.0.1' }, windowsHide: true, stdio: ['ignore','pipe','pipe'] });
     return { app, close: async () => { await stop(app); await stop(api); } };
   } catch (error) { await stop(app); await stop(api); throw error; }

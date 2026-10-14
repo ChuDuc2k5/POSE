@@ -1,11 +1,10 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { startStack } from './test-stack.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createCampaignDatabase } from './campaign-test-db.mjs';
 import { createSimulator } from './telephony-simulator.mjs';
 import { createHmac,createHash } from 'node:crypto';
-import { stopProcess } from './campaign-test-process.mjs';
 
 // The fake Supabase transport executes the real RPCs and RLS in isolated PostgreSQL.
 const db=await createCampaignDatabase();
@@ -54,7 +53,7 @@ const provider=createServer(async(req,res)=>{
   }
   if(url.pathname.startsWith('/rest/v1/')){
    const table=url.pathname.split('/').at(-1);
-   if(!['lead_tasks','calls','call_events','call_turns','contact_consents','campaigns','call_scripts','call_script_versions','property_products','property_public_catalog','property_projects','property_subdivisions'].includes(table))return reply(404,{});
+   if(!['account_history','lead_tasks','calls','call_events','call_turns','contact_consents','campaigns','call_scripts','call_script_versions','property_products','property_public_catalog','property_projects','property_subdivisions'].includes(table))return reply(404,{});
    const values=[],where=[];
    for(const [key,value] of url.searchParams){if(['select','order','offset','limit'].includes(key))continue;const p=value.indexOf('.'),op=value.slice(0,p),v=value.slice(p+1);if(!['eq','ilike','in'].includes(op))throw Error('Unsupported fake filter');if(op==='in'){values.push(v.slice(1,-1).split(','));where.push(`${quote(key)}=any($${values.length}::${key==='id'||key.endsWith('_id')?'uuid':'text'}[])`);}else{values.push(v);where.push(`${quote(key)} ${op==='eq' ? '=':'ilike'} $${values.length}`);}}
    const result=await transaction(role,()=>db.query(`select * from public.${quote(table)}${where.length ? ' where '+where.join(' and '):''}${url.searchParams.get('order') ? ' order by '+url.searchParams.get('order').split(',').map(x=>{const [key,dir]=x.split('.');return `${quote(key)} ${dir==='desc' ? 'desc':'asc'}`;}).join(','):''}`,values));
@@ -69,7 +68,7 @@ const provider=createServer(async(req,res)=>{
   reply(404,{});
  }catch(e){console.error('Gateway:',e.message,e.code,e.where||'');res.writeHead(e.code==='42501' ? 403:e.code==='40001' || e.code==='23505' ? 409:400,{'Content-Type':'application/json'});res.end(JSON.stringify({code:e.code || 'XX000',message:e.message,details:e.detail || null}));}
 });
-let app,simulator,output='';
+let app,stack,simulator,output='';
 const cronToken=cron;
 export async function startCallingFixture(){
  await new Promise(resolve=>provider.listen(3501,'127.0.0.1',resolve));
@@ -77,11 +76,11 @@ export async function startCallingFixture(){
  simulator=createSimulator({scenarioFor:input=>scenarios.get(input.to)||'hold'});
  await new Promise(resolve=>simulator.server.listen(3509,'127.0.0.1',resolve));
  await db.exec('grant select on storage.objects to authenticated');
- app=spawn(process.execPath,['node_modules/next/dist/bin/next','start','--port','3500'],{cwd:new URL('..',import.meta.url),windowsHide:true,stdio:['ignore','pipe','pipe'],env:{...process.env,SUPABASE_URL:'http://127.0.0.1:3501',SUPABASE_PUBLISHABLE_KEY:'fixture-public',SUPABASE_SECRET_KEY:'fixture-service',CRON_SECRET:cronToken,TELEPHONY_PROVIDER:'simulator',TELEPHONY_API_URL:'http://127.0.0.1:3509',TELEPHONY_CALLER_ID:'simulator',APP_PUBLIC_URL:origin,AI_API_URL:'http://127.0.0.1:3501/v1',AI_MODEL:'fixture'}});
+ stack=await startStack(3500,{...process.env,SUPABASE_URL:'http://127.0.0.1:3501',SUPABASE_PUBLISHABLE_KEY:'fixture-public',SUPABASE_SECRET_KEY:'fixture-service',CRON_SECRET:cronToken,TELEPHONY_PROVIDER:'simulator',TELEPHONY_API_URL:'http://127.0.0.1:3509',TELEPHONY_CALLER_ID:'simulator',APP_PUBLIC_URL:origin,AI_API_URL:'http://127.0.0.1:3501/v1',AI_MODEL:'fixture'},{build:false,backendPort:3503});app=stack.app;
  app.stdout.on('data',x=>output+=x);app.stderr.on('data',x=>output+=x);
  for(let n=0;n<100;n++){try{if((await fetch(`${origin}/api/calls`,{headers:{Cookie:'pose-access=fixture-admin'}})).ok)return;}catch{}await delay(150);}throw Error(output);
 }
-export async function closeCallingFixture(){try{await stopProcess(app);}finally{await simulator?.close();provider.closeAllConnections();await new Promise(resolve=>provider.close(resolve));await db.close();}}
+export async function closeCallingFixture(){try{await stack?.close();}finally{await simulator?.close();provider.closeAllConnections();await new Promise(resolve=>provider.close(resolve));await db.close();}}
 export const sql=(query,params=[])=>transaction('Owner',()=>db.query(query,params));
 export const owner=(query,params=[])=>{const task=chain.then(()=>db.query(query,params));chain=task.catch(()=>{});return task;};
 export const scalar=async(query,params=[])=>Object.values((await owner(query,params)).rows[0])[0];
