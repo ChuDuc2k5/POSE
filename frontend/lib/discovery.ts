@@ -1,7 +1,7 @@
 import { availabilityLabels, propertyTypeLabels, uuidPattern, type CatalogItem } from './catalog';
 import { normalizePhone } from './profile-validation';
 
-export type PublicProperty = CatalogItem & { project_name: string; subdivision_name: string | null; amenities: string; cover_id: string | null };
+export type PublicProperty = CatalogItem & { transaction_type: 'Sale'|'Rent'; price_period: 'Total'|'Month'; project_name: string; subdivision_name: string | null; amenities: string; cover_id: string | null };
 export type SearchResult = { items: PublicProperty[]; total: number; page: number; pageSize: number; snapshot: string; expiresAt: string };
 export type Favorite = { property_id: string; created_at: string; property: PublicProperty | null };
 export const inquiryLabels = { PendingVerification: 'Chờ xác minh số điện thoại', Received: 'Đã tiếp nhận', NeedsReview: 'Chờ kiểm tra thông tin' };
@@ -11,14 +11,14 @@ export const sortLabels = { newest: 'Mới cập nhật', priceAsc: 'Giá tăng 
 export function searchParameters(params: URLSearchParams) {
   const fields: Record<string,string> = {};
   const filters: Record<string,string|number> = {};
-  const known = ['q','location','project','type','minPrice','maxPrice','minArea','maxArea','bedrooms','availability','sort','page','pageSize','snapshot'];
+  const known = ['q','location','project','type','transaction','minPrice','maxPrice','minArea','maxArea','bedrooms','availability','sort','page','pageSize','snapshot'];
   for (const [key,value] of params) {
     if (!known.includes(key) || params.getAll(key).length > 1) fields.form = 'Bộ lọc không hợp lệ.';
     if (['q','location'].includes(key) && value.trim()) { if (value.length>120) fields[key]='Nhập tối đa 120 ký tự.'; else filters[key]=value.trim(); }
   }
-  for (const key of ['project','type','availability','sort']) {
+  for (const key of ['project','type','availability','sort','transaction']) {
     const value=params.get(key); if (!value) continue;
-    const valid=key==='project' ? uuidPattern.test(value) : Object.hasOwn(key==='type' ? propertyTypeLabels:key==='availability' ? availabilityLabels:sortLabels,value);
+    const valid=key==='transaction' ? ['Sale','Rent'].includes(value) : key==='project' ? uuidPattern.test(value) : Object.hasOwn(key==='type' ? propertyTypeLabels:key==='availability' ? availabilityLabels:sortLabels,value);
     if (!valid) fields[key]='Lựa chọn không hợp lệ.'; else filters[key]=value;
   }
   for (const key of ['minPrice','maxPrice','minArea','maxArea','bedrooms']) {
