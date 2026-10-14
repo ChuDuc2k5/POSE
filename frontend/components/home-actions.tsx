@@ -14,5 +14,5 @@ export function HomeActions() {
     }).catch(()=>{});
     return()=>controller.abort();
   },[]);
-  return <div className="hero-actions"><Link href={destination || '/sign-in'} className="button primary">{destination ? destination==='/customer' ? 'Trang chủ của tôi':'Mở không gian làm việc':'Đăng nhập'} <ArrowUpRight size={19}/></Link><Link href="#chuc-nang" className="text-link">Khám phá NexCall <ArrowRight size={17}/></Link></div>;
+  return <div className="hero-actions"><Link href={destination || '/sign-in'} className="button primary">{destination ? destination==='/customer' ? 'Trang chủ của tôi':'Mở không gian làm việc':'Đăng nhập'} <ArrowUpRight size={19}/></Link><Link href="#chuc-nang" className="text-link">Khám phá TERAVA <ArrowRight size={17}/></Link></div>;
 }

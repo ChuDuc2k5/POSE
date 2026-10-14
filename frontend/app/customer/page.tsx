@@ -3,7 +3,7 @@ import { requirePageSession } from '@/lib/auth-server';
 import { readProfile } from '@/lib/account-server';
 import { CustomerHome } from '@/components/customer-home';
 
-export const metadata: Metadata = { title: 'Trang chủ khách hàng | NexCall', robots: { index: false, follow: false } };
+export const metadata: Metadata = { title: 'Trang chủ khách hàng | TERAVA', robots: { index: false, follow: false } };
 
 export default async function CustomerPage() {
   const session = await requirePageSession('/customer', ['User']);

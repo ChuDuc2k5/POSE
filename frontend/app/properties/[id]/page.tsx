@@ -5,7 +5,7 @@ import { PropertyDetail } from '@/components/property-detail';
 import type { PublicProperty } from '@/lib/discovery';
 
 export const dynamic='force-dynamic';
-export const metadata={title:'Chi tiết bất động sản | NexCall'};
+export const metadata={title:'Chi tiết bất động sản | TERAVA'};
 export default async function PropertyPage({params}:{params:Promise<{id:string}>}){
   const {id}=await params;if(!uuidPattern.test(id))notFound();
   const client=authClient();
