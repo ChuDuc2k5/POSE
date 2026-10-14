@@ -1,18 +1,7 @@
+import './env.js';
 import { NestFactory } from '@nestjs/core';
-import { frontendUrl, observeEnabled } from './env.js';
-import { AppModule, ObserveInstrument } from './app.module.js';
-
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
-    ...(observeEnabled ? { instrument: ObserveInstrument } : {}),
-  });
-
-  app.enableCors({
-    origin: frontendUrl,
-    credentials: true,
-  });
-
-  await app.listen(process.env.PORT ?? 3001 );
-}
-
-await bootstrap();
+import { AppModule } from './app.module.js';
+import { configureApp } from './bootstrap.js';
+const app = await NestFactory.create(AppModule, { bodyParser: false });
+configureApp(app);
+await app.listen(Number(process.env.BACKEND_PORT || process.env.PORT || 3001), '0.0.0.0');

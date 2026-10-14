@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { spawn } from 'node:child_process';
+import { startStack } from './test-stack.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import sharp from 'sharp';
 
@@ -75,7 +75,9 @@ const provider = createServer(async (request, response) => {
   return reply(404, {});
 });
 await new Promise(resolve => provider.listen(3211, '127.0.0.1', resolve));
-const app = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '--port', '3210'], { cwd: new URL('..', import.meta.url), env: { ...process.env, SUPABASE_URL: 'http://127.0.0.1:3211', SUPABASE_PUBLISHABLE_KEY: 'fixture-public-key' }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+let stack;
+try { stack = await startStack(3210, {"SUPABASE_URL": "http://127.0.0.1:3211", "SUPABASE_PUBLISHABLE_KEY": "fixture-public-key"}); } catch (error) { provider.close(); throw error; }
+const { app } = stack;
 let startupOutput = '';
 app.stdout.on('data', chunk => { startupOutput += chunk; });
 app.stderr.on('data', chunk => { startupOutput += chunk; });
@@ -227,6 +229,6 @@ try {
     await new Promise(resolve => { process.once('SIGINT', resolve); process.once('SIGTERM', resolve); });
   }
 } finally {
-  app.kill();
+  await stack.close();
   provider.close();
 }

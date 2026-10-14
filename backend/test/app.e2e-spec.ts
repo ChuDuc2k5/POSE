@@ -1,24 +1,26 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { App } from 'supertest/types';
+import type { Server } from 'node:http';
+import { configureApp } from '../src/bootstrap.js';
 import { AppModule } from './../src/app.module.js';
 
 describe('AppController (e2e)', () => {
-  let app: INestApplication<App>;
+  let app: INestApplication<Server>;
 
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
-    app = moduleFixture.createNestApplication();
+    app = moduleFixture.createNestApplication({ bodyParser: false });
+    configureApp(app);
     await app.init();
   });
 
   it('/ (GET)', () => {
     return request(app.getHttpServer())
-      .get('/')
+      .get('/api')
       .expect(200)
       .expect('Hello World!');
   });
@@ -33,14 +35,14 @@ describe('AppController (e2e)', () => {
         : { user_id: 'fixture-id', role, active: true, session_valid: true },
     ), { status: 200 })));
     try {
-      await request(app.getHttpServer()).get('/auth/me').expect(401);
-      await request(app.getHttpServer()).get('/auth/me').set('Authorization', 'Bearer fixture-token').expect(200);
-      await request(app.getHttpServer()).get('/auth/admin').set('Authorization', 'Bearer fixture-token').expect(403);
+      await request(app.getHttpServer()).get('/api/auth/principal').expect(401);
+      await request(app.getHttpServer()).get('/api/auth/principal').set('Authorization', 'Bearer fixture-token').expect(200);
+      await request(app.getHttpServer()).get('/api/auth/admin').set('Authorization', 'Bearer fixture-token').expect(403);
       role = 'Sales';
-      await request(app.getHttpServer()).get('/auth/sales').set('Authorization', 'Bearer fixture-token').expect(200);
-      await request(app.getHttpServer()).get('/auth/admin').set('Authorization', 'Bearer fixture-token').expect(403);
+      await request(app.getHttpServer()).get('/api/auth/sales').set('Authorization', 'Bearer fixture-token').expect(200);
+      await request(app.getHttpServer()).get('/api/auth/admin').set('Authorization', 'Bearer fixture-token').expect(403);
       role = 'Admin';
-      await request(app.getHttpServer()).get('/auth/admin').set('Authorization', 'Bearer fixture-token').expect(200);
+      await request(app.getHttpServer()).get('/api/auth/admin').set('Authorization', 'Bearer fixture-token').expect(200);
     } finally { vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
   });
 

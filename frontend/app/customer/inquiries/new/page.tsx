@@ -1,4 +1,4 @@
-import { requirePageSession } from '@/lib/auth-server';
+import { requirePageSession } from '@/lib/page-session';
 import { SiteHeader } from '@/components/site-header';
 import { CustomerNav } from '@/components/customer-nav';
 import { InquiryForm } from '@/components/inquiry-form';

@@ -1,8 +1,8 @@
-import { requirePageSession } from '@/lib/auth-server';
+import { requirePageSession } from '@/lib/page-session';
 import { CatalogWorkspace } from '@/components/catalog-workspace';
-import { readProfile } from '@/lib/account-server';
+import { readProfile } from '@/lib/page-profile';
 
 export default async function AdminPage() {
-  const session = await requirePageSession('/admin', ['Admin']);
-  return <CatalogWorkspace name={(await readProfile(session.access)).name}/>;
+  await requirePageSession('/admin', ['Admin']);
+  return <CatalogWorkspace name={(await readProfile()).name}/>;
 }

@@ -1,30 +1,21 @@
 import { Module } from '@nestjs/common';
-import { observeEnabled } from './env.js';
-import { createObserveModule } from '@nestjs/observe';
-import { AppController } from './app.controller.js';
-import { AppService } from './app.service.js';
-import { GatewayGateway } from './gateway/gateway.gateway.js';
 import { APP_GUARD } from '@nestjs/core';
 import { AuthGuard } from './auth/auth.guard.js';
 import { AccessController } from './auth/access.controller.js';
-
-export const { ObserveModule, ObserveInstrument } = createObserveModule();
-
+import { AppController } from './app.controller.js';
+import { AppService } from './app.service.js';
+import { GatewayGateway } from './gateway/gateway.gateway.js';
+import { SupabaseModule } from './modules/supabase/supabase.module.js';
+import { AuthModule } from './modules/auth/auth.module.js';
+import { AccountModule } from './modules/account/account.module.js';
+import { CatalogModule } from './modules/catalog/catalog.module.js';
+import { CustomerModule } from './modules/customer/customer.module.js';
+import { WorkspaceModule } from './modules/workspace/workspace.module.js';
+import { QueueModule } from './modules/queue/queue.module.js';
+import { HealthController } from './modules/queue/health.controller.js';
 @Module({
-  imports: [
-    // Distributed tracing, auto-correlated logs, request/job metrics, error
-    // telemetry, alarms, and more — out of the box. Sign up at https://observe.nestjs.com
-    ...(observeEnabled ? [ObserveModule.forRoot({
-      appKey: process.env.OBSERVE_APP_KEY!,
-      appSecret: process.env.OBSERVE_APP_SECRET!,
-      serviceId: 'backend',
-    })] : []),
-  ],
-  controllers: [AppController, AccessController],
-  providers: [
-    AppService,
-    { provide: APP_GUARD, useClass: AuthGuard },
-    GatewayGateway
-  ],
+  imports: [SupabaseModule, AuthModule, AccountModule, CatalogModule, CustomerModule, WorkspaceModule, QueueModule],
+  controllers: [AppController, AccessController, HealthController],
+  providers: [AppService, { provide: APP_GUARD, useClass: AuthGuard }, GatewayGateway],
 })
 export class AppModule {}
