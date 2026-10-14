@@ -1,0 +1,36 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: ["redis-data:/data"]
+    networks: [pose]
+  backend:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      PORT: 3001
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      TRUSTED_PROXY_IPS: 172.30.0.10
+    depends_on: [redis]
+    networks: [pose]
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        BACKEND_URL: http://backend:3001
+    environment:
+      BACKEND_URL: http://backend:3001
+    ports: ["3000:3000"]
+    depends_on: [backend]
+    networks:
+      pose:
+        ipv4_address: 172.30.0.10
+volumes:
+  redis-data:
+networks:
+  pose:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
