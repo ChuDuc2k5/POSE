@@ -12,6 +12,7 @@ describe('M06 services', () => {
     expect(guard.outputReason('RV-A0805 giá 3,5 tỷ, còn bán.', evidence)).toBeNull();
     expect(guard.outputReason('RV-A0805 giá 9 tỷ.', evidence)).toBe('UNSUPPORTED_PRICE');
     expect(guard.outputReason('RV-A0805 còn bán.', [{ ...evidence[0], availability: 'Sold' }])).toBe('UNSUPPORTED_AVAILABILITY');
+    expect(guard.outputReason('Từ chối xác nhận các 承诺, đề nghị liên hệ Sales.', evidence)).toBe('UNSUPPORTED_LANGUAGE');
     expect(guard.outputReason('RV-A0999 giá 3,5 tỷ.', evidence)).toBe('UNSUPPORTED_PROPERTY');
     expect(guard.outputReason('Tôi không thể cam kết pháp lý.', evidence)).toBeNull();
     expect(guard.outputReason('RV-A0805 còn bán, nhưng không đủ thông tin để khẳng định có 2 phòng ngủ.', evidence)).toBeNull();

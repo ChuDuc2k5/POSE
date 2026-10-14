@@ -5,7 +5,7 @@ export const GUARD_VERSION='guard.v2';
 export const safeReply='Tôi chưa thể xác nhận câu trả lời an toàn từ dữ liệu hiện có. Bạn có thể yêu cầu chuyên viên tư vấn hỗ trợ.';
 export const disclosure='Tôi là trợ lý AI của TERAVA.';
 export function correctionData(reason:string){
-  const corrections:Record<string,string>={UNSUPPORTED_ROOM_COUNT:'Số phòng ngủ không có trong properties. Không mô tả căn có số phòng khách yêu cầu. Nói chưa biết số phòng, cần Sales xác nhận. Chép giá price nguyên số VND, không đổi đơn vị.',UNSUPPORTED_PRICE:'Chép đúng price nguyên số VND của căn; không đổi đơn vị hay gán giá khác.',UNSUPPORTED_COMMITMENT:'Không có dữ liệu giảm giá/pháp lý/thanh toán. Từ chối xác nhận, đề nghị Sales.',UNSUPPORTED_AVAILABILITY:'Chỉ Available còn bán; không giới thiệu trạng thái khác là còn bán.',PRIVATE_DATA_OR_SECRET:'Từ chối cung cấp dữ liệu cá nhân/secret, không trích lại nội dung đó.'};
+  const corrections:Record<string,string>={UNSUPPORTED_LANGUAGE:'Chỉ viết tiếng Việt, không dùng chữ Hán hay ngôn ngữ khác.',UNSUPPORTED_ROOM_COUNT:'Số phòng ngủ không có trong properties. Không mô tả căn có số phòng khách yêu cầu. Nói chưa biết số phòng, cần Sales xác nhận. Chép giá price nguyên số VND, không đổi đơn vị.',UNSUPPORTED_PRICE:'Chép đúng price nguyên số VND của căn; không đổi đơn vị hay gán giá khác.',UNSUPPORTED_COMMITMENT:'Không có dữ liệu giảm giá/pháp lý/thanh toán. Từ chối xác nhận, đề nghị Sales.',UNSUPPORTED_AVAILABILITY:'Chỉ Available còn bán; không giới thiệu trạng thái khác là còn bán.',PRIVATE_DATA_OR_SECRET:'Từ chối cung cấp dữ liệu cá nhân/secret, không trích lại nội dung đó.'};
   return {violations:[reason],correction:corrections[reason] || 'Bỏ nội dung không có trong properties, nói rõ chưa biết và đề nghị Sales.'};
 }
 export function injection(text:string) { return /bỏ qua (?:hướng dẫn|chỉ dẫn)|ignore (?:previous|all) (?:instructions|rules)|bạn là admin|(?:đọc|xem|liệt kê).{0,25}(?:lead|khách hàng).{0,15}(?:khác|tất cả)|read (?:other|all) (?:customers?|leads?)|đổi (?:role|quyền|consent)|change (?:role|consent)|(?:reveal|show|đọc|tiết lộ).{0,15}system prompt/i.test(text); }
@@ -42,6 +42,8 @@ function moneyText(text:string,evidence:Evidence[]){
   return result;
 }
 export function outputReason(reply:string,evidence:Evidence[],customerText='') {
+  // Small local models sometimes slip Chinese/Japanese/Korean words into Vietnamese replies.
+  if(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(reply))return 'UNSUPPORTED_LANGUAGE';
   if(secrets.test(reply) || clauses(reply).some(clause=>[...clause.matchAll(privateCustomers)].some(m=>!negated(clause,m.index!))))return 'PRIVATE_DATA_OR_SECRET';
   if(links.test(reply))return 'PRIVATE_OR_UNSUPPORTED_LINK';
   if(clauses(reply).some(commitment))return 'UNSUPPORTED_COMMITMENT';
