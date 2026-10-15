@@ -1,4 +1,5 @@
 'use client';
+import { clearChatStorage } from '@/lib/chat-storage';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -8,6 +9,7 @@ export function LogoutButton() {
   const [error, setError] = useState('');
   async function logout() {
     setBusy(true); setError('');
+    clearChatStorage();
     try {
       const response = await fetch('/api/auth/logout', { method: 'POST' });
       const data = await response.json();

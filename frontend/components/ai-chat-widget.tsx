@@ -4,9 +4,14 @@ import Link from 'next/link';
 import { ArrowUp, AudioLines, Mic, MicOff, Plus, UserRound, X } from 'lucide-react';
 import { TeravaMark } from './brand';
 import { availabilityLabels } from '@/lib/catalog';
+import { chatStorageKey } from '@/lib/chat-storage';
 
 type Source={id:string;code:string;name:string;updated_at:string;price:number|null;availability:keyof typeof availabilityLabels;transaction_type:'Sale'|'Rent';price_period:'Total'|'Month'};
 type Message={role:'user'|'assistant';content:string;sources?:Source[]};
+function validMessage(message:Message){
+  return message && (message.role==='user'||message.role==='assistant') && typeof message.content==='string' &&
+    (!message.sources || Array.isArray(message.sources) && message.sources.every(source=>source && typeof source.id==='string' && typeof source.name==='string' && typeof source.code==='string' && typeof source.updated_at==='string' && (source.price===null || typeof source.price==='number') && Object.hasOwn(availabilityLabels,source.availability)));
+}
 type VoiceState='idle'|'listening'|'thinking'|'speaking';
 type Recognition={lang:string;interimResults:boolean;continuous:boolean;start():void;stop():void;abort():void;
   onresult:((event:{resultIndex:number;results:ArrayLike<{isFinal:boolean;0:{transcript:string}}>})=>void)|null;onend:(()=>void)|null;onerror:((event:{error:string})=>void)|null};
@@ -27,7 +32,7 @@ function vietnameseVoice(){
   return window.speechSynthesis.getVoices().find(v=>v.lang.toLowerCase().startsWith('vi')) || null;
 }
 
-export function AiChatWidget({signedIn=false,propertyId}:{signedIn?:boolean;propertyId?:string}){
+export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,visible,navigationKey}:{signedIn?:boolean;propertyId?:string;propertyName?:string;ownerKey:string;visible:boolean;navigationKey:string}){
   const [open,setOpen]=useState(false),[store,setStore]=useState(false),[session,setSession]=useState<string>();
   const [messages,setMessages]=useState<Message[]>([]),[text,setText]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [dictating,setDictating]=useState(false),[voice,setVoice]=useState<VoiceState|null>(null),[heard,setHeard]=useState('');
@@ -38,12 +43,39 @@ export function AiChatWidget({signedIn=false,propertyId}:{signedIn?:boolean;prop
   const history=useRef<Message[]>([]),sessionRef=useRef<string|undefined>(undefined);
   const panel=useRef<HTMLElement>(null),launcher=useRef<HTMLButtonElement>(null),finishSpeech=useRef<(()=>void)|null>(null),voiceEpoch=useRef(0);
   const voiceActive=voice!==null;
+  const [restored,setRestored]=useState(false);
+  useEffect(()=>{
+    try{
+      const saved=JSON.parse(window.sessionStorage.getItem(chatStorageKey)||'null');
+      if(saved?.ownerKey===ownerKey && Array.isArray(saved.messages) && saved.messages.slice(-30).every(validMessage)){
+        const restoredMessages=saved.messages.slice(-30);
+        history.current=restoredMessages;sessionRef.current=typeof saved.session_id==='string' ? saved.session_id:undefined;
+        // Restore browser-only storage after hydration.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setMessages(restoredMessages);setSession(sessionRef.current);setStore(saved.store===true);setOpen(saved.open===true);setText(typeof saved.draft==='string' ? saved.draft.slice(0,2000):'');
+      }else window.sessionStorage.removeItem(chatStorageKey);
+    }catch{}
+    setRestored(true);
+  },[ownerKey]);
+  useEffect(()=>{
+    if(!restored)return;
+    try{window.sessionStorage.setItem(chatStorageKey,JSON.stringify({ownerKey,messages:messages.slice(-30),session_id:session,store,open,draft:text}));}catch{}
+  },[restored,ownerKey,messages,session,store,open,text]);
+  useEffect(()=>{
+    voiceOn.current=false;voiceEpoch.current++;
+    const r=recognition.current;recognition.current=null;
+    if(r){r.onend=null;r.onresult=null;r.onerror=null;r.abort();}
+    window.speechSynthesis?.cancel();finishSpeech.current?.();finishSpeech.current=null;
+    // Navigation ends the browser voice session while retaining conversation state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDictating(false);setVoice(null);setHeard('');
+  },[navigationKey,visible]);
 
   useEffect(()=>{history.current=messages;sessionRef.current=session;},[messages,session]);
   useEffect(()=>{if(open){if(voiceActive)panel.current?.querySelector<HTMLButtonElement>('.ai-voice-end')?.focus();else input.current?.focus();}},[open,voiceActive]);
   useEffect(()=>{log.current?.scrollTo({top:log.current.scrollHeight,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant':'smooth'});},[messages,busy,heard]);
   useEffect(()=>{const el=input.current;if(el){el.style.height='auto';el.style.height=`${Math.min(el.scrollHeight,160)}px`;}},[text]);
-  useEffect(()=>()=>{voiceOn.current=false;voiceEpoch.current++;if(recognition.current){recognition.current.onend=null;recognition.current.onresult=null;recognition.current.abort();}window.speechSynthesis?.cancel();finishSpeech.current?.();},[]);
+  useEffect(()=>()=>{voiceOn.current=false;voiceEpoch.current++;if(recognition.current){recognition.current.onend=null;recognition.current.onresult=null;recognition.current.onerror=null;recognition.current.abort();}window.speechSynthesis?.cancel();finishSpeech.current?.();},[]);
 
   const ask=useCallback(async(message:string)=>{
     const content=message.trim();if(!content || pending.current)return null;
@@ -135,13 +167,14 @@ export function AiChatWidget({signedIn=false,propertyId}:{signedIn?:boolean;prop
       const result=await response.json();if(!response.ok)throw new Error(result.message);setNotice(result.message);setHandoffOpen(false);
     }catch(e){setError(e instanceof Error ? e.message:'Chưa thể bàn giao.');}finally{pending.current=false;setBusy(false);}
   }
-  function reset(){stopVoice();sessionRef.current=undefined;setSession(undefined);setMessages([]);setStore(false);setNotice('');setHandoffKey(undefined);setError('');setText('');setHandoffOpen(false);}
+  function reset(){try{window.sessionStorage.removeItem(chatStorageKey);}catch{}stopVoice();setPreferred('');sessionRef.current=undefined;setSession(undefined);setMessages([]);setStore(false);setNotice('');setHandoffKey(undefined);setError('');setText('');setHandoffOpen(false);}
 
+  if(!visible || !restored)return null;
   return <aside className="ai-chat">
     {open && <section ref={panel} id="ai-chat-panel" className="ai-panel" role="dialog" aria-label="Trợ lý AI TERAVA" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close();}if(e.key==='Tab'){const nodes=panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],textarea:not(:disabled),input:not(:disabled)');if(nodes?.length){const first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}}}}>
       <header className="ai-panel-head">
         <span className="ai-avatar"><TeravaMark size={26}/></span>
-        <div><h2>Trợ lý TERAVA</h2><small>Trợ lý AI · tư vấn bất động sản</small></div>
+        <div><h2>Trợ lý TERAVA</h2><small>Trợ lý AI · tư vấn bất động sản</small>{propertyName && <small>Đang xem: {propertyName}</small>}</div>
         <button type="button" className="ai-icon" disabled={busy} onClick={()=>{reset();requestAnimationFrame(()=>input.current?.focus());}} title="Cuộc trò chuyện mới" aria-label="Cuộc trò chuyện mới"><Plus size={18}/></button>
         <button type="button" className="ai-icon" onClick={close} title="Đóng" aria-label="Đóng"><X size={18}/></button>
       </header>

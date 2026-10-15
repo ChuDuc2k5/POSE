@@ -31,11 +31,15 @@ export async function redirectSignedInUser(path: '/' | '/sign-in' | '/sign-up') 
   if (jar.get(REFRESH_COOKIE)?.value) redirect(`/auth/refresh?next=${encodeURIComponent(path)}`);
 }
 
-export async function publicPageRole(path: string): Promise<Role | null> {
+export async function publicPageSession(path: string) {
   const jar = await cookies();
   if (!jar.get(ACCESS_COOKIE)?.value && !jar.get(REFRESH_COOKIE)?.value) return null;
   const session = await authenticatedSession({ writable: false });
-  if (session) return session.role;
+  if (session) return session;
   if (jar.get(REFRESH_COOKIE)?.value) redirect(`/auth/refresh?next=${encodeURIComponent(path)}`);
   return null;
+}
+
+export async function publicPageRole(path: string): Promise<Role | null> {
+  return (await publicPageSession(path))?.role ?? null;
 }

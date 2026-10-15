@@ -73,12 +73,13 @@ const provider=createServer(async(req,res)=>{
 let app,stack,simulator,output='';
 const cronToken=cron;
 export async function startCallingFixture(options={}){
+ const simulatorPort=Number(process.env.CALLING_SIMULATOR_PORT || 3509);
  await new Promise(resolve=>provider.listen(3501,'127.0.0.1',resolve));
  process.env.TELEPHONY_API_KEY='fixture-telephony';process.env.TELEPHONY_WEBHOOK_SECRET='fixture-webhook-secret';
  simulator=createSimulator({scenarioFor:input=>scenarios.get(input.to)||'hold'});
- await new Promise(resolve=>simulator.server.listen(3509,'127.0.0.1',resolve));
+ await new Promise(resolve=>simulator.server.listen(simulatorPort,'127.0.0.1',resolve));
  await db.exec('grant select on storage.objects to authenticated');
- stack=await startStack(3500,{...process.env,SUPABASE_URL:'http://127.0.0.1:3501',SUPABASE_PUBLISHABLE_KEY:'fixture-public',SUPABASE_SECRET_KEY:'fixture-service',CRON_SECRET:cronToken,TELEPHONY_PROVIDER:'simulator',TELEPHONY_API_URL:'http://127.0.0.1:3509',TELEPHONY_CALLER_ID:'simulator',APP_PUBLIC_URL:origin,AI_API_URL:options.aiUrl||'http://127.0.0.1:3501/v1',AI_MODEL:options.model||'fixture'},{build:false,backendPort:3503});app=stack.app;
+ stack=await startStack(3500,{...process.env,SUPABASE_URL:'http://127.0.0.1:3501',SUPABASE_PUBLISHABLE_KEY:'fixture-public',SUPABASE_SECRET_KEY:'fixture-service',CRON_SECRET:cronToken,TELEPHONY_PROVIDER:'simulator',TELEPHONY_API_URL:`http://127.0.0.1:${simulatorPort}`,TELEPHONY_CALLER_ID:'simulator',APP_PUBLIC_URL:origin,AI_API_URL:options.aiUrl||'http://127.0.0.1:3501/v1',AI_MODEL:options.model||'fixture'},{build:false,backendPort:3503});app=stack.app;
  app.stdout.on('data',x=>output+=x);app.stderr.on('data',x=>output+=x);
  for(let n=0;n<100;n++){try{if((await fetch(`${origin}/api/calls`,{headers:{Cookie:'pose-access=fixture-admin'}})).ok)return;}catch{}await delay(150);}throw Error(output);
 }

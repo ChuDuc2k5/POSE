@@ -82,3 +82,5 @@
 .ai-workspace .button.primary{color:var(--nx-on-primary);background:var(--nx-gold-gradient);border-color:var(--nx-primary)}.ai-workspace :focus-visible{outline:2px solid var(--nx-primary);outline-offset:3px}
 .ai-workspace.catalog-list-panel{margin:1.5rem auto;padding:1.5rem;max-width:72rem;background:var(--nx-surface);color:var(--nx-ink);border:1px solid var(--nx-line);border-radius:1.25rem;box-shadow:var(--nx-shadow)}.ai-workspace-heading{display:flex;align-items:center;gap:.75rem;margin-bottom:1rem}.ai-workspace h2{font-size:1.25rem;font-weight:700;color:var(--nx-primary-tint)}.ai-workspace article{padding:1rem 0;border-bottom:1px solid var(--nx-line)}.ai-workspace form{display:flex;gap:1rem;align-items:end;flex-wrap:wrap}.ai-workspace label{display:grid;gap:.4rem}.ai-workspace dd,.ai-workspace small{color:var(--nx-muted)}
 @media(max-width:600px){.ai-workspace.catalog-list-panel{margin:1rem .5rem;padding:1rem}.ai-workspace form label{width:100%}}
+
+.ai-panel-head small{display:block;overflow-wrap:anywhere}

@@ -135,7 +135,7 @@ const provider=createServer(async(req,res)=>{
  const reply=(status,body)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(body));};
  const error=(code,message,status=400)=>reply(status,{code,message});
  if(providerOffline)return reply(503,{message:'Unavailable'});
- if(previewOnly && url.pathname.endsWith('/pose_search_properties'))return reply(200,{items:[],total:0,page:1,pageSize:12,snapshot:randomUUID(),expiresAt:'2027-01-01T00:00:00Z'});
+ if(previewOnly && url.pathname.endsWith('/pose_search_properties')){const items=properties.filter(p=>p.publication==='Published' && !p.archived);return reply(200,{items,total:items.length,page:1,pageSize:12,snapshot:randomUUID(),expiresAt:'2027-01-01T00:00:00Z'});}
  if(previewOnly && url.pathname.endsWith('/property_projects'))return reply(200,[]);
  if(url.pathname==='/v1/chat/completions'){
   if(live){
@@ -177,6 +177,7 @@ const provider=createServer(async(req,res)=>{
   modelOutputs.push(result);
   return reply(200,{choices:[{message:{content:JSON.stringify(result)}}]});
  }
+ if(url.pathname.endsWith('/logout')){res.writeHead(204);return res.end();}
  if(url.pathname.endsWith('/user'))return uid ? reply(200,{id:uid,aud:'authenticated',role:'authenticated',email:'fixture@example.test',email_confirmed_at:new Date().toISOString()}):reply(401,{});
  if(url.pathname.endsWith('/pose_access_context'))return reply(200,{user_id:uid,role,active:true,session_valid:true});
  if(url.pathname.endsWith('/account_history'))return reply(200,[]);
@@ -271,7 +272,7 @@ try{
  check((await call('/api/ai/chat',{...base,message:'x'.repeat(2001)})).status===400,'Length limit');
  check((await call('/api/ai/chat',{...base,history:Array(11).fill({role:'user',content:'test'})})).status===400,'History limit');
  check((await call('/api/ai/chat',{...base,user_id:otherId})).status===400,'Identity spoofing denied');
- for(const [path,cookie,expected] of [['/properties','','Trò chuyện với trợ lý AI'],[`/properties/${properties[0].id}`,'','Trò chuyện với trợ lý AI'],['/customer','pose-access=fixture-User','Trò chuyện với trợ lý AI'],['/sales','pose-access=fixture-Sales','Bàn giao từ trợ lý AI'],['/admin','pose-access=fixture-Admin','AI Agent']]){
+ for(const [path,cookie,expected] of [['/properties','','AiChatPage'],[`/properties/${properties[0].id}`,'','AiChatPage'],['/customer','pose-access=fixture-User','AiChatPage'],['/sales','pose-access=fixture-Sales','Bàn giao từ trợ lý AI'],['/admin','pose-access=fixture-Admin','AI Agent']]){
   const page=await call(path,null,cookie);check(page.ok && (await page.text()).includes(expected),`UI mounted on ${path}`);
  }
  const first=await call('/api/ai/chat',base);check(first.status===200,'Guest chat succeeds');const chat=await first.json();
