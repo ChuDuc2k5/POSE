@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { importListingImage } from './listing-media.mjs';
+import { assertListingPrivacy, hasListingContactData, scrubListingText } from './listing-privacy.mjs';
 
 const amenities = {
   parking: 'chỗ đậu xe', elevator: 'thang máy', swimmingPool: 'hồ bơi', gym: 'phòng gym',
@@ -57,10 +58,10 @@ export function prepareRevoland(input, now = new Date().toISOString()) {
   const records = transposeColumns(input).filter(row => row.isDeleted !== true);
   const titles = new Map();
   for (const record of records) {
-    const title = titleCase(record.title).toLocaleLowerCase('vi');
+    const title = titleCase(scrubListingText(record.title, { title: true })).toLocaleLowerCase('vi');
     titles.set(title, (titles.get(title) ?? 0) + 1);
   }
-  return records.map(record => {
+  const prepared = records.map(record => {
     const externalId = record['_id.$oid'];
     if (typeof externalId !== 'string' || !/^[a-f\d]{24}$/i.test(externalId)) throw new Error('Mã nguồn Revoland không hợp lệ.');
     const type = types[record.type];
@@ -75,8 +76,10 @@ export function prepareRevoland(input, now = new Date().toISOString()) {
     if (!price) notes.push('Thiếu giá hoặc giá không hợp lệ');
     const area = ['landArea', 'usableArea', 'buildingArea'].map(key => positive(record[`propertyDetails.${key}`])).find(Boolean) ?? null;
     if (!area) notes.push('Thiếu diện tích');
-    const name = titleCase(record.title).slice(0, 160);
-    if ((titles.get(titleCase(record.title).toLocaleLowerCase('vi')) ?? 0) > 1) notes.push('Tiêu đề trùng với tin khác');
+    const safeTitle = scrubListingText(record.title, { title: true });
+    const safeDescription = scrubListingText(record.description);
+    const name = titleCase(safeTitle).slice(0, 160) || 'Bất động sản Revoland';
+    if ((titles.get(titleCase(safeTitle).toLocaleLowerCase('vi')) ?? 0) > 1) notes.push('Tiêu đề trùng với tin khác');
     const labels = [...new Set(Object.entries(amenities).filter(([key]) => record[`amenities.${key}`] === true).map(([, label]) => label))];
     const details = [];
     if (labels.length) details.push(`Tiện ích: ${labels.join(', ')}.`);
@@ -86,7 +89,7 @@ export function prepareRevoland(input, now = new Date().toISOString()) {
     if (floors) details.push(`${floors} tầng.`);
     details.push('Nguồn: dữ liệu Revoland.');
     const suffix = details.join(' ');
-    const original = clean(record.description).slice(0, Math.max(0, 10000 - suffix.length - 1));
+    const original = safeDescription.slice(0, Math.max(0, 10000 - suffix.length - 1));
     const location = [clean(record['location.ward']) || clean(record['location.address']), clean(record['location.city'])].filter(Boolean).join(', ');
     let scrapedAt = now;
     for (const key of ['publishedAt.$date', 'publishedAt', 'submittedAt.$date', 'submittedAt']) {
@@ -96,6 +99,7 @@ export function prepareRevoland(input, now = new Date().toISOString()) {
     }
     return {
       project: projects[transaction].code,
+      text_scrubbed: safeTitle !== clean(record.title) || safeDescription !== clean(record.description),
       image_urls: (Array.isArray(record.images) ? record.images : []).slice(0, 5).filter(image => typeof image === 'string' && /^https?:\/\//i.test(image)),
       row: {
         code: `RVL-${externalId.slice(0, 16).toUpperCase()}`, name, location,
@@ -108,6 +112,8 @@ export function prepareRevoland(input, now = new Date().toISOString()) {
       },
     };
   });
+  assertListingPrivacy(prepared);
+  return prepared;
 }
 
 export function summarizeRevoland(prepared) {
@@ -119,6 +125,8 @@ export function summarizeRevoland(prepared) {
     withNotes: prepared.filter(p => p.row.quality_notes).length,
     notesCount: prepared.reduce((count, p) => count + (p.row.quality_notes ? p.row.quality_notes.split('; ').length : 0), 0),
     imagesPlanned: prepared.reduce((count, p) => count + p.image_urls.length, 0),
+    rowsChangedByScrubbing: prepared.filter(p => p.text_scrubbed).length,
+    rowsWithDetectorHits: prepared.filter(({ row }) => ['name', 'description', 'location', 'quality_notes'].some(key => hasListingContactData(row[key]))).length,
   };
 }
 

@@ -23,6 +23,16 @@ function fixture(overrides: RecordRow[] = [{}]) {
 }
 
 describe('Revoland import', () => {
+  it('scrubs embedded contact data from titles and descriptions before building rows', () => {
+    const prepared = prepareRevoland(fixture([{
+      title: 'NHÀ 50M² - Liên hệ 090-123-4567',
+      description: 'Nhà 50m², 3 phòng ngủ. Liên hệ anh Tuấn 0967.703.685. Sổ hồng riêng.',
+    }]), now);
+    expect(prepared[0].row.name).toBe('Nhà 50m2');
+    expect(prepared[0].row.description).toBe('Nhà 50m², 3 phòng ngủ. Sổ hồng riêng. Nguồn: dữ liệu Revoland.');
+    expect(summarizeRevoland(prepared)).toMatchObject({ rowsChangedByScrubbing: 1, rowsWithDetectorHits: 0 });
+  });
+
   it('transposes sparse column indices and skips only deleted rows', () => {
     const input = fixture([{}, { isDeleted: true }, { isDeleted: false }]);
     input['propertyDetails.usableArea'] = { 2: 80 };
