@@ -65,9 +65,9 @@ export function HomePropertySearch() {
 }
 
 const examples = [
-  { name: 'TERAVA Sky City', image: 'sky-city', type: 'Apartment', description: 'Không gian sống hiện đại, tầm nhìn rộng mở và những tiện ích cho mỗi ngày.', location: 'Không gian sống giữa lòng thành phố', price: 'Căn hộ cao cấp' },
-  { name: 'TERAVA Riverside', image: 'riverside', type: 'Villa', description: 'Biệt thự với sân vườn riêng, thiết kế tinh tế và không gian gần gũi thiên nhiên.', location: 'Không gian xanh, cuộc sống an yên', price: 'Biệt thự sân vườn' },
-  { name: 'TERAVA Central Plaza', image: 'central-plaza', type: 'Office', description: 'Văn phòng hiện đại với mặt bằng thông thoáng, kết nối thuận tiện cho doanh nghiệp.', location: 'Kết nối trung tâm, đón đầu cơ hội', price: 'Văn phòng hiện đại' },
+  { name: 'TERAVA Sky City', image: 'hero', type: 'Apartment', description: 'Không gian sống hiện đại, tầm nhìn rộng mở và những tiện ích cho mỗi ngày.', location: 'Không gian sống giữa lòng thành phố', price: 'Căn hộ cao cấp' },
+  { name: 'TERAVA Riverside', image: 'villa', type: 'Villa', description: 'Biệt thự với sân vườn riêng, thiết kế tinh tế và không gian gần gũi thiên nhiên.', location: 'Không gian xanh, cuộc sống an yên', price: 'Biệt thự sân vườn' },
+  { name: 'TERAVA Central Plaza', image: 'office', type: 'Office', description: 'Văn phòng hiện đại với mặt bằng thông thoáng, kết nối thuận tiện cho doanh nghiệp.', location: 'Kết nối trung tâm, đón đầu cơ hội', price: 'Văn phòng hiện đại' },
 ];
 
 type HomeProperty = { id: string; name: string; type: string; image: string; description: string; location: string; price: string; href: string };
@@ -75,7 +75,7 @@ type HomeProperty = { id: string; name: string; type: string; image: string; des
 function PropertyPhoto({ item }: { item: HomeProperty }) {
   const [failed, setFailed] = useState(false);
   return <Link href={item.href} className={styles.propertyPhoto} aria-label={`Khám phá ${item.name}`}>
-    {failed ? <div className={styles.photoPlaceholder}><Building2 size={38}/><span>{item.name}</span></div> : <Image src={item.image} alt={item.name} width={640} height={400} sizes="(max-width: 600px) 100vw, (max-width: 900px) 48vw, 33vw" unoptimized={item.image.startsWith('/api/')} onError={() => setFailed(true)}/>}
+    {failed ? <div className={styles.photoPlaceholder}><Building2 size={38}/><span>{item.name}</span></div> : <Image src={item.image} alt={item.name} width={1536} height={1024} sizes="(max-width: 600px) 100vw, (max-width: 900px) 48vw, 33vw" quality={90} unoptimized={item.image.startsWith('/api/')} onError={() => setFailed(true)}/>}
   </Link>;
 }
 

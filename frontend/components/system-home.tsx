@@ -44,12 +44,12 @@ export function SystemHome() {
           </div>
           <div className={styles.heroGallery}>
             <Link href="#du-an" className={styles.heroImage} aria-label="Khám phá dự án nổi bật">
-              <Image src="/images/home/hero.webp" alt="Tòa căn hộ cao cấp bên đường chân trời thành phố lúc hoàng hôn" width={685} height={418} sizes="(max-width: 760px) 100vw, 54vw" preload/>
+              <Image src="/images/home/hero.webp" alt="Tòa căn hộ cao cấp bên đường chân trời thành phố lúc hoàng hôn" width={1536} height={1024} sizes="(max-width: 760px) calc(100vw - 40px), (min-width: 1392px) 688px, 54vw" quality={90} preload/>
               <span className={styles.imageBadge}>Dự án nổi bật</span>
             </Link>
             <div className={styles.categoryGrid}>
               {categories.map(category => <Link href={`/properties?type=${category.type}`} key={category.type} className={styles.categoryImage}>
-                <Image src={`/images/home/${category.image}.webp`} alt={category.alt} width={220} height={180} sizes="(max-width: 760px) 30vw, 18vw"/>
+                <Image src={`/images/home/${category.image}.webp`} alt={category.alt} width={1536} height={1024} sizes="(max-width: 760px) 30vw, (min-width: 1392px) 219px, 18vw" quality={90}/>
                 <span className={styles.imageBadge}>{category.label}</span>
               </Link>)}
             </div>
