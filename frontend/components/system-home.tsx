@@ -1,20 +1,129 @@
+import Image from 'next/image';
 import Link from 'next/link';
-import { ArrowRight, ArrowUpRight, Building2, Check, ClipboardList, FolderKanban, Layers3, ShieldCheck, UsersRound } from 'lucide-react';
-import { SiteHeader } from './site-header';
-import { Brand } from './brand';
-import { HomeActions } from './home-actions';
+import { Clock3, ShieldCheck, Star } from 'lucide-react';
+import { HomeConsultation, HomeNavigation, HomePropertySearch, FeaturedProperties } from './home-sections';
+import styles from './system-home.module.css';
 
-export function WorkflowPreview() {
-  return <div className="workflow-preview" aria-label="Quy trình tổ chức thông tin bất động sản"><div className="preview-top"><span className="preview-logo"><Layers3 size={18}/> TERAVA WORKSPACE</span><span className="demo-badge">Kết nối thông tin</span></div><div className="preview-title"><span className="eyebrow">DỰ ÁN → SẢN PHẨM → ĐỘI NGŨ</span><h3>Mọi thông tin, một không gian.</h3></div><div className="workflow-node"><span className="workflow-icon"><FolderKanban size={22}/></span><div><strong>Tổ chức danh mục</strong><small>Dự án, phân khu và tiện ích</small></div><span className="workflow-number">01</span></div><div className="workflow-connector"/><div className="workflow-node active"><span className="workflow-icon"><Building2 size={22}/></span><div><strong>Quản lý sản phẩm</strong><small>Nội dung, tài liệu và tình trạng mở bán</small></div><span className="workflow-number">02</span></div><div className="workflow-connector"/><div className="workflow-node"><span className="workflow-icon"><UsersRound size={22}/></span><div><strong>Kết nối đội ngũ</strong><small>Không gian phù hợp cho từng vai trò</small></div><span className="workflow-number">03</span></div><div className="preview-bottom"><ShieldCheck size={16}/> Thông tin rõ ràng · Truy cập có kiểm soát</div></div>;
+export function HomeBrand({ light = false }: { light?: boolean }) {
+  return <Link href="/" className={`${styles.brand} ${light ? styles.brandLight : ''}`} aria-label="TERAVA — Trang chủ">
+    <span className={styles.brandMark}>T</span>
+    <span><strong>TERAVA</strong><small>Bất động sản cao cấp</small></span>
+  </Link>;
 }
 
-const features = [
-  { icon: Building2, name: 'Danh mục bất động sản', text: 'Sắp xếp dự án, phân khu và sản phẩm để đội ngũ có cùng một nguồn thông tin.' },
-  { icon: FolderKanban, name: 'Tài liệu tập trung', text: 'Quản lý hình ảnh và tài liệu sản phẩm, chủ động chọn phạm vi hiển thị công khai hoặc nội bộ.' },
-  { icon: ClipboardList, name: 'Cập nhật minh bạch', text: 'Theo dõi trạng thái công bố, tình trạng mở bán và lịch sử thay đổi của từng sản phẩm.' },
-  { icon: ShieldCheck, name: 'Không gian theo vai trò', text: 'Tài khoản khách hàng, nhân viên tư vấn và quản trị viên có phạm vi truy cập phù hợp.' },
+const categories = [
+  { type: 'Apartment', label: 'Căn hộ', image: 'apartment', alt: 'Căn hộ với phòng khách rộng, ngập ánh sáng tự nhiên' },
+  { type: 'Villa', label: 'Biệt thự', image: 'villa', alt: 'Biệt thự sân vườn có hồ bơi riêng' },
+  { type: 'Office', label: 'Văn phòng', image: 'office', alt: 'Tòa nhà văn phòng hiện đại tại trung tâm thành phố' },
+];
+
+const benefits = [
+  { icon: ShieldCheck, title: 'Thông tin minh bạch', text: 'Tra cứu thông tin, hình ảnh và tình trạng bất động sản trong cùng một nơi.' },
+  { icon: Star, title: 'Tư vấn chuyên nghiệp', text: 'Chia sẻ nhu cầu để đội ngũ tư vấn đồng hành cùng bạn trên hành trình tìm kiếm.' },
+  { icon: Clock3, title: 'Chủ động kết nối', text: 'Gửi yêu cầu bất cứ lúc nào và theo dõi phản hồi trong tài khoản của bạn.' },
+];
+
+const priorities = [
+  { quote: 'Một căn hộ đúng ngân sách, vị trí thuận tiện và một không gian thực sự thuộc về mình.', initial: 'N', name: 'Người mua nhà', detail: 'An cư & tận hưởng cuộc sống' },
+  { quote: 'Thông tin rõ ràng, dễ so sánh để tự tin hơn trước mỗi quyết định đầu tư.', initial: 'Đ', name: 'Nhà đầu tư', detail: 'Tìm kiếm giá trị dài hạn' },
+  { quote: 'Một địa điểm phù hợp để doanh nghiệp phát triển và tạo nên những kết nối mới.', initial: 'D', name: 'Khách hàng doanh nghiệp', detail: 'Không gian cho sự phát triển' },
 ];
 
 export function SystemHome() {
-  return <><SiteHeader role={null}/><main className="system-main"><section className="hero system-hero"><div className="container hero-grid"><div className="hero-copy"><span className="eyebrow"><span/> PROPERTY & CUSTOMER WORKSPACE</span><h1>Thông tin rõ ràng.<br/>Kết nối khách hàng<br/><em>hiệu quả.</em></h1><p>TERAVA kết nối thông tin bất động sản, khách hàng và đội ngũ tư vấn. Tổ chức danh mục, cập nhật sản phẩm và làm việc trong một không gian thống nhất.</p><HomeActions/><div className="hero-trust"><span><ShieldCheck size={17}/> Truy cập theo vai trò</span><span><UsersRound size={17}/> Đồng hành cùng đội ngũ tư vấn</span></div></div><WorkflowPreview/></div></section><section className="section container" id="chuc-nang"><div className="section-top"><div><span className="eyebrow">LÀM VIỆC RÕ RÀNG HƠN</span><h2>Thông tin đầy đủ. Phối hợp thuận tiện.</h2><p>Các công cụ giúp bạn quản lý danh mục và chủ động cập nhật thông tin mỗi ngày.</p></div><span className="demo-badge">Một không gian thống nhất</span></div><div className="system-feature-grid">{features.map(({icon:Icon,name,text})=><article key={name}><span className="benefit-icon"><Icon size={26}/></span><h3>{name}</h3><p>{text}</p></article>)}</div></section><section className="about-section" id="ve-nexcall"><div className="container system-about"><div><span className="eyebrow">VỀ TERAVA</span><h2>Kết nối dữ liệu.<br/>Đồng hành cùng khách hàng.</h2><p>Mỗi sản phẩm có thông tin rõ ràng. Mỗi thành viên có không gian phù hợp. TERAVA giúp đội ngũ quản lý danh mục nhất quán và tạo nền tảng cho những cuộc tư vấn hiệu quả.</p></div><div className="system-principles"><p><Check size={18}/> Tổ chức sản phẩm theo dự án và phân khu.</p><p><Check size={18}/> Cập nhật giá và tình trạng mở bán rõ ràng.</p><p><Check size={18}/> Quản lý hình ảnh và tài liệu tại một nơi.</p><p><Check size={18}/> Theo dõi thay đổi và kiểm soát quyền truy cập.</p></div></div></section><section className="container cta-section"><div><span className="eyebrow light">BẮT ĐẦU VỚI TERAVA</span><h2>Một không gian.<br/>Nhiều kết nối giá trị.</h2><p>Tạo tài khoản khách hàng và quản lý thông tin cá nhân của bạn.</p></div><Link href="/sign-up" className="button white">Tạo tài khoản <ArrowUpRight size={19}/></Link><div className="cta-circle"/></section></main><footer className="site-footer container"><Brand/><span>© {new Date().getFullYear()} TERAVA</span><Link href="/terms">Điều khoản & quyền riêng tư <ArrowRight size={14}/></Link></footer></>;
+  return <div className={styles.page} id="trang-chu">
+    <main>
+      <section className={styles.hero} aria-labelledby="home-heading">
+        <div className={`${styles.container} ${styles.heroGrid}`}>
+          <div className={styles.heroCopy}>
+            <span className={styles.eyebrow}>THƯƠNG HIỆU BẤT ĐỘNG SẢN TERAVA</span>
+            <h1 id="home-heading">Khám phá bất động sản cao cấp với TERAVA</h1>
+            <p>Tìm nhà, chung cư, biệt thự và dự án phù hợp với bạn. Khám phá thông tin rõ ràng, kết nối tư vấn và đến gần hơn với không gian lý tưởng.</p>
+            <div className={styles.actions}>
+              <Link href="#tim-kiem" className={styles.primaryButton}>Tìm kiếm dự án</Link>
+              <Link href="#tu-van" className={styles.secondaryButton}>Tư vấn miễn phí</Link>
+            </div>
+            <div className={styles.stats}>
+              <div><strong>6 loại hình</strong><span>Bất động sản đa dạng</span></div>
+              <div><strong>24/7</strong><span>Chủ động tìm kiếm</span></div>
+              <div><strong>Một nơi</strong><span>Kết nối mọi nhu cầu</span></div>
+            </div>
+          </div>
+          <div className={styles.heroGallery}>
+            <Link href="#du-an" className={styles.heroImage} aria-label="Khám phá dự án nổi bật">
+              <Image src="/images/home/hero.webp" alt="Tòa căn hộ cao cấp bên đường chân trời thành phố lúc hoàng hôn" width={685} height={418} sizes="(max-width: 760px) 100vw, 54vw" preload/>
+              <span className={styles.imageBadge}>Dự án nổi bật</span>
+            </Link>
+            <div className={styles.categoryGrid}>
+              {categories.map(category => <Link href={`/properties?type=${category.type}`} key={category.type} className={styles.categoryImage}>
+                <Image src={`/images/home/${category.image}.webp`} alt={category.alt} width={220} height={180} sizes="(max-width: 760px) 30vw, 18vw"/>
+                <span className={styles.imageBadge}>{category.label}</span>
+              </Link>)}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <HomeNavigation/>
+
+      <section className={styles.discovery} aria-label="Khám phá bất động sản">
+        <div className={styles.container}>
+          <HomePropertySearch/>
+          <section id="du-an" className={styles.featured} aria-labelledby="featured-heading">
+            <div className={styles.sectionHeading}>
+              <div><h2 id="featured-heading">Dự án nổi bật</h2><p>Khám phá những lựa chọn cho không gian sống và làm việc của bạn.</p></div>
+              <Link href="/properties" className={styles.smallButton}>Xem tất cả dự án</Link>
+            </div>
+            <FeaturedProperties/>
+          </section>
+        </div>
+      </section>
+
+      <section className={styles.benefits} id="ve-nexcall" aria-labelledby="benefits-heading">
+        <div className={`${styles.container} ${styles.benefitGrid}`}>
+          <div className={styles.benefitIntro}>
+            <h2 id="benefits-heading">Tại sao chọn TERAVA</h2>
+            <p>Chúng tôi kết nối khách hàng với những cơ hội bất động sản phù hợp thông qua thông tin rõ ràng, tư vấn tận tâm và sự đồng hành trong hành trình tìm kiếm.</p>
+            <Link href="#tu-van" className={styles.primaryButton}>Liên hệ tư vấn</Link>
+          </div>
+          {benefits.map(({ icon: Icon, title, text }) => <article className={styles.benefitCard} key={title}>
+            <span className={styles.benefitIcon}><Icon size={21} strokeWidth={1.7}/></span>
+            <h3>{title}</h3><p>{text}</p>
+          </article>)}
+        </div>
+      </section>
+
+      <section className={styles.priorities} id="dong-hanh" aria-labelledby="priorities-heading">
+        <div className={styles.container}>
+          <div className={styles.sectionHeading}><div><h2 id="priorities-heading">Mỗi nhu cầu, một hành trình riêng</h2><p>TERAVA đồng hành cùng những điều bạn đang tìm kiếm.</p></div></div>
+          <div className={styles.priorityGrid}>{priorities.map(item => <article key={item.name} className={styles.priorityCard}>
+            <p>“{item.quote}”</p>
+            <div className={styles.person}><span>{item.initial}</span><div><strong>{item.name}</strong><small>{item.detail}</small></div></div>
+          </article>)}</div>
+        </div>
+      </section>
+
+      <section className={styles.consultation} id="tu-van" aria-labelledby="consultation-heading">
+        <div className={`${styles.container} ${styles.consultationGrid}`}>
+          <div className={styles.consultationCopy}>
+            <h2 id="consultation-heading">Cần tư vấn dự án phù hợp?</h2>
+            <p>TERAVA đồng hành cùng bạn tìm kiếm, so sánh và lựa chọn bất động sản theo nhu cầu thực tế.</p>
+            <div className={styles.actions}><a href="#dang-ky-tu-van" className={styles.whiteButton}>Đăng ký tư vấn</a><Link href="/properties" className={styles.darkButton}>Khám phá bất động sản</Link></div>
+          </div>
+          <HomeConsultation/>
+        </div>
+      </section>
+    </main>
+
+    <footer className={styles.footer}>
+      <div className={styles.container}>
+        <div className={styles.footerGrid}>
+          <div className={styles.footerAbout}><HomeBrand light/><p>Kết nối bất động sản và khách hàng bằng thông tin rõ ràng, sự chuyên nghiệp và những lựa chọn phù hợp.</p></div>
+          <div><h3>Dịch vụ</h3><Link href="/properties">Tìm bất động sản</Link><a href="#tu-van">Tư vấn nhu cầu</a><Link href="/properties?transaction=Rent">Bất động sản cho thuê</Link></div>
+          <div><h3>Về TERAVA</h3><a href="#ve-nexcall">Về chúng tôi</a><a href="#du-an">Dự án nổi bật</a><a href="#dong-hanh">Đồng hành cùng bạn</a></div>
+          <div><h3>Hỗ trợ</h3><a href="#tu-van">Liên hệ tư vấn</a><Link href="/sign-in">Đăng nhập</Link><Link href="/sign-up">Tạo tài khoản</Link></div>
+        </div>
+        <div className={styles.footerBottom}><span>© {new Date().getFullYear()} TERAVA. Tất cả quyền được bảo lưu.</span><Link href="/terms">Chính sách bảo mật & Điều khoản sử dụng</Link></div>
+      </div>
+    </footer>
+  </div>;
 }

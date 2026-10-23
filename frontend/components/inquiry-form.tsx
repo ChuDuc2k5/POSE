@@ -6,6 +6,7 @@ import { CheckCircle2, Send } from 'lucide-react';
 import type { Profile } from '@/lib/profile';
 import { CatalogRequestError, catalogRequest } from '@/lib/catalog-client';
 import { inquiryLabels } from '@/lib/discovery';
+import { readInquiryDraft, clearInquiryDraft } from '@/lib/inquiry-draft';
 
 export function InquiryForm({ propertyId=null,propertyName }: { propertyId?:string|null;propertyName?:string }) {
   const [identity,setIdentity]=useState<'loading'|'customer'|'guest'|'staff'|'error'>('loading');
@@ -22,14 +23,16 @@ export function InquiryForm({ propertyId=null,propertyName }: { propertyId?:stri
       if(!response.ok)throw new Error();
       const me=await response.json();if(me.user.role!=='User'){setIdentity('staff');return;}
       const data=await catalogRequest<{profile:Profile}>('/api/account/profile',{signal:controller.signal});
-      setIdentity('customer');setName(data.profile.name);setPhone(data.profile.phone);setEmail(me.user.email);
+      const draft=propertyId ? null:readInquiryDraft();
+      setIdentity('customer');setName(draft?.name || data.profile.name);setPhone(draft?.phone || data.profile.phone);setEmail(me.user.email);
+      if(draft){setCountry('VN');setMessage(draft.message);}
     }).catch(()=>{if(!controller.signal.aborted)setIdentity('error');});
     return()=>controller.abort();
-  },[]);
+  },[propertyId]);
   async function submit(event:FormEvent){
     event.preventDefault();setBusy(true);setError('');setFields({});
     key.current ||= crypto.randomUUID();
-    try { const data=await catalogRequest<{id:string;status:keyof typeof inquiryLabels}>('/api/customer/inquiries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({property_id:propertyId,name,phone,country,channel,preferred_time:preferredTime,message,consent,request_key:key.current})});setResult(data); }
+    try { const data=await catalogRequest<{id:string;status:keyof typeof inquiryLabels}>('/api/customer/inquiries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({property_id:propertyId,name,phone,country,channel,preferred_time:preferredTime,message,consent,request_key:key.current})});setResult(data);if(!propertyId)clearInquiryDraft(); }
     catch(e){setError(e instanceof Error ? e.message:'Chưa thể gửi yêu cầu.');if(e instanceof CatalogRequestError)setFields(e.fields);}
     finally{setBusy(false);}
   }

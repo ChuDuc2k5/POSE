@@ -5,6 +5,7 @@ import { useState, type FormEvent } from 'react';
 import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, LoaderCircle, Mail, ShieldCheck, LockKeyhole, UserRound, UsersRound, PhoneCall, ClipboardCheck, Sparkles } from 'lucide-react';
 import { Brand } from './brand';
 import { validateCredentials } from '@/lib/auth-validation';
+import { readInquiryDraft } from '@/lib/inquiry-draft';
 
 export function AuthForm({ mode, verificationFailed = false }: { mode: 'signin' | 'signup'; verificationFailed?: boolean }) {
   const signup = mode === 'signup';
@@ -28,7 +29,11 @@ export function AuthForm({ mode, verificationFailed = false }: { mode: 'signin' 
       const data = await response.json();
       if (!response.ok) { setError(data.message); return; }
       if (signup) { setNotice(data.message); setRegistered(true); setPassword(''); }
-      else { router.replace(data.destination || '/'); router.refresh(); }
+      else {
+        const continueInquiry = data.destination === '/customer' && new URLSearchParams(window.location.search).get('next') === '/customer/inquiries/new' && readInquiryDraft();
+        router.replace(continueInquiry ? '/customer/inquiries/new' : data.destination || '/');
+        router.refresh();
+      }
     } catch { setError('Không thể kết nối. Vui lòng kiểm tra mạng và thử lại.'); }
     finally { setBusy(false); }
   }
