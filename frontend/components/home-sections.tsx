@@ -8,13 +8,14 @@ import { Building2, ChevronDown, Headphones, MapPin, Menu, Search, Wallet, X } f
 import { priceLabel, propertyTypeLabels } from '@/lib/catalog';
 import type { SearchResult } from '@/lib/discovery';
 import { saveInquiryDraft } from '@/lib/inquiry-draft';
+import { Brand } from './brand';
 import styles from './system-home.module.css';
 
 export function HomeNavigation() {
   const [open, setOpen] = useState(false);
   return <header className={styles.navigation}>
     <div className={`${styles.container} ${styles.navigationInner}`}>
-      <Link href="/" className={styles.brand} aria-label="TERAVA — Trang chủ"><span className={styles.brandMark}>T</span><span><strong>TERAVA</strong><small>Bất động sản cao cấp</small></span></Link>
+      <Brand light={false} compactOnMobile/>
       <button type="button" className={styles.menuToggle} onClick={() => setOpen(!open)} aria-expanded={open} aria-controls="home-navigation" aria-label={open ? 'Đóng menu' : 'Mở menu'}>{open ? <X size={23}/> : <Menu size={23}/>}</button>
       <nav id="home-navigation" aria-label="Điều hướng chính" className={`${styles.navLinks} ${open ? styles.navOpen : ''}`} onClick={() => setOpen(false)}>
         <a href="#trang-chu" aria-current="page">Trang chủ</a><a href="#du-an">Dự án</a><a href="#ve-nexcall">Về TERAVA</a><a href="#tu-van">Liên hệ</a>

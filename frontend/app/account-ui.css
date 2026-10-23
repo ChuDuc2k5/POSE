@@ -50,6 +50,7 @@
 .access-mode a[aria-current=page] { color: var(--account-ink); background:var(--nx-surface); box-shadow: 0 2px 5px #00000010; }
 .access-mode a:hover { color: var(--account-green); }
 .access-form-icon { display: grid; place-items: center; width: 49px; height: 49px; border-radius: 15px; border: 1px solid var(--nx-line); color: var(--nx-primary); background: var(--nx-primary-tint); margin-bottom: 19px; }
+.access-brand-emblem { display: grid; place-items: center; width: 68px; height: 68px; padding: 11px; border: 1px solid #e3e3f2; border-radius: 18px; background: #f4f3fb; margin-bottom: 19px; }
 .access-form-wrap h1 { font-size: 32px; font-weight: 600; line-height: 1.3; letter-spacing: -.045em; margin: 0 0 10px; }
 .access-intro { font-size: 13px; line-height: 1.8; color: var(--account-muted); margin-bottom: 24px; max-width: 390px; }
 .access-form { gap: 19px; }

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="410" height="360" viewBox="0 0 410 360" fill="none"><defs>
+  <linearGradient id="navy" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#101b2b"/><stop offset="1" stop-color="#3b465c"/></linearGradient>
+  <linearGradient id="silver" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffffff"/><stop offset=".5" stop-color="#e9eaf5"/><stop offset="1" stop-color="#c9cde7"/></linearGradient>
+  <linearGradient id="fold" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#a8b1d3"/><stop offset="1" stop-color="#eaebf3"/></linearGradient>
+  <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#354154"/><stop offset="1" stop-color="#111c2a"/></linearGradient>
+  <linearGradient id="lavender" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f3f1ff"/><stop offset="1" stop-color="#e6e7f5"/></linearGradient>
+  <mask id="gable"><rect width="410" height="360" fill="white"/><path d="M130 110 198 69v30l-53 33Z" fill="black"/></mask>
+</defs><g fill="url(#navy)" mask="url(#gable)"><rect width="410" height="110" rx="23"/><path d="M198 69h18v291h-18Z"/></g>
+    <path d="m119 140 62-42v262h-70V156q0-10 8-16Z" fill="url(#navy)"/>
+    <path d="M216 28q0-5 4-2l60 40q4 3 4 8v130l-68-47Z" fill="url(#silver)"/>
+    <path d="m216 157 74 59q8 7 8 20v124h-82Z" fill="url(#silver)"/>
+    <path d="m228 180 62 43q8 6 8 15v122h-70Z" fill="url(#fold)"/></svg>

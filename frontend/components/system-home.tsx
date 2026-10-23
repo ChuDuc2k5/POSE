@@ -3,13 +3,7 @@ import Link from 'next/link';
 import { Clock3, ShieldCheck, Star } from 'lucide-react';
 import { HomeConsultation, HomeNavigation, HomePropertySearch, FeaturedProperties } from './home-sections';
 import styles from './system-home.module.css';
-
-export function HomeBrand({ light = false }: { light?: boolean }) {
-  return <Link href="/" className={`${styles.brand} ${light ? styles.brandLight : ''}`} aria-label="TERAVA — Trang chủ">
-    <span className={styles.brandMark}>T</span>
-    <span><strong>TERAVA</strong><small>Bất động sản cao cấp</small></span>
-  </Link>;
-}
+import { Brand } from './brand';
 
 const categories = [
   { type: 'Apartment', label: 'Căn hộ', image: 'apartment', alt: 'Căn hộ với phòng khách rộng, ngập ánh sáng tự nhiên' },
@@ -117,7 +111,7 @@ export function SystemHome() {
     <footer className={styles.footer}>
       <div className={styles.container}>
         <div className={styles.footerGrid}>
-          <div className={styles.footerAbout}><HomeBrand light/><p>Kết nối bất động sản và khách hàng bằng thông tin rõ ràng, sự chuyên nghiệp và những lựa chọn phù hợp.</p></div>
+          <div className={styles.footerAbout}><Brand light/><p>Kết nối bất động sản và khách hàng bằng thông tin rõ ràng, sự chuyên nghiệp và những lựa chọn phù hợp.</p></div>
           <div><h3>Dịch vụ</h3><Link href="/properties">Tìm bất động sản</Link><a href="#tu-van">Tư vấn nhu cầu</a><Link href="/properties?transaction=Rent">Bất động sản cho thuê</Link></div>
           <div><h3>Về TERAVA</h3><a href="#ve-nexcall">Về chúng tôi</a><a href="#du-an">Dự án nổi bật</a><a href="#dong-hanh">Đồng hành cùng bạn</a></div>
           <div><h3>Hỗ trợ</h3><a href="#tu-van">Liên hệ tư vấn</a><Link href="/sign-in">Đăng nhập</Link><Link href="/sign-up">Tạo tài khoản</Link></div>

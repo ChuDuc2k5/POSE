@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, LoaderCircle, Mail, ShieldCheck, LockKeyhole, UserRound, UsersRound, PhoneCall, ClipboardCheck, Sparkles } from 'lucide-react';
-import { Brand } from './brand';
+import { Brand, TeravaMark } from './brand';
 import { validateCredentials } from '@/lib/auth-validation';
 import { readInquiryDraft } from '@/lib/inquiry-draft';
 
@@ -49,7 +49,7 @@ export function AuthForm({ mode, verificationFailed = false }: { mode: 'signin' 
   }
   return <main className={`access-page ${signup ? 'access-signup' : ''}`}>
     <aside className="access-story">
-      <Brand light/>
+      <Brand light iconVariant="lavender"/>
       <div className="access-story-copy">
         <span className="access-kicker"><span/> KẾT NỐI THÔNG MINH CÙNG AI</span>
         <h2>Mỗi kết nối,<br/>một <em>cơ hội mới.</em></h2>
@@ -72,10 +72,10 @@ export function AuthForm({ mode, verificationFailed = false }: { mode: 'signin' 
     </aside>
     <section className="access-content">
       <header className="access-topbar"><Link href="/" className="back-link"><ArrowLeft size={16}/> Về trang chủ</Link><Link href="/terms" className="access-help">Điều khoản & quyền riêng tư <ArrowRight size={14}/></Link></header>
-      <div className="access-mobile-brand"><Brand/></div>
+      <div className="access-mobile-brand"><Brand iconVariant="lavender"/></div>
       <div className="access-form-wrap">
         <nav className="access-mode" aria-label="Tài khoản"><Link href="/sign-in" aria-current={!signup ? 'page' : undefined}>Đăng nhập</Link><Link href="/sign-up" aria-current={signup ? 'page' : undefined}>Đăng ký</Link></nav>
-        <span className="access-form-icon">{registered ? <Mail size={24}/> : signup ? <UserRound size={24}/> : <LockKeyhole size={24}/>}</span>
+        <span className={registered ? 'access-form-icon' : 'access-brand-emblem'}>{registered ? <Mail size={24}/> : <TeravaMark size={46} variant="mark"/>}</span>
         <h1>{registered ? 'Kiểm tra hộp thư của bạn' : signup ? 'Bắt đầu cùng TERAVA' : 'Chào mừng trở lại.'}</h1>
         <p className="access-intro">{registered ? 'Xác minh email để hoàn tất đăng ký và bắt đầu hành trình của bạn.' : signup ? 'Một tài khoản, nhiều kết nối. Tạo tài khoản khách hàng của bạn chỉ với vài bước.' : 'Đăng nhập để tiếp tục hành trình kết nối và quản lý tài khoản của bạn.'}</p>
         {error && <div className="form-alert error" role="alert">{error}</div>}

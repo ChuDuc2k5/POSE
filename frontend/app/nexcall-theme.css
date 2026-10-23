@@ -141,12 +141,3 @@ h1, h2, h3, h4 { color: var(--nx-ink); }
 }
 .cta-section::after { height: 100%; opacity: .4; }
 .access-story::after { height: 300px; opacity: .5; -webkit-mask-image: linear-gradient(to top, #000 50%, transparent); mask-image: linear-gradient(to top, #000 50%, transparent); }
-
-/* TERAVA wordmark: gold line mark on a black tile. */
-.brand .brand-mark, .brand-light .brand-mark, .access-story .brand-mark, .catalog-sidebar .brand-mark {
-  color: var(--nx-primary); background: radial-gradient(circle at 30% 20%, #2a2210, #050505 70%);
-  border: 1px solid var(--nx-primary-line); box-shadow: 0 6px 18px #d4af3726, inset 0 0 0 1px #f3e3b00d;
-}
-.brand .brand-name { color: var(--nx-ink); letter-spacing: .16em; font-weight: 700; }
-.brand-light .brand-name { color: var(--nx-on-dark); }
-.brand .brand-caption { color: var(--nx-primary); letter-spacing: .2em; }

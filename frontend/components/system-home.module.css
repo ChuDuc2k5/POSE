@@ -71,10 +71,6 @@
 
 .navigation { position: sticky; top: 0; z-index: 20; border-bottom: 1px solid var(--home-line); background: #fffffffa; backdrop-filter: blur(14px); }
 .navigationInner { min-height: 92px; display: flex; align-items: center; justify-content: space-between; gap: 24px; position: relative; }
-.brand { display: inline-flex; gap: 14px; align-items: center; color: var(--home-ink); flex-shrink: 0; }
-.brandMark { display: grid; place-items: center; width: 44px; height: 44px; background: #202b39; color: #fff; border-radius: 11px; font-size: 21px; line-height: 1; font-weight: 800; }
-.brand strong { display: block; font-size: 24px; font-weight: 800; line-height: 1.1; letter-spacing: -.025em; }
-.brand small { display: block; margin-top: 5px; color: var(--home-muted); font-size: 11px; line-height: 1.2; }
 .navLinks { display: flex; align-items: center; gap: 29px; font-size: 13px; }
 .navLinks > a { color: #73767c; padding-block: 12px; transition: color .18s; }
 .navLinks > a:hover, .navLinks > a[aria-current] { color: var(--home-ink); }
@@ -170,9 +166,6 @@
 
 .footer { padding: 48px 0 24px; background: #111827; color: #99a1b0; }
 .footerGrid { display: grid; grid-template-columns: 3.4fr 1fr 1fr 1fr; gap: 44px; padding-bottom: 34px; }
-.brandLight { color: #fff; }
-.brandLight .brandMark { color: #202b39; background: #fff; }
-.brandLight small { color: #9099a9; }
 .footerAbout p { max-width: 365px; font-size: 14px; line-height: 1.75; margin-top: 17px; }
 .footerGrid h3 { font-size: 15px; font-weight: 650; letter-spacing: 0; color: #fff; margin-bottom: 10px; }
 .footerGrid > div:not(.footerAbout) a { display: block; width: fit-content; margin-top: 8px; font-size: 13px; }
@@ -218,10 +211,6 @@
   .categoryImage .imageBadge { min-width: 56px; padding: 7px 8px; font-size: 10px; }
   .heroImage .imageBadge { min-width: 102px; padding: 9px 12px; }
   .navigationInner { min-height: 78px; gap: 18px; }
-  .brand { gap: 10px; }
-  .brand strong { font-size: 21px; }
-  .brandMark { width: 40px; height: 40px; }
-  .brand small { font-size: 10px; }
   .navLinks { gap: 14px; font-size: 12px; }
   .navAccount { gap: 7px; }
   .navAccount .smallButton, .navAccount .primaryButton { font-size: 11px; padding-inline: 12px; }
@@ -318,10 +307,6 @@
   .filterChips button { font-size: 11px; padding: 8px 11px; }
   .chipDivider { display: none; }
   .navigationInner { gap: 8px; }
-  .brand { gap: 8px; }
-  .brand strong { font-size: 19px; }
-  .brand small { font-size: 9px; }
-  .brandMark { width: 37px; height: 39px; }
   .navAccount .smallButton, .navAccount .primaryButton { min-height: 36px; padding: 9px 10px; font-size: 10px; }
   .menuToggle { padding: 5px; }
   .consultationForm { padding: 24px 21px; border-radius: 20px; }
@@ -331,7 +316,6 @@
 @media (max-width: 380px) {
   .container { width: calc(100% - 32px); }
   .heroCopy h1 { font-size: 35px; }
-  .brand small { display: none; }
   .navAccount .smallButton, .navAccount .primaryButton { padding-inline: 9px; }
   .contactFields { grid-template-columns: 1fr; }
   .searchPanel { padding: 17px; }
