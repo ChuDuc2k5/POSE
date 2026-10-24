@@ -14,7 +14,7 @@ let chrome;
 for(const candidate of [process.env.CHROME_PATH,process.env.PROGRAMFILES && join(process.env.PROGRAMFILES,'Google/Chrome/Application/chrome.exe'),process.env['PROGRAMFILES(X86)'] && join(process.env['PROGRAMFILES(X86)'],'Google/Chrome/Application/chrome.exe'),process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA,'Google/Chrome/Application/chrome.exe')].filter(Boolean)){try{await access(candidate);chrome=candidate;break;}catch{}}
 if(!chrome){console.log('SKIP: M07 UI checks; Chrome not found. Set CHROME_PATH to a Chrome executable.');process.exit(0);}
 assert.ok(process.env.PGLITE_PATH,'Set PGLITE_PATH to an external @electric-sql/pglite directory.');
-const root=join(tmpdir(),'pose-m07-ui');await mkdir(root,{recursive:true});
+const root=join(tmpdir(),'pose-m07-audience');await mkdir(root,{recursive:true});
 let child,server,ws,send,checks=0;
 try {
  let output='';server=spawn(process.execPath,['scripts/test-campaign-management.mjs','--preview-only'],{cwd:new URL('..',import.meta.url),env:process.env,windowsHide:true,stdio:['ignore','pipe','pipe','ipc']});
@@ -38,6 +38,7 @@ try {
   const condition=page==='list' ? "document.querySelectorAll('.campaigns-list-item').length===3":page==='0' ? "document.querySelector('input[value=\"Tư vấn căn hộ — bản nháp\"]')":page==='1' ? "document.querySelector('textarea')":page==='2' ? "document.querySelector('select option[value=\"f7700000-0000-4000-8000-000000000001\"]')":page==='3' ? "document.querySelector('.campaigns-checklist')?.innerText.includes('✓ Ngân sách')":"document.querySelectorAll('.catalog-stats article').length===4";
   for(let i=0;i<60;i++){if(await evaluate(`document.readyState==='complete' && !!(${condition})`)){ready=true;break;}await delay(100);}
   assert.ok(ready,name+' loaded');
+  if(page==='1'){const match=await evaluate(`({button:document.body.innerText.includes('Gợi ý theo sản phẩm chiến dịch'),filters:document.querySelectorAll('.campaigns-audience-match-panel input').length,counters:document.body.innerText.includes('Đủ điều kiện'),chips:!!document.querySelector('.campaigns-reason-chips')})`);assert.ok(match.button&&match.filters>=6,name+' match controls');}
   const dimensions=await evaluate('({width:innerWidth,scroll:document.documentElement.scrollWidth})');
   assert.equal(dimensions.width,width,name+' actual viewport');assert.ok(dimensions.scroll<=width,name+' no horizontal overflow: '+JSON.stringify(dimensions));
   if(page==='0'){const text=await evaluate('document.body.innerText');for(const unit of ['(VND)','(giây)','(giờ)','(cuộc/ngày)'])assert.ok(text.includes(unit),name+' unit '+unit);}

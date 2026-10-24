@@ -80,6 +80,9 @@ try{
  check(await f.scalar("select count(*)::integer from campaign_events where action='budget_alert'")===1,'budget alert persisted');
  await f.owner('update campaigns set budget_limit_vnd=10000 where id=$1',[campaign]);await prepare(12);await json(await f.cronCall('dispatch'));
  const consented=(await f.owner("select * from calls where phone_e164='+84901230012'")).rows[0];await json(await f.postEvent(event(consented,'answered')));
+ await f.owner("select set_config('request.jwt.claims','{\"role\":\"service_role\"}',false)");
+ const callContext=(await f.owner('select public.pose_system_call_context($1) as context',[consented.id])).rows[0].context;
+ check(Array.isArray(callContext.lead?.products_of_interest)&&callContext.lead?.products_of_interest.includes('DIRECT_INTEREST')&&callContext.lead?.campaign_snapshot?.match?.rule_version==='MATCH.v1'&&!('transcript' in (callContext.lead||{})),'call context exposes frozen audience reasons without transcript text');
  await f.owner("update property_products set transaction_type='Rent',price_period='Month',price=12000000 where id=$1",[f.productId]);
  const say=async text=>json(await f.postEvent(event(consented,'answered',{utterance:{speaker:'Customer',text,at:new Date().toISOString()}})));
  for(let n=0;n<3;n++)await say('\u0111\u1ed3ng \u00fd');

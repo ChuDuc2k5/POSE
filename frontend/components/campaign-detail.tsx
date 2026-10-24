@@ -7,13 +7,14 @@ import { audienceLabels, preflightHelp, reasonLabels, statusLabels, type Campaig
 import { CampaignCallCosts } from './campaign-call-costs';
 import { CampaignScripts } from './campaign-scripts';
 import { CampaignConfirm } from './campaign-confirm';
+import { CampaignAudienceMatch } from './campaign-audience-match';
 import { useSearchParams } from 'next/navigation';
 const tabs=['Cấu hình','Đối tượng','Kịch bản','Vận hành','Theo dõi'];
 const actions:Record<string,string>={schedule:'Lên lịch',start:'Bắt đầu',pause:'Tạm dừng',resume:'Tiếp tục',cancel:'Hủy chiến dịch'};
 const allowed:Record<string,string[]>={DRAFT:['schedule','start','cancel'],SCHEDULED:['start','cancel'],RUNNING:['pause','cancel'],PAUSED:['resume','cancel']};
 type Scheduler={redis:boolean;repeatEvery:number;lastRunAt:string|null;lastResult:Record<string,unknown>|null;lastError:string|null};
 type Option={id:string;name:string};
-export function CampaignDetail({id}:{id:string}) {
+function CampaignDetailBase({id}:{id:string}) {
  const searchParams=useSearchParams();
  const [c,setC]=useState<Campaign|null>(null),[form,setForm]=useState<Record<string,unknown>>({}),[tab,setTab]=useState(Math.min(4,Math.max(0,Number(searchParams.get('tab')) || 0))),[error,setError]=useState(''),[message,setMessage]=useState(''),[fields,setFields]=useState<Record<string,string>>({}),[reason,setReason]=useState(''),[busy,setBusy]=useState(false),[rev,setRev]=useState(0),[products,setProducts]=useState<Option[]>([]),[action,setAction]=useState(''),[missing,setMissing]=useState<string[]>([]),[progress,setProgress]=useState<Progress|null>(null);
  const [filters,setFilters]=useState<Record<string,unknown>>({}),[preview,setPreview]=useState<Preview|null>(null),[preflight,setPreflight]=useState<{missing:string[];revision:number;checkedAt:number}|null>(null);
@@ -41,3 +42,5 @@ export function CampaignDetail({id}:{id:string}) {
  {tab===4 && <><a className="button secondary" href={`/admin/calls?campaign_id=${id}`}>Xem cuộc gọi</a><div className="campaigns-row"><h2>Theo dõi chiến dịch</h2><button className="button secondary" onClick={()=>setRev(r=>r+1)}>Tải lại</button></div>{progress ? <><CampaignCallCosts items={progress.cost_log}/><div className="catalog-stats">{[['Đối tượng',progress.total],['Đã kết nối',progress.connected],['Cuộc gọi hoàn tất',progress.completed],['Chi phí đã dùng (VND)',progress.cost_spent_vnd]].map(([label,n])=><article key={label}><span>{label}</span><strong>{Number(n).toLocaleString('vi-VN')}</strong></article>)}</div><p>Dự phòng: {Number(progress.cost_reserved_vnd).toLocaleString('vi-VN')} VND. Cuộc gọi hoàn tất không tự xác nhận khách hàng quan tâm.</p><div className="campaigns-breakdowns">{[['Đối tượng',progress.memberships],['Công việc gọi',progress.jobs],['Cuộc gọi',progress.calls]].map(([title,counts])=><section key={String(title)}><h3>{String(title)}</h3><ul>{Object.entries(counts).map(([s,n])=><li key={s}>{statusLabels[s] || s}: {n}</li>)}</ul></section>)}</div><h3>Lỗi xử lý</h3>{progress.errors.length ? progress.errors.map(x=><p key={x.id}>{x.id}: {x.error_code || 'Chưa có mã lỗi'}</p>):<p>Chưa ghi nhận lỗi.</p>}<h3>Cần đối soát (quá 15 phút)</h3>{progress.reconciliation.length ? progress.reconciliation.map(x=><p key={x.id}>{x.kind==='job' ? 'Công việc':'Cuộc gọi'} {x.id} · {statusLabels[x.status] || x.status} · {new Date(x.updated_at).toLocaleString('vi-VN')}</p>):<p>Không có mục cần đối soát.</p>}</>:<p>Đang tải tiến độ…</p>}</>}
  </div></section></>;
 }
+
+export function CampaignDetail({id}:{id:string}) { return <><CampaignDetailBase id={id}/><CampaignAudienceMatch id={id}/></>; }

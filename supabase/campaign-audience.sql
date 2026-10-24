@@ -12,7 +12,7 @@ create index if not exists campaign_customers_priority_idx on public.campaign_cu
 -- small activity tables keep the scorer compatible with deployments that also
 -- record views/favorites as first-class events.
 create table if not exists public.property_views (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key default extensions.gen_random_uuid(),
   customer_id uuid references public.customers(id) on delete cascade,
   user_id uuid references auth.users(id) on delete cascade,
   property_id uuid not null references public.property_products(id) on delete cascade,
@@ -21,7 +21,7 @@ create table if not exists public.property_views (
 );
 create index if not exists property_views_match_idx on public.property_views(property_id,created_at desc);
 create table if not exists public.property_favorites (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key default extensions.gen_random_uuid(),
   customer_id uuid references public.customers(id) on delete cascade,
   user_id uuid references auth.users(id) on delete cascade,
   property_id uuid not null references public.property_products(id) on delete cascade,
@@ -127,7 +127,7 @@ declare k text; begin
  end loop;
  if p_filter ? 'match_campaign_products' and jsonb_typeof(p_filter->'match_campaign_products')<>'boolean' then raise exception 'INVALID_FILTER' using errcode='22023'; end if;
  if p_filter ? 'min_match' and (jsonb_typeof(p_filter->'min_match')<>'number' or (p_filter->>'min_match')::numeric not between 0 and 85) then raise exception 'INVALID_FILTER' using errcode='22023'; end if;
- foreach k in array array['interacted_days','exclude_called_days'] loop if p_filter ? k and ((p_filter->>k)::integer is null or (p_filter->>k)::integer not between 1 and case when k='interacted_days' then 365 else 90 end) then raise exception 'INVALID_FILTER' using errcode='22023'; end if; end loop;
+ foreach k in array array['interacted_days','exclude_called_days'] loop if p_filter ? k and (jsonb_typeof(p_filter->k)<>'number' or (p_filter->>k) !~ '^[0-9]+$' or case when (p_filter->>k) ~ '^[0-9]+$' then (p_filter->>k)::integer else 0 end not between 1 and case when k='interacted_days' then 365 else 90 end) then raise exception 'INVALID_FILTER' using errcode='22023'; end if; end loop;
  if p_filter ? 'confirmed_needs_only' and jsonb_typeof(p_filter->'confirmed_needs_only')<>'boolean' then raise exception 'INVALID_FILTER' using errcode='22023'; end if;
 end $$;
 
@@ -204,4 +204,53 @@ create or replace function public.pose_read_my_contact_consents() returns jsonb 
 create or replace function public.pose_set_my_contact_consent(p_purpose text,p_granted boolean,p_text text) returns jsonb language sql security invoker set search_path='' as $$ select pose_private.set_my_contact_consent(p_purpose,p_granted,p_text); $$;
 revoke all on function public.pose_read_my_contact_consents(),public.pose_set_my_contact_consent(text,boolean,text) from public,anon,authenticated;
 grant execute on function pose_private.read_my_contact_consents(),pose_private.set_my_contact_consent(text,boolean,text),public.pose_read_my_contact_consents(),public.pose_set_my_contact_consent(text,boolean,text) to authenticated;
+-- M07 audience scores are scheduling priority, while preserving the existing caps and fairness tie-breakers.
+create or replace function pose_private.system_campaign_tick(p_now timestamptz) returns jsonb language plpgsql security definer set search_path='' as $$
+declare c public.campaigns; m public.campaign_customers; local_now timestamp; allowance integer; queued integer; added integer:=0; missing jsonb; reason text; n integer; before_state jsonb; changed jsonb:='[]'; begin
+ if auth.role() is distinct from 'service_role' then raise exception 'SYSTEM_REQUIRED' using errcode='42501'; end if;
+ if p_now is null then raise exception 'INVALID_TIME' using errcode='22023'; end if;
+ for c in select * from public.campaigns where status in ('SCHEDULED','RUNNING','PAUSED') order by id for update skip locked loop
+  before_state:=pose_private.campaign_tick_state(c.id);
+  if c.status='SCHEDULED' and c.start_time<=p_now then
+   missing:=pose_private.campaign_preflight(c.id,c.provider_ready,p_now);
+   update public.campaigns set status=case when missing='[]'::jsonb then 'RUNNING'::public.campaign_status else 'FAILED'::public.campaign_status end,status_reason=case when missing='[]'::jsonb then '' else missing::text end,version=version+1,updated_at=p_now where id=c.id returning * into c;
+  end if;
+  if c.status='RUNNING' then
+   if c.end_time is not null and c.end_time<=p_now then update public.campaign_customers set status='EXHAUSTED',skip_reason='END_TIME',updated_at=p_now where campaign_id=c.id and status in ('PENDING','RETRYING');
+   else
+    local_now:=p_now at time zone c.timezone;
+    if extract(dow from local_now)::smallint=any(c.weekdays) and local_now::time>=c.window_start and local_now::time<c.window_end then
+     select count(*) into queued from public.call_jobs where campaign_id=c.id and status in ('Pending','Claimed');
+     allowance:=least(coalesce(c.daily_call_limit,0)-(select count(*)::integer from public.call_jobs where campaign_id=c.id and (created_at at time zone c.timezone)::date=local_now::date),greatest(0,coalesce(floor((coalesce(c.budget_limit_vnd,0)-c.budget_spent_vnd-c.budget_reserved_vnd)/nullif(c.cost_reserve_per_call_vnd,0)),0)-queued))::integer;
+     for m in select * from public.campaign_customers where campaign_id=c.id and (status='PENDING' and (next_attempt_at is null or next_attempt_at<=p_now) or status='RETRYING' and next_attempt_at<=p_now) order by priority desc,added_at,id for update loop
+      reason:=pose_private.contact_eligibility(m.lead_id,c.id,p_now)->>'reason';
+      if m.phone_e164 is distinct from (select phone from public.customers where id=m.customer_id) then reason:='PHONE_UNVERIFIED'; end if;
+      if reason is not null then perform pose_private.campaign_contact_block(m.id,reason,p_now); continue; end if;
+      n:=m.retry_count+1;
+      if n>c.max_attempts then update public.campaign_customers set status='EXHAUSTED',updated_at=p_now where id=m.id; continue; end if;
+      if allowance<=0 then continue; end if;
+      perform pg_advisory_xact_lock(hashtextextended(m.phone_e164,7));
+      if exists(select 1 from public.call_jobs j join public.campaign_customers other on other.id=j.membership_id where other.phone_e164=m.phone_e164 and j.campaign_id<>c.id and j.status in ('Pending','Claimed','Dispatched')) then perform pose_private.campaign_contact_block(m.id,'ACTIVE_CALL',p_now);continue; end if;
+      insert into public.call_jobs(campaign_id,membership_id,attempt_no,scheduled_at,idempotency_key,created_at,updated_at) values(c.id,m.id,n,p_now,'campaign:'||c.id||':member:'||m.id||':attempt:'||n,p_now,p_now) on conflict do nothing;
+      if found then added:=added+1; allowance:=allowance-1; end if;
+      update public.campaign_customers set status='QUEUED',skip_reason=null,next_attempt_at=null,version=version+1,updated_at=p_now where id=m.id;
+     end loop;
+    end if;
+   end if;
+  end if;
+  perform pose_private.campaign_complete(c.id);
+  if before_state is distinct from pose_private.campaign_tick_state(c.id) then changed:=changed||jsonb_build_array(c.id); end if;
+ end loop;
+return jsonb_build_object('jobs_created',added,'_changed_campaigns',changed);
+end $$;
+-- Callers receive the immutable audience decision as data, while conversation text remains separate.
+create or replace function pose_private.call_context(p_call uuid) returns jsonb language plpgsql security definer set search_path='' as $$
+declare a public.calls;
+begin
+ perform pose_private.call_system();
+ select * into a from public.calls where id=p_call;
+ return to_jsonb(a)||jsonb_build_object('suppressed',pose_private.phone_suppressed(a.phone_e164),'script',(select content from public.call_script_versions where id=a.script_version_id),'lead',(select jsonb_build_object('needs',l.needs,'campaign_snapshot',m.snapshot,'products_of_interest',coalesce(m.snapshot->'reasons','[]'::jsonb),'match',coalesce(m.snapshot->'match','{}'::jsonb)) from public.leads l left join public.campaign_customers m on m.id=a.membership_id where l.id=a.lead_id));
+end $$;
+revoke all on function pose_private.call_context(uuid) from public,anon,authenticated;
+grant execute on function pose_private.call_context(uuid) to service_role;
 commit;
