@@ -69,6 +69,26 @@
 .ai-voice-end:hover{border-color:var(--nx-primary-line);color:var(--nx-primary)}
 
 .ai-panel-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.6rem;padding:.35rem 1rem .75rem;font-size:.72rem;color:var(--nx-subtle)}
+.ai-chat-full{position:relative;inset:auto;width:100%;z-index:1;color:var(--nx-ink)}
+.ai-chat-full .ai-panel{width:100%;height:calc(100dvh - 86px);min-height:620px;border:0;border-radius:0;box-shadow:none;background:var(--nx-page)}
+.ai-chat-full .ai-panel-head{padding:1rem max(1.25rem,calc((100% - 1120px)/2));}
+.ai-chat-full .ai-log{width:min(100%,1120px);margin:0 auto;padding:2.5rem 1.25rem 1rem;gap:1.25rem}
+.ai-chat-full .ai-welcome{margin:auto;max-width:760px;padding:2rem 1rem;gap:.85rem}
+.ai-chat-full .ai-welcome h3{font-size:clamp(2rem,4vw,3.5rem);line-height:1.1}
+.ai-chat-full .ai-welcome p{max-width:52ch;font-size:1rem}
+.ai-chat-full .ai-welcome>.ai-suggestions:not(.ai-full-suggestions){display:none}
+.ai-chat-full .ai-full-suggestions{display:flex;order:4}
+.ai-chat-full .ai-suggestions{display:flex;flex-direction:row;flex-wrap:wrap;justify-content:center;gap:.65rem;width:min(100%,720px)}
+.ai-chat-full .ai-suggestions button{border-radius:999px;text-align:center;padding:.7rem 1rem}
+.ai-chat-full .ai-property-list{grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem}
+.ai-chat-full .ai-property-card{display:block}
+.ai-chat-full .ai-property-cover{height:150px;min-height:150px}
+.ai-chat-full .ai-composer{width:min(100% - 2rem,820px);margin:.5rem auto 1rem}
+.ai-chat-full .ai-error,.ai-chat-full .ai-action-consent{width:min(100% - 2rem,820px);margin-inline:auto}
+.ai-chat-full .ai-panel-foot{width:min(100% - 2rem,820px);margin-inline:auto}
+.ai-page-main{min-height:0}
+@media(max-width:900px){.ai-chat-full .ai-property-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.ai-chat-full .ai-panel{height:calc(100dvh - 76px);min-height:540px}.ai-chat-full .ai-panel-head{padding-inline:1rem}.ai-chat-full .ai-log{padding:1.25rem .75rem .5rem}.ai-chat-full .ai-property-list{grid-template-columns:1fr}.ai-chat-full .ai-welcome{padding:1rem .25rem}.ai-chat-full .ai-welcome h3{font-size:2rem}.ai-chat-full .ai-welcome p{font-size:.9rem}.ai-chat-full .ai-suggestions{display:grid;grid-template-columns:1fr}.ai-chat-full .ai-suggestions button{width:100%}}
 .ai-link{display:inline-flex;align-items:center;gap:.3rem;flex:none;border:0;background:none;padding:0;color:var(--nx-primary);font-size:.75rem;text-decoration:none}.ai-link:disabled{color:var(--nx-subtle);cursor:not-allowed}
 .ai-handoff{display:grid;gap:.4rem;width:100%}.ai-handoff label{font-size:.78rem;color:var(--nx-text)}
 .ai-handoff input{width:100%;padding:.5rem .6rem;border-radius:.6rem;border:1px solid var(--nx-line-strong);background:var(--nx-surface);color:var(--nx-ink)}

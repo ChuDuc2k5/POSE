@@ -1,7 +1,8 @@
 'use client';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
-import { ArrowUp, AudioLines, Mic, MicOff, Plus, UserRound, X } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ArrowUp, AudioLines, Maximize2, Mic, MicOff, Plus, UserRound, X } from 'lucide-react';
 import { TeravaMark } from './brand';
 import { availabilityLabels } from '@/lib/catalog';
 import { chatStorageKey } from '@/lib/chat-storage';
@@ -35,6 +36,8 @@ function vietnameseVoice(){
 }
 
 export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,visible,navigationKey}:{signedIn?:boolean;propertyId?:string;propertyName?:string;ownerKey:string;visible:boolean;navigationKey:string}){
+  const router=useRouter();
+  const fullPage=visible && navigationKey.split('?')[0]==='/tro-ly-ai';
   const [open,setOpen]=useState(false),[store,setStore]=useState(false),[session,setSession]=useState<string>();
   const [messages,setMessages]=useState<Message[]>([]),[text,setText]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [dictating,setDictating]=useState(false),[voice,setVoice]=useState<VoiceState|null>(null),[heard,setHeard]=useState('');
@@ -77,6 +80,9 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
 
   useEffect(()=>{history.current=messages;sessionRef.current=session;},[messages,session]);
   useEffect(()=>{if(open){if(voiceActive)panel.current?.querySelector<HTMLButtonElement>('.ai-voice-end')?.focus();else input.current?.focus();}},[open,voiceActive]);
+  // The route is an external navigation state; opening the existing panel keeps its state intact.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(()=>{if(fullPage)setOpen(true);},[fullPage]);
   useEffect(()=>{log.current?.scrollTo({top:log.current.scrollHeight,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant':'smooth'});},[messages,busy,heard]);
   useEffect(()=>{const el=input.current;if(el){el.style.height='auto';el.style.height=`${Math.min(el.scrollHeight,160)}px`;}},[text]);
   useEffect(()=>()=>{voiceOn.current=false;voiceEpoch.current++;if(recognition.current){recognition.current.onend=null;recognition.current.onresult=null;recognition.current.onerror=null;recognition.current.abort();}window.speechSynthesis?.cancel();finishSpeech.current?.();},[]);
@@ -180,9 +186,13 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   function reset(){try{window.sessionStorage.removeItem(chatStorageKey);}catch{}stopVoice();setPreferred('');sessionRef.current=undefined;setSession(undefined);setMessages([]);setStore(false);setNotice('');setHandoffKey(undefined);setError('');setText('');setHandoffOpen(false);}
 
   if(!visible || !restored)return null;
-  return <aside className="ai-chat">
+  const pageSuggestions=fullPage?['Thuê chung cư Thủ Đức','Mua căn hộ Quận 7','Thuê nhà phố Bình Thạnh','Mua nhà phố Quận 10']:suggestions;
+  void pageSuggestions;
+  return <aside className={`ai-chat${fullPage?' ai-chat-full':''}`}>
     {open && <section ref={panel} id="ai-chat-panel" className="ai-panel" role="dialog" aria-label="Trợ lý AI TERAVA" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close();}if(e.key==='Tab'){const nodes=panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],textarea:not(:disabled),input:not(:disabled)');if(nodes?.length){const first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}}}}>
       <header className="ai-panel-head">
+        {!fullPage && <button type="button" className="ai-icon" onClick={()=>{setOpen(true);router.push('/tro-ly-ai');}} title="Mở toàn màn hình" aria-label="Mở trợ lý AI toàn màn hình"><Maximize2 size={18}/></button>}
+        {fullPage && <button type="button" className="ai-icon" onClick={()=>router.push('/properties')} title="Thu nhỏ" aria-label="Thu nhỏ trợ lý AI"><X size={18}/></button>}
         <span className="ai-avatar"><TeravaMark size={26}/></span>
         <div><h2>Trợ lý TERAVA</h2><small>Trợ lý AI · tư vấn bất động sản</small>{propertyName && <small>Đang xem: {propertyName}</small>}</div>
         <button type="button" className="ai-icon" disabled={busy} onClick={()=>{reset();requestAnimationFrame(()=>input.current?.focus());}} title="Cuộc trò chuyện mới" aria-label="Cuộc trò chuyện mới"><Plus size={18}/></button>
@@ -191,6 +201,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
 
       <div className="ai-log" ref={log} role="log" aria-live="polite" aria-relevant="additions">
         {!messages.length && <div className="ai-welcome">
+          {fullPage && <div className="ai-suggestions ai-full-suggestions">{pageSuggestions.map(s=><button type="button" key={`full-${s}`} disabled={busy} onClick={()=>void ask(s)}>{s}</button>)}</div>}
           <span className="ai-welcome-mark"><TeravaMark size={44}/></span>
           <h3>Xin chào! Tôi có thể giúp gì cho bạn?</h3>
           <p>Tôi là trợ lý AI của TERAVA, trả lời dựa trên dữ liệu bất động sản đã công bố. Chuyên viên sẽ xác nhận mọi đề nghị.</p>

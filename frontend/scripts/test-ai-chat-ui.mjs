@@ -121,7 +121,17 @@ try{
  check(await evaluate("!document.querySelector('[aria-label=\"Nói thay vì gõ\"]')"),'Firefox-like mic hidden');await click('Trò chuyện bằng giọng nói');await wait("!!document.querySelector('.ai-error')");check(await evaluate("document.querySelector('.ai-error').innerText.includes('Chrome hoặc Edge')"),'clear unsupported voice guidance');await screenshot('no-speech-380');
  await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});check(await evaluate("getComputedStyle(document.querySelector('.ai-send')).transitionDuration==='0s'"),'reduced motion');
  await send('Network.setCookie',{name:'pose-access',value:'fixture-Admin',url:'http://localhost:3300'});await send('Page.navigate',{url:'http://localhost:3300/admin'});await delay(500);await wait("!!document.querySelector('.ai-usage-panel')");await screenshot('admin-usage-1280');
- console.log(`PASS: ${checks} M06 chat UI checks at 1280px and 380px; dictation, voice, barge-in, fallback, keyboard and consent.`);
+ // Full-page chat shares the widget state and stream implementation.
+ await send('Network.deleteCookies',{name:'pose-access',url:'http://localhost:3300'});await evaluate('sessionStorage.clear()');
+ await send('Page.navigate',{url:'http://localhost:3300/properties'});await delay(500);await wait("!!document.querySelector('.ai-launcher')");await evaluate("document.querySelector('.ai-launcher').click()");
+ await type('Find an apartment in District 7');await evaluate("document.querySelector('.ai-send').click()");await wait("document.querySelectorAll('.ai-row').length===2 && !!document.querySelector('.ai-property-card')");
+ await click('Mở trợ lý AI toàn màn hình');await wait("location.pathname==='/tro-ly-ai' && !!document.querySelector('.ai-chat-full .ai-panel')");
+ check(await evaluate("document.querySelectorAll('.ai-row').length===2 && !!document.querySelector('.ai-property-card') && document.querySelector('.ai-launcher')===null"),'full page preserves conversation and hides launcher');
+ await screenshot('bigchat-380');await send('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false});await screenshot('bigchat-1280');
+ await type('Find a townhouse');await evaluate("document.querySelector('.ai-send').click()");await wait("document.querySelectorAll('.ai-row').length===4 && !document.querySelector('.ai-typing')");
+ await click('Thu nhỏ trợ lý AI');await wait("location.pathname==='/properties' && document.querySelectorAll('.ai-row').length===4");
+ check(await evaluate("document.documentElement.scrollWidth<=1280"),'full page returns to widget without overflow');
+ console.log(`PASS: ${checks} M06 chat UI checks at 1280px and 380px; full-page chat, dictation, voice, barge-in, fallback, keyboard and consent.`);
  console.log(`Screenshots: ${root}`);
 }finally{
  if(send&&ws?.readyState===WebSocket.OPEN){try{await send('Browser.close');}catch{}}
