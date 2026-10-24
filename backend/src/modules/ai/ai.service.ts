@@ -239,7 +239,7 @@ async getUsage(request:NextRequest) {
   if(!session)return catalogError('UNAUTHORIZED','Vui lòng đăng nhập.',401);
   if(session.role!=='Admin')return catalogError('FORBIDDEN','Bạn không có quyền xem sử dụng AI.',403);
   const url=new URL(request.url), from=url.searchParams.get('from'), to=url.searchParams.get('to');
-  const result=await authClient(session.access).rpc('pose_system_admin_ai_usage',{p_from:from||null,p_to:to||null, p_price_input_per_m:Number(process.env.AI_PRICE_INPUT_PER_M||0),p_price_output_per_m:Number(process.env.AI_PRICE_OUTPUT_PER_M||0)});
+  const result=await authClient(session.access).rpc('pose_system_admin_ai_usage',{p_from:from||null,p_to:to||null});
   return result.error ? catalogDatabaseError(result.error) : catalogJson({items:result.data||[]});
 }
   async handoff(request:NextRequest) {

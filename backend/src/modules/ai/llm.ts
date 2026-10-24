@@ -56,6 +56,8 @@ export function validateModel(raw: unknown, source?: string): ModelResult {
   return { reply: raw.reply, intent: raw.intent as ModelResult['intent'], needs, tool_calls: calls, flags };
 }
 
+// Maps a structured-output schema name to ai_request_log.kind.
+const logKind=(name:string)=>({rag_rerank:'rerank',search_query:'query',needs_v1:'needs',answer_meta:'answer_meta'} as Record<string,string>)[name] || name;
 export async function structured<T>(schema: z.ZodType<T>, name: string, messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[], model = process.env.AI_META_MODEL || providerConfig().model, maxTokens = 300): Promise<T> {
   const started=Date.now(); const { api } = client();
   try {
@@ -73,9 +75,9 @@ export async function structured<T>(schema: z.ZodType<T>, name: string, messages
     if (seen < count) { console.info(JSON.stringify({ event: 'rerank_raw', raw: content })); process.env.AI_RAG_RERANK_DEBUG_SEEN = String(seen + 1); }
   }
   const value=schema.parse(JSON.parse(content));
-  logAiRequest({kind:name==='rag_rerank'?'rerank':name.replace(/_v1$/,''),model,promptName:name,promptVersion:name==='search_query'?promptVersion('query'):name==='needs_v1'?promptVersion('needs'):name==='rag_rerank'?promptVersion('rerank.system'):promptVersion('answer-meta'),promptTokens:usage?.prompt_tokens,completionTokens:usage?.completion_tokens,totalTokens:usage?.total_tokens,latencyMs:Date.now()-started,status:'ok'});
+  logAiRequest({kind:logKind(name),model,promptName:name,promptVersion:name==='search_query'?promptVersion('query'):name==='needs_v1'?promptVersion('needs'):name==='rag_rerank'?promptVersion('rerank.system'):promptVersion('answer-meta'),promptTokens:usage?.prompt_tokens,completionTokens:usage?.completion_tokens,totalTokens:usage?.total_tokens,latencyMs:Date.now()-started,status:'ok'});
   return value;
-  } catch(error) { logAiRequest({kind:name==='rag_rerank'?'rerank':name.replace(/_v1$/,''),model,promptName:name,latencyMs:Date.now()-started,status:requestStatus(error),errorCode:error instanceof Error?error.message:'UNKNOWN'}); throw error; }
+  } catch(error) { logAiRequest({kind:logKind(name),model,promptName:name,latencyMs:Date.now()-started,status:requestStatus(error),errorCode:error instanceof Error?error.message:'UNKNOWN'}); throw error; }
 }
 
 export async function complete(data: unknown): Promise<ModelResult> {

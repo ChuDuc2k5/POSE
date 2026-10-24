@@ -3,7 +3,9 @@ import { structured } from './llm.js';
 import { applyThresholds, type RankedChunk } from './retrieval.js';
 import { prompt } from './prompts.js';
 
-const RerankEnvelopeSchema = z.object({ has_answer: z.boolean(), ranked: z.array(z.unknown()) });
+// Wire schema sent as the response format: entries must be {n, relevance} integers, otherwise
+// small models copy candidate text into the array. Ranges are checked per entry below.
+const RerankEnvelopeSchema = z.object({ has_answer: z.boolean(), ranked: z.array(z.object({ n: z.number().int(), relevance: z.number().int() })) });
 const RerankEntrySchema = z.object({ n: z.number().int().positive(), relevance: z.number().int().min(0).max(3) });
 export type RerankModel = (schema: z.ZodType<unknown>, name: string, messages: Parameters<typeof structured>[2], model?: string, maxTokens?: number) => Promise<unknown>;
 export type RerankOptions = { pool?: number; min?: number; batch?: number; timeoutMs?: number; model?: RerankModel };
@@ -33,7 +35,7 @@ export async function rerank(question: string, rows: RankedChunk[], options: Rer
         { role: 'system' as const, content: prompt('rerank.system').text },
         { role: 'user' as const, content: prompt('rerank.user', { question, data }).text },
       ];
-      const raw = await withTimeout(model(RerankEnvelopeSchema, 'rag_rerank', messages, undefined, Math.max(160, Math.min(300, group.length * 14 + 80))), timeoutMs);
+      const raw = await withTimeout(model(RerankEnvelopeSchema, 'rag_rerank', messages, undefined, Math.max(160, Math.min(500, group.length * 24 + 80))), timeoutMs);
       const envelope = RerankEnvelopeSchema.safeParse(raw); if (!envelope.success) throw new Error('invalid_json');
       modelSaysAnswer ||= envelope.data.has_answer;
       for (const entry of envelope.data.ranked) { const parsed = RerankEntrySchema.safeParse(entry); if (!parsed.success || parsed.data.n > group.length) continue; const globalN = offset + parsed.data.n; if (scores.has(globalN)) continue; scores.set(globalN, parsed.data.relevance); if (envelope.data.has_answer) answerable.add(globalN); if (envelope.data.has_answer && parsed.data.relevance >= min) hasRelevant = true; }
