@@ -26,6 +26,15 @@ describe('knowledge chunking',()=>{
   const clean=cleanKnowledgeText('<p>🏠 Nhà có hẻm xe hơi.</p> Giá 3,5 tỷ. Liên hệ anh Tuấn 090-123-4567. email broker@example.vn. https://example.vn');
   expect(clean).toContain('hẻm xe hơi');expect(clean).not.toMatch(/3,5|090|broker|example|Liên hệ/i);
  });
+ it('removes real-catalogue money clauses but keeps factual measurements',()=>{
+  const examples=[
+   ['Nhà có hẻm xe hơi 6m, giá 3.2 tỷ, gần chợ.','6m'],
+   ['Căn hộ có 2 phòng ngủ, 25 triệu/tháng, nội thất đầy đủ.','2 phòng'],
+   ['Đất rộng 110m2, mặt tiền đường 20m, 10.000.000.000 VND.','110m2'],
+   ['Giá thương lượng, pháp lý sẵn sổ và xây 2 tầng.','2 tầng']
+  ];
+  for(const [example,kept] of examples){const clean=cleanKnowledgeText(example);expect(clean).not.toMatch(/3\.2|25\s*tri|10\.000|VND|thương\s*lượng/i);expect(clean).toContain(kept);}
+ });
 });
 
 describe('embeddings',()=>{
