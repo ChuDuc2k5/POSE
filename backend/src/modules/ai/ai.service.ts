@@ -204,6 +204,8 @@ export class AiService {
       if(retryViolation){log('regeneration',result.reply,retryViolation);blocked=true;}
       else { violation=null; log('regeneration',{},null); }
     }
+    // Tool calls can mix result sets; the grounded summary and its cards share one fresh 1..n numbering.
+    if(blocked)items=items.map((item,index)=>({...item,number:index+1}));
     const reply=(count===0 ? `${disclosure}\n`:'')+(related.length && !items.length ? 'Không có bất động sản nào khớp các tiêu chí bạn nêu.\n' : '')+(blocked ? groundedSummary(items):result.reply);
     if(!blocked){
       try {

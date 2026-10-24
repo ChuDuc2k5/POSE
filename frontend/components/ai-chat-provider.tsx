@@ -14,7 +14,7 @@ export function AiChatProvider({children,ownerKey}:{children:ReactNode;ownerKey:
     try{const saved=JSON.parse(window.sessionStorage.getItem(chatStorageKey)||'null');if(saved && saved.ownerKey!==ownerKey)window.sessionStorage.removeItem(chatStorageKey);}catch{}
   },[ownerKey]);
   useEffect(()=>{const clear=()=>{setPage(undefined);setGeneration(n=>n+1);};window.addEventListener('terava-chat-clear',clear);return()=>window.removeEventListener('terava-chat-clear',clear);},[]);
-  return <ChatContext value={setPage}>{children}{page && <AiChatWidget key={`${page.ownerKey}:${generation}`} {...page} visible={page.path===path} navigationKey={`${path}?${query}`}/>}</ChatContext>;
+  return <ChatContext value={setPage}>{children}{page && <AiChatWidget key={`${page.ownerKey}:${generation}`} {...page} visible={page.path===path} navigationKey={`${path}${query ? `?${query}` : ''}`}/>}</ChatContext>;
 }
 
 export function AiChatPage({ownerKey,signedIn=false,propertyId,propertyName}:{ownerKey:string;signedIn?:boolean;propertyId?:string;propertyName?:string}){

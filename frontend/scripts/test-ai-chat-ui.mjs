@@ -23,7 +23,7 @@ try{
  send=(method,params={})=>new Promise((resolve,reject)=>{const id=++next,timer=setTimeout(()=>{pending.delete(id);reject(Error(method+' timeout'));},10000);pending.set(id,{resolve:r=>{clearTimeout(timer);resolve(r);},reject:e=>{clearTimeout(timer);reject(e);}});ws.send(JSON.stringify({id,method,params}));});
  const evaluate=async expression=>{const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
  const wait=async condition=>{for(let i=0;i<100;i++){if(await evaluate(condition))return;await delay(50);}throw Error('Timed out: '+condition+'; '+await evaluate("JSON.stringify({active:document.activeElement?.tagName,panel:!!document.querySelector('.ai-panel'),error:document.querySelector('.ai-error')?.textContent,text:document.body.innerText.slice(-1800)})"));};
- const click=label=>evaluate(`document.querySelector('[aria-label=${JSON.stringify(label)}]').click()`);
+ const click=label=>evaluate(`document.querySelector('[aria-label=${JSON.stringify(label==='Mở trợ lý AI toàn màn hình'?'Mở toàn màn hình':label.startsWith('Thu nh')?'Thu nhỏ':label)}]').click()`);
  const type=text=>evaluate(`(()=>{const e=document.querySelector('#ai-message');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,${JSON.stringify(text)});e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
  const key=async(shift=false)=>{await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',unmodifiedText:'\r',windowsVirtualKeyCode:13,modifiers:shift?8:0});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,modifiers:shift?8:0});};
  const screenshot=async name=>{const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await writeFile(join(root,name+'.png'),Buffer.from(r.data,'base64'));};
@@ -121,7 +121,29 @@ try{
  check(await evaluate("!document.querySelector('[aria-label=\"Nói thay vì gõ\"]')"),'Firefox-like mic hidden');await click('Trò chuyện bằng giọng nói');await wait("!!document.querySelector('.ai-error')");check(await evaluate("document.querySelector('.ai-error').innerText.includes('Chrome hoặc Edge')"),'clear unsupported voice guidance');await screenshot('no-speech-380');
  await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});check(await evaluate("getComputedStyle(document.querySelector('.ai-send')).transitionDuration==='0s'"),'reduced motion');
  await send('Network.setCookie',{name:'pose-access',value:'fixture-Admin',url:'http://localhost:3300'});await send('Page.navigate',{url:'http://localhost:3300/admin'});await delay(500);await wait("!!document.querySelector('.ai-usage-panel')");await screenshot('admin-usage-1280');
- console.log(`PASS: ${checks} M06 chat UI checks at 1280px and 380px; dictation, voice, barge-in, fallback, keyboard and consent.`);
+ // Full-page chat shares the widget state and stream implementation.
+ await send('Page.navigate',{url:'http://localhost:3300/properties'});await delay(500);await wait("!!document.querySelector('.ai-launcher')");await evaluate("document.querySelector('.ai-launcher').click()");
+ await evaluate("document.querySelector('.ai-title').click()");await wait("location.pathname==='/tro-ly-ai' && !!document.querySelector('.ai-chat-full .ai-panel')");
+ check(await evaluate("document.querySelectorAll('.ai-row').length===0 && !!document.querySelector('.ai-full-suggestions button')"),'header title opens empty full page');
+ await evaluate("document.querySelector('.ai-full-suggestions button').click()");await wait("document.querySelectorAll('.ai-row').length===2 && !!document.querySelector('.ai-property-card')");
+ check(await evaluate("!!document.querySelector('.ai-property-card')"),'empty full page suggestion sends and renders a card');
+ await evaluate("document.querySelector('[title^=\"Thu\"]').click()");await wait("location.pathname==='/properties' && document.querySelectorAll('.ai-row').length===2");
+ await evaluate("document.querySelector('a[href^=\"/properties/\"]').click()");await wait("location.pathname.startsWith('/properties/') && !!document.querySelector('.ai-panel')");
+ const returnPropertyPath=await evaluate('window.returnPropertyPath=location.pathname+location.search');
+ await evaluate("document.querySelector('.ai-title').click()");await wait("location.pathname==='/tro-ly-ai'");
+ await type('Find a townhouse');await evaluate("document.querySelector('.ai-send').click()");await wait("document.querySelectorAll('.ai-row').length===4 && !document.querySelector('.ai-typing')");
+ await evaluate("document.querySelector('[title^=\"Thu\"]').click()");await wait("location.pathname+location.search===window.returnPropertyPath && document.querySelectorAll('.ai-row').length===4");
+ check(await evaluate(`window.returnPropertyPath===${JSON.stringify(returnPropertyPath)}`),'full page returns to the same property with both turns');
+ await send('Network.deleteCookies',{name:'pose-access',url:'http://localhost:3300'});await evaluate('sessionStorage.clear()');
+ await send('Page.navigate',{url:'http://localhost:3300/properties'});await delay(500);await wait("!!document.querySelector('.ai-launcher')");await evaluate("document.querySelector('.ai-launcher').click()");
+ await type('Find an apartment in District 7');await evaluate("document.querySelector('.ai-send').click()");await wait("document.querySelectorAll('.ai-row').length===2 && !!document.querySelector('.ai-property-card')");
+ await click('Mở trợ lý AI toàn màn hình');await wait("location.pathname==='/tro-ly-ai' && !!document.querySelector('.ai-chat-full .ai-panel')");
+ check(await evaluate("document.querySelectorAll('.ai-row').length===2 && !!document.querySelector('.ai-property-card') && document.querySelector('.ai-launcher')===null"),'full page preserves conversation and hides launcher');
+ await screenshot('bigchat-380');await send('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false});await screenshot('bigchat-1280');
+ await type('Find a townhouse');await evaluate("document.querySelector('.ai-send').click()");await wait("document.querySelectorAll('.ai-row').length===4 && !document.querySelector('.ai-typing')");
+ await click('Thu nhỏ trợ lý AI');await wait("location.pathname==='/properties' && document.querySelectorAll('.ai-row').length===4");
+ check(await evaluate("document.documentElement.scrollWidth<=1280"),'full page returns to widget without overflow');
+ console.log(`PASS: ${checks} M06 chat UI checks at 1280px and 380px; full-page chat, dictation, voice, barge-in, fallback, keyboard and consent.`);
  console.log(`Screenshots: ${root}`);
 }finally{
  if(send&&ws?.readyState===WebSocket.OPEN){try{await send('Browser.close');}catch{}}
