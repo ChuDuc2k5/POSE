@@ -6,15 +6,14 @@ import { AiLlmService, AiGuardService, AiExtractionService, AiScoringService, Ai
 import { authenticatedSession, authClient, consumeAttempt } from '../auth/session.js';
 import { systemClient } from '../supabase/supabase.service.js';
 import { catalogDatabaseError, catalogError, catalogInput, catalogJson } from '../catalog/catalog.service.js';
-import { searchParameters } from '../../common/discovery.js';
 import { uuidPattern } from '../../common/catalog.js';
 import { object } from './extraction.js';
 import { inferSearch } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
-import { disclosure, GUARD_VERSION, safeReply, type Evidence } from './guard.js';
+import { correctionData, disclosure, GUARD_VERSION, safeReply, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContext, type RetrievalResult } from './retrieval.js';
 import { runAgent } from './agent.ts';
-import { querySearch, checkAnswer, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
+import { querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
 
 export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI hiện chưa khả dụng. Vui lòng thử lại hoặc gửi yêu cầu tư vấn.',retry:true,inquiry_url:'/customer/inquiries/new'},503);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -30,8 +29,9 @@ async function readSession(id:string, who:Awaited<ReturnType<typeof identity>>) 
   return who.client ? who.client.rpc('pose_ai_read_session',{p_session:id}):systemClient().rpc('pose_system_ai_read_guest',{p_session:id,p_hash:who.guestHash});
 }
 async function retrieve(filters:Record<string,unknown>,context:string|null):Promise<Evidence[]> {
-  const params=new URLSearchParams(Object.entries(filters).filter(([k])=>k!=='transaction_type').map(([k,v])=>[k,String(v)]));
-  const parsed=searchParameters(params);if(Object.keys(parsed.fields).length)throw new Error('INVALID_FILTER');
+  const scalar=(value:unknown)=>typeof value==='string'||typeof value==='number' ? value:'';
+  const params=new URLSearchParams();if(typeof filters.location==='string')params.set('location',`ilike.%${filters.location}%`);if(filters.transaction_type)params.set('transaction_type',`eq.${scalar(filters.transaction_type)}`);if(filters.type)params.set('property_type',`eq.${scalar(filters.type)}`);if(filters.minPrice!==undefined)params.set('price',`gte.${scalar(filters.minPrice)}`);if(filters.maxPrice!==undefined)params.set('price',`lte.${scalar(filters.maxPrice)}`);
+  const allowed=new Set(['location','transaction_type','type','minPrice','maxPrice']);if(Object.keys(filters).some(k=>!allowed.has(k)))throw new Error('INVALID_FILTER');
   let query=authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type,transaction_type,price_period');
   if(context)query=query.eq('id',context);
   if(typeof filters.location==='string')query=query.ilike('location',`%${filters.location.replace(/[%_\\]/g,'\\$&')}%`);
@@ -73,6 +73,7 @@ export class AiService {
     let searchPerformed=input.filters!==undefined || !!input.property_id,rag:RetrievalResult|null=null;
     let items:Evidence[]=[];
     const search=async(searchFilters:Record<string,unknown>,propertyId:string|null=null)=>{
+      const aliases:Record<string,string>={min_price_vnd:'minPrice',max_price_vnd:'maxPrice',property_type:'type'};searchFilters=Object.fromEntries(Object.entries(searchFilters).map(([key,value])=>[aliases[key]||key,value]));
       try{rag=await this.retrieval.search(source,searchFilters,{propertyId,propertyIds:interestIds.slice(-20)});return (rag.sources.filter(item=>item.id).map(item=>({...item,id:item.id as string,name:item.title as string})) as unknown) as Evidence[];}
       catch{return retrieve(searchFilters,propertyId);}
     };
@@ -103,17 +104,17 @@ export class AiService {
     if(realEstateIntent && !searchPerformed) { items=await search(queryFilters,null); searchPerformed=true; }
     const extracted:Record<string,unknown>={};
     const contextBlocks=items.map((item,index)=>`[${item.number || index+1}] ${item.code || ''} ${item.name || ''} ${item.location || ''} price=${item.price ?? 'unknown'} availability=${item.availability || 'unknown'}`).join('\n');
-    const agentMessages=[{role:'system' as const,content:SYSTEM_PROMPT},{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({question:standalone,history:sanitizedHistory,properties:contextBlocks,customer_text:source,contact_redacted:guest && source!==input.message})}\nEND_UNTRUSTED_DATA`}];
+    const agentMessages=[{role:'system' as const,content:SYSTEM_PROMPT},{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({question:standalone,history:sanitizedHistory,properties:contextBlocks,customer_text:source,contact_redacted:guest && source!==input.message,injection_suspected:suspected,search_performed:searchPerformed})}\nEND_UNTRUSTED_DATA`}];
     const proposals:{tool:string;args_hash:string;decision:string;reason:string;rule_version:string}[]=[];
     const pendingActions:unknown[]=[];
     const execute=async(name:string,args:unknown)=>{
-      if(name==='search_properties') { const a=args as Record<string,unknown>; const raw=object(a.filters) ? a.filters as Record<string,unknown> : {}; const f=Object.fromEntries(Object.entries(raw).filter(([,v])=>v!==null&&v!==undefined)); const found=await search(f,null); const labels:Record<string,string>={Available:'Đang mở bán',Sold:'Đã bán, không còn mở bán',Reserved:'Đã giữ chỗ, không còn mở bán',Unavailable:'Chưa khả dụng, không còn mở bán'}; return found.map((p,i)=>`[${p.number || i+1}] ${p.code}: ${p.name}, ${p.price===null ? 'giá chưa công bố':`${p.price.toLocaleString('vi-VN')} VND`}. ${labels[p.availability] || 'Chưa rõ khả dụng'}. Cập nhật ${p.updated_at}.`); }
+      if(name==='search_properties') { const a=args as Record<string,unknown>; const raw=object(a.filters) ? a.filters as Record<string,unknown> : {}; const f=Object.fromEntries(Object.entries(raw).filter(([,v])=>v!==null&&v!==undefined)); const found=await search(f,input.property_id as string|null || null); const labels:Record<string,string>={Available:'Đang mở bán',Sold:'Đã bán, không còn mở bán',Reserved:'Đã giữ chỗ, không còn mở bán',Unavailable:'Chưa khả dụng, không còn mở bán'}; return found.length ? found.map((p,i)=>`[${p.number || i+1}] ${p.code}: ${p.name}, ${p.price===null ? 'giá chưa công bố':`${p.price.toLocaleString('vi-VN')} VND`}. ${labels[p.availability] || 'Chưa rõ khả dụng'}. Cập nhật ${p.updated_at}.`) : ['Chưa có kết quả phù hợp trong nguồn công bố. Bạn có thể nói ngân sách hoặc khu vực tìm kiếm không?']; }
       if(name==='get_property_detail') { const code=(args as {code:string}).code; const result=await authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type,transaction_type,price_period').eq('code',code).maybeSingle(); return result.error || !result.data ? {found:false} : {found:true,property:result.data}; }
       if(name==='list_my_appointments') { if(guest) return {requires_sign_in:true}; const result=await who.client!.from('appointments').select('*').order('starts_at',{ascending:true}).limit(20); return result.error ? {error:'unavailable'} : {appointments:result.data || []}; }
       return {error:'unknown_read_tool'};
     };
     const createPending=async(name:string,args:unknown)=>{
-      if(guest) return null;
+      if(guest) { log(name,args,'SIGN_IN_REQUIRED','flagged'); return null; }
       const summary=name==='request_handoff' ? String((args as {summary:string}).summary) : name==='propose_appointment' ? `Đề nghị lịch xem ${(args as {code?:string}).code || ''} lúc ${(args as {preferred_start:string}).preferred_start}` : `Lưu ${(args as {code:string}).code} vào yêu thích`;
       const pending=await who.client!.rpc('pose_ai_create_pending',{p_session:id,p_tool:name,p_args:args,p_summary:summary,p_key:`${id}:${hash(JSON.stringify({name,args}))}`});
       if(pending.error) throw new Error(pending.error.message || 'PENDING_FAILED');
@@ -122,9 +123,12 @@ export class AiService {
     };
     const streamedDeltas:string[]=[];
     const streamRequested=request.headers.get('accept')?.includes('text/event-stream')===true;
-    const agent=await runAgent(agentMessages as never,execute,createPending,undefined,streamRequested ? ((messages:Parameters<typeof streamAgentStep>[0])=>streamAgentStep(messages,text=>streamedDeltas.push(text))) as never : undefined);
+    const step=streamRequested ? ((messages:Parameters<typeof streamAgentStep>[0])=>streamAgentStep(messages,text=>streamedDeltas.push(text))) as never : undefined;
+    const run=async(messages:typeof agentMessages)=>runAgent(messages as never,execute,createPending,undefined,step);
+    let agent=await run(agentMessages);
     for(const blockedReason of agent.blocked) log('agent',blockedReason,blockedReason,'flagged');
     let result={reply:agent.text || 'Hiện tôi chưa đủ dữ liệu để trả lời chính xác.',tool_calls:[] as unknown[],needs:{},flags:[] as never[]};
+    result.reply=agent.text || result.reply;
     let violation:string|null=agent.blocked.length ? 'AGENT_BLOCKED':null;
     if(!violation) { try { const meta=await checkAnswer(result.reply,{sources:items,question:source}); const cited=new Set(items.map(x=>x.number)); if(meta.grounding==='none' && ( /\b\d{3,}\b/.test(result.reply) || /RV-\w+/i.test(result.reply))) violation='C3_META_UNGROUNDED'; if(meta.cited.some(n=>!cited.has(n))) violation='C3_CITATION_NOT_IN_CONTEXT'; } catch { /* C3 failure never fails the turn; guard remains authoritative. */ } }
     items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5);
@@ -133,10 +137,22 @@ export class AiService {
     let blocked=false;
     if(violation){
       log('final_output',result.reply,violation);
-      blocked=true;
+      const retryMessages=[...agentMessages,{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({regeneration:true,violation,...correctionData(violation)})}\nEND_UNTRUSTED_DATA`}];
+      agent=await run(retryMessages);
+      result.reply=agent.text || safeReply;
+      const retryViolation=this.guard.outputReason(result.reply,items,source,{retrievalFound:rag?.found??items.length>0,faqOnly:items.length>0&&items.every(x=>x.source_type==='Faq')});
+      if(retryViolation){log('regeneration',result.reply,retryViolation);blocked=true;}
+      else { violation=null; log('regeneration',{},null); }
+    }
+    const reply=(count===0 ? `${disclosure}\n`:'')+(blocked ? safeReply:result.reply);
+    if(!blocked){
+      try {
+        const modelNeeds=await extractNeedsAfterReply(source,reply);
+        for(const entry of modelNeeds.invalid) log('invalid_need',entry,'invalid_need','flagged');
+        for(const entry of modelNeeds.entries) extracted[entry.field]={value:entry.value,confidence:1,evidence:entry.evidence};
+      } catch { log('extraction','needs_v1','extraction_failed','flagged'); }
     }
     const fields=blocked ? {}:this.extraction.extractNeeds(extracted,source,(key,field)=>log('invalid_need',{field:key,value:field},'invalid_need','flagged'));
-    const reply=(count===0 ? `${disclosure}\n`:'')+(blocked ? safeReply:result.reply);
     const acceptedFields=guest || !input.store_transcript ? {}:fields;
     const merged:Record<string,{value:unknown;evidence?:string;confirmed_by?:unknown}>|null=scoring ? {...scoring.needs,...acceptedFields}:null;
     if(merged && scoring)for(const [k,f] of Object.entries(scoring.needs))if(object(f) && Object.hasOwn(f,'confirmed_by'))merged[k]=f;
