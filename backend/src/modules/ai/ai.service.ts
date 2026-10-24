@@ -10,12 +10,12 @@ import { uuidPattern } from '../../common/catalog.js';
 import { object } from './extraction.js';
 import { inferSearch } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
-import { correctionData, disclosure, GUARD_VERSION, safeReply, type Evidence } from './guard.js';
+import { correctionData, disclosure, GUARD_VERSION, safeReply, isOutOfScope, outOfScopeReply, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
 
-export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI hiện chưa khả dụng. Vui lòng thử lại hoặc gửi yêu cầu tư vấn.',retry:true,inquiry_url:'/customer/inquiries/new'},503);
+export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI tạm thời không khả dụng. Bạn có thể thử lại, xem danh sách bất động sản hoặc gửi yêu cầu tư vấn.',retry:true,search_url:'/properties',inquiry_url:'/customer/inquiries/new'},503);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
 async function identity() {
   const session=await authenticatedSession();
@@ -108,6 +108,12 @@ export class AiService {
     // inference is deliberately only the fallback (or the no-history fast path).
     let standalone=source, queryKeywords:string[]=[], queryFilters:Record<string,unknown>=inferred || {};
     const realEstateIntent=Object.keys(queryFilters).length>0 || /căn|nhà|đất|phòng|giá|thuê|mua|bất động sản|Q\d|RV-/i.test(source);
+    // Refuse before retrieval and before constructing an agent with tools.
+    if (isOutOfScope(source, realEstateIntent || input.property_id ? 'real_estate' : 'unknown')) {
+      const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:false,p_message:source,p_reply:outOfScopeReply,p_sources:[],p_actions:[],p_fields:{},p_score:null});
+      if(committed.error)return catalogDatabaseError(committed.error);
+      return catalogJson({session:committed.data,reply:outOfScopeReply,sources:[],related:[],blocked:false,proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
+    }
     let referenceIds:string[]=[];
     if(realEstateIntent && !(history.length===0 && Object.keys(queryFilters).length)) {
       try {
