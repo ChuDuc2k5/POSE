@@ -16,6 +16,7 @@ language sql security definer set search_path='' as $$
   offset greatest(coalesce(p_page,1)-1,0)*20 limit 20;
 $$;
 revoke all on function pose_private.ai_list_sessions(integer) from public, anon, authenticated;
+grant execute on function pose_private.ai_list_sessions(integer) to authenticated;
 
 create or replace function public.pose_ai_list_sessions(p_page integer default 1)
 returns table(id uuid, title text, updated_at timestamptz, message_count integer)

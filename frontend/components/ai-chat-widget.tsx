@@ -76,7 +76,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
       if(signedIn){
         try{const response=await fetch('/api/ai/sessions?page=1');if(response.ok){const result=await response.json();if(!cancelled)setHistoryItems((result.items||[]).map((item:HistoryItem)=>({...item,time:item.updated_at||item.time})));return;}}catch{}
       }
-      try{const saved=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');if(!cancelled&&Array.isArray(saved))setHistoryItems(saved.slice(0,20));}catch{}
+      try{const saved=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');if(!cancelled&&Array.isArray(saved))setHistoryItems(saved.slice(0,20).map((item:HistoryItem)=>({...item,title:maskTitle(item.title)})));}catch{}
     };
     void load();return()=>{cancelled=true;};
   },[fullPage,signedIn,session]);
