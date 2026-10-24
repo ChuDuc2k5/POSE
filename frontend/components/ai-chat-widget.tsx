@@ -1,10 +1,11 @@
 'use client';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
-import { ArrowUp, AudioLines, BedDouble, Building2, CalendarClock, Heart, MapPin, Mic, MicOff, Plus, Ruler, UserRound, X } from 'lucide-react';
+import { ArrowUp, AudioLines, Mic, MicOff, Plus, UserRound, X } from 'lucide-react';
 import { TeravaMark } from './brand';
 import { availabilityLabels } from '@/lib/catalog';
 import { chatStorageKey } from '@/lib/chat-storage';
+import { RecommendationCard } from './recommendation-card';
 
 type Source={id:string;code:string;name:string;updated_at:string;price:number|null;availability:keyof typeof availabilityLabels;transaction_type:'Sale'|'Rent';price_period:'Total'|'Month';number?:number;cover_id?:string|null;area?:number|null;bedrooms?:number|null;location?:string;reason?:string;relaxed_reason?:string};
 type PendingAction={id:string;tool:string;summary_vi:string;status?:string;requires_verified_phone?:boolean};
@@ -28,14 +29,6 @@ function recognitionCtor():RecognitionCtor|null{
   return w.SpeechRecognition || w.webkitSpeechRecognition || null;
 }
 const subscribeNever=()=>()=>{};
-function ChatPropertyCard({source,related,onAsk,signedIn}:{source:Source;related:boolean;onAsk:(message:string)=>void;signedIn:boolean}){
-  const unavailable=source.availability!=='Available';
-  const price=source.price===null?'Giá chưa công bố':`${new Intl.NumberFormat('vi-VN').format(source.price)} ₫${source.price_period==='Month'?'/tháng':''}`;
-  return <article className={`ai-property-card${related?' is-related':''}`}>
-    <div className="ai-property-cover"><Link href={`/properties/${source.id}`} aria-label={`Xem ${source.name}`}><img src={source.cover_id?`/api/catalog/media/${source.cover_id}?public=true`:''} alt={source.name} onError={event=>{event.currentTarget.style.display='none';}}/><span className="ai-property-placeholder"><Building2 size={28}/></span></Link>{source.number && <span className="ai-property-number">[{source.number}]</span>}<span className={`availability-pill ${source.availability}`}>{source.transaction_type==='Rent'&&source.availability==='Available'?'Còn cho thuê':availabilityLabels[source.availability]}</span></div>
-    <div className="ai-property-body"><h3><Link href={`/properties/${source.id}`}>{source.name}</Link></h3><strong className="ai-property-price">{price}</strong><div className="ai-property-specs">{source.area!=null&&<span><Ruler size={13}/>{source.area.toLocaleString('vi-VN')} m²</span>}{source.bedrooms!=null&&<span><BedDouble size={13}/>{source.bedrooms} phòng ngủ</span>}</div><p className="ai-property-location"><MapPin size={13}/>{source.location||'Đang cập nhật'}</p>{source.relaxed_reason?<small className="ai-property-reason">{source.relaxed_reason}</small>:source.reason&&<small className="ai-property-reason">{source.reason}</small>}<div className="ai-property-actions"><Link className="ai-property-view" href={`/properties/${source.id}`}>Xem</Link>{signedIn?<button type="button" onClick={()=>onAsk(`Lưu căn ${source.code} vào yêu thích giúp tôi`)}><Heart size={14}/> Lưu</button>:<Link href="/sign-in"><Heart size={14}/> Đăng nhập để lưu</Link>}{!unavailable&&(signedIn?<button type="button" onClick={()=>onAsk(`Đặt lịch xem căn ${source.code}`)}><CalendarClock size={14}/> Đặt lịch xem</button>:<Link href="/sign-in"><CalendarClock size={14}/> Đăng nhập để đặt lịch</Link>)}</div></div>
-  </article>;
-}
 function vietnameseVoice(){
   if(typeof window==='undefined' || !window.speechSynthesis)return null;
   return window.speechSynthesis.getVoices().find(v=>v.lang.toLowerCase().startsWith('vi')) || null;
@@ -51,7 +44,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   // Speech support is a browser capability: false during server rendering, real value after hydration.
   const speechSupported=useSyncExternalStore(subscribeNever,()=>!!recognitionCtor(),()=>false);
   const pending=useRef(false),recognition=useRef<Recognition|null>(null),voiceOn=useRef(false),log=useRef<HTMLDivElement>(null),input=useRef<HTMLTextAreaElement>(null);
-  const history=useRef<Message[]>([]),sessionRef=useRef<string|undefined>(undefined);
+  const history=useRef<Message[]>([]),sessionRef=useRef<string|undefined>(undefined),relatedRef=useRef<Source[]>([]);
   const panel=useRef<HTMLElement>(null),launcher=useRef<HTMLButtonElement>(null),finishSpeech=useRef<(()=>void)|null>(null),voiceEpoch=useRef(0);
   const voiceActive=voice!==null;
   const [restored,setRestored]=useState(false);
@@ -98,8 +91,8 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
       if(!response.ok)throw new Error((await response.json()).message);
       if(!response.headers.get('content-type')?.includes('text/event-stream')){const result=await response.json();sessionRef.current=result.session.id;setSession(result.session.id);setMessages(list=>[...list,{role:'assistant',content:result.reply,sources:result.sources,related:result.related,action:result.action}]);return result.reply as string;}
       const reader=response.body?.getReader();if(!reader)throw new Error('Không nhận được nội dung trả lời.');let buffer='',reply='',sources:Source[]=[],action:PendingAction|undefined;setMessages(list=>[...list,{role:'assistant',content:''}]);
-      const update=()=>setMessages(list=>{const copy=[...list];copy[copy.length-1]={role:'assistant',content:reply,sources,related:[],action};return copy;});
-      while(true){const chunk=await reader.read();buffer+=new TextDecoder().decode(chunk.value||new Uint8Array(),{stream:!chunk.done});let end;while((end=buffer.indexOf('\n\n'))>=0){const block=buffer.slice(0,end);buffer=buffer.slice(end+2);const line=block.split('\n').find(value=>value.startsWith('data:'));if(!line)continue;const event=JSON.parse(line.slice(5));if(event.type==='meta'){sessionRef.current=event.session_id;setSession(event.session_id);sources=event.sources||[];}else if(event.type==='delta')reply+=event.text||'';else if(event.type==='action')action=event.action;else if(event.type==='done')reply=event.message||reply;update();}if(chunk.done)break;}
+      const update=()=>setMessages(list=>{const copy=[...list];copy[copy.length-1]={role:'assistant',content:reply,sources,related:relatedRef.current,action};return copy;});
+      while(true){const chunk=await reader.read();buffer+=new TextDecoder().decode(chunk.value||new Uint8Array(),{stream:!chunk.done});let end;while((end=buffer.indexOf('\n\n'))>=0){const block=buffer.slice(0,end);buffer=buffer.slice(end+2);const line=block.split('\n').find(value=>value.startsWith('data:'));if(!line)continue;const event=JSON.parse(line.slice(5));if(event.related)relatedRef.current=event.related;if(event.type==='meta'){sessionRef.current=event.session_id;setSession(sessionRef.current);sources=event.sources||[];}else if(event.type==='delta')reply+=event.text||'';else if(event.type==='action')action=event.action;else if(event.type==='done')reply=event.message||reply;update();}if(chunk.done)break;}
       return reply;
     }catch(e){
       setMessages(list=>list.slice(0,-1));setText(content);
@@ -207,8 +200,8 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
           ? <div className="ai-row ai-row-user" key={i}><p className="ai-bubble">{m.content}</p></div>
           : <div className="ai-row ai-row-assistant" key={i}><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><div className="ai-answer"><p>{m.content}</p>{m.action && <div className="ai-action-card"><strong>{m.action.summary_vi}</strong><div><button type="button" disabled={busy} onClick={()=>void decide(m.action!.id,true)}>Xác nhận</button><button type="button" disabled={busy} onClick={()=>void decide(m.action!.id,false)}>Huỷ</button></div></div>}
               {!!m.sources?.length && <div className="ai-sources">{m.sources.map(s=><Link className="ai-source" href={`/properties/${s.id}`} key={s.id}><strong>{s.name}</strong><span>{s.code} · {s.price===null ? 'Giá chưa công bố':`${new Intl.NumberFormat('vi-VN').format(s.price)} VND${s.price_period==='Month' ? '/tháng':''}`}</span><em className={`ai-status ai-status-${s.availability}`}>{s.transaction_type==='Rent'&&s.availability==='Available' ? 'Còn cho thuê':availabilityLabels[s.availability]}</em><small>Cập nhật {new Date(s.updated_at).toLocaleString('vi-VN')}</small></Link>)}</div>}
-               {!!m.sources?.length && <div className="ai-property-list">{m.sources.slice(0,5).map(s=><ChatPropertyCard key={s.id} source={s} related={false} onAsk={message=>void ask(message)} signedIn={signedIn}/>)}</div>}
-               {!!m.related?.length && <section className="ai-related"><h3>Có thể bạn quan tâm</h3><div className="ai-property-list">{m.related.slice(0,3).map(s=><ChatPropertyCard key={s.id} source={s} related onAsk={message=>void ask(message)} signedIn={signedIn}/>)}</div></section>}
+               {!!m.sources?.length && <div className="ai-property-list">{m.sources.slice(0,5).map(s=><RecommendationCard key={s.id} source={s} related={false} onAsk={message=>void ask(message)} signedIn={signedIn}/>)}</div>}
+               {!!m.related?.length && <section className="ai-related"><h3>Có thể bạn quan tâm</h3><div className="ai-property-list">{m.related.slice(0,3).map(s=><RecommendationCard key={s.id} source={s} related onAsk={message=>void ask(message)} signedIn={signedIn}/>)}</div></section>}
              </div></div>)}
         {busy && voice!=='thinking' && <div className="ai-row ai-row-assistant"><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><span className="ai-typing" role="status" aria-label="Trợ lý đang soạn câu trả lời…"><i/><i/><i/></span></div>}
         {notice && <p className="ai-notice" role="status">{notice}</p>}

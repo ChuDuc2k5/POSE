@@ -14,6 +14,7 @@ create unique index property_similar_rank_idx on public.property_similar(propert
 alter table public.property_similar enable row level security;
 revoke all on public.property_similar from public, anon, authenticated;
 grant all on public.property_similar to service_role;
+grant usage on schema extensions to service_role;
 create policy property_similar_no_direct_read on public.property_similar for select to anon, authenticated using(false);
 
 create or replace function pose_private.property_similar_recompute(p_property uuid, p_embed_model text default null)
@@ -37,7 +38,7 @@ begin
     get diagnostics n=row_count; return n;
   end if;
   with vectors as (
-    select d.source_id as id, avg(c.embedding) as vector
+    select d.source_id as id, extensions.avg(c.embedding) as vector
     from public.kb_documents d join public.kb_chunks c on c.document_id=d.id
     where d.source_type='Property' and d.published and c.embedding is not null and c.embed_model=p_embed_model
     group by d.source_id
@@ -70,6 +71,7 @@ language sql stable security definer set search_path='' as $$
   order by s.rank, s.score desc, p.id limit greatest(0,least(coalesce(p_limit,4),4));
 $$;
 revoke all on function pose_private.property_similar_recompute(uuid,text), public.pose_system_recompute_similar(uuid,text), public.pose_system_remove_similar(uuid), public.pose_similar_properties(uuid,integer) from public,anon,authenticated;
+grant execute on function pose_private.property_similar_recompute(uuid,text) to service_role;
 grant execute on function public.pose_system_recompute_similar(uuid,text), public.pose_system_remove_similar(uuid) to service_role;
 grant execute on function public.pose_similar_properties(uuid,integer) to anon,authenticated,service_role;
 commit;

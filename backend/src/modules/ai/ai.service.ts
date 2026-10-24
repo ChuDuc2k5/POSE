@@ -11,7 +11,7 @@ import { object } from './extraction.js';
 import { inferSearch } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
 import { correctionData, disclosure, GUARD_VERSION, safeReply, type Evidence } from './guard.js';
-import { RetrievalService, renderRetrievedContext, deterministicReason, type RetrievalResult } from './retrieval.js';
+import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
 
@@ -144,7 +144,7 @@ export class AiService {
     let violation:string|null=agent.blocked.length ? 'AGENT_BLOCKED':null;
     if(!violation) { try { const meta=await checkAnswer(result.reply,{sources:items,question:source}); const cited=new Set(items.map(x=>x.number)); if(meta.grounding==='none' && ( /\b\d{3,}\b/.test(result.reply) || /RV-\w+/i.test(result.reply))) violation='C3_META_UNGROUNDED'; if(meta.cited.some(n=>!cited.has(n))) violation='C3_CITATION_NOT_IN_CONTEXT'; } catch { /* C3 failure never fails the turn; guard remains authoritative. */ } }
     items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5);
-    const finalRag=rag as RetrievalResult|null;if(finalRag){const rendered=renderRetrievedContext(finalRag.chunks,new Set(items.map(x=>x.id)));rag={...finalRag,...rendered};items=items.map(item=>({...item,number:(rendered.sources.find(s=>s.id===item.id)?.number as number|undefined),source_type:'Property'}));}else items=items.map((item,index)=>({...item,number:index+1,source_type:'Property'}));
+    const finalRag=rag as RetrievalResult|null;if(finalRag){const rendered=renderRetrievedContextWithCards(finalRag.chunks,new Set(items.map(x=>x.id)));rag={...finalRag,...rendered};items=items.map(item=>({...item,number:((rendered.sources.find(s=>(s as {id?:string}).id===item.id) as {number?:number}|undefined)?.number),source_type:'Property'}));}else items=items.map((item,index)=>({...item,number:index+1,source_type:'Property'}));
     if(!violation){violation=this.guard.outputReason(result.reply,items,source,{retrievalFound:rag?.found??items.length>0,faqOnly:items.length>0&&items.every(x=>x.source_type==='Faq')});if(violation)log('output',result.reply,violation);}
     let blocked=false;
     if(violation){

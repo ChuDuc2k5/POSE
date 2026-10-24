@@ -125,7 +125,7 @@ const customerFor=uid=>uid ? [...customers.values()].find(c=>c.auth_user_id===ui
 const leadFor=uid=>[...leads.values()].find(l=>l.customer_id===customerFor(uid)?.id && !l.archived && !['CONVERTED','LOST'].includes(l.status));
 const assigned=(lead,sales)=>assignments.some(a=>a.lead_id===lead && a.sales_id===sales && a.is_active);
 const scoringFor=lead=>lead ? {needs:lead.needs,verified:customers.get(lead.customer_id).phone_verified_at!==null,version:lead.version,score_result:lead.score_evidence,interest_ids:[...new Set([...sessions.values()].filter(s=>s.lead_id===lead.id).flatMap(s=>s.property_ids || []))]}:null;
-const properties=['Available','Sold','Reserved','Unavailable'].map((availability,i)=>({id:`f6300000-0000-4000-8000-00000000000${i+1}`,code:`P-${i+1}`,name:'Căn hộ công bố',price:i===1 ? null:3e9,availability,updated_at:'2026-10-14T01:00:00Z',location:'Hồ Chí Minh',property_type:'Apartment',publication:'Published',archived:false,area:80,bedrooms:2,project_name:'TERAVA',subdivision_name:null,amenities:'Công viên',cover_id:null,description:'Căn hộ có thông tin công bố để tham khảo.'}));
+const properties=['Available','Sold','Reserved','Unavailable'].map((availability,i)=>({id:`f6300000-0000-4000-8000-00000000000${i+1}`,code:`P-${i+1}`,name:'Căn hộ công bố',price:i===1 ? null:3e9,availability,updated_at:'2026-10-14T01:00:00Z',location:'Hồ Chí Minh',property_type:'Apartment',publication:'Published',archived:false,area:80,bedrooms:2,project_name:'TERAVA',subdivision_name:null,amenities:'Công viên',cover_id:null,transaction_type:i===2?'Rent':'Sale',price_period:i===2?'Month':'Total',description:'Căn hộ có thông tin công bố để tham khảo.'}));
 properties.push({...properties[0],id:randomUUID(),publication:'Draft'}, {...properties[0],id:randomUUID(),archived:true});
 const previewOnly=process.argv.includes('--preview-only'),live=process.argv.includes('--live');
 if(previewOnly || live){
@@ -325,6 +325,10 @@ try{
  check((await call(`/api/ai/sessions/${chat.session.id}`,null,cookie)).status===200,'Own guest reads session');
  check(messages.length===0,'Default no transcript');
  check(chat.sources.length===4 && chat.sources.every(p=>p.updated_at),'Published-only timestamp evidence');
+ check(chat.sources.every(p=>Number.isInteger(p.number) && Object.hasOwn(p,'cover_id') && Object.hasOwn(p,'area') && Object.hasOwn(p,'bedrooms') && Object.hasOwn(p,'location')),'Cards expose numbered source fields');
+ check(chat.sources.some(p=>p.price===null) && chat.sources.some(p=>p.price_period==='Month' || p.price_period==='Total'),'Cards preserve null and period-aware prices');
+ check(chat.sources.every(p=>!String(p.reason||'').match(/\d{7,}|@|\+\d/)),'Card reasons contain no PII or price');
+ check(!chat.related?.some(p=>p.number!==undefined || p.reason?.includes(String(p.price))) || chat.related.every(p=>p.related===true),'Related cards remain uncited');
  check(chat.reply.includes('Đã bán, không còn mở bán') && chat.reply.includes('giá chưa công bố'),'Sold and unknown price honestly stated');
  check(chat.reply===`Tôi là trợ lý AI của TERAVA.\n${modelOutputs.at(-1).reply}`,'Answer text comes only from model plus disclosure');
  check(prompt.messages.length===2 && prompt.messages[0].role==='system' && prompt.messages[1].content.startsWith('BEGIN_UNTRUSTED_DATA'),'Untrusted data prompt boundary');

@@ -9,7 +9,7 @@ import { stopProcess } from './campaign-test-process.mjs';
 let chrome;
 for(const candidate of [process.env.CHROME_PATH,process.env.PROGRAMFILES&&join(process.env.PROGRAMFILES,'Google/Chrome/Application/chrome.exe'),process.env['PROGRAMFILES(X86)']&&join(process.env['PROGRAMFILES(X86)'],'Google/Chrome/Application/chrome.exe')].filter(Boolean)){try{await access(candidate);chrome=candidate;break;}catch{}}
 assert.ok(chrome,'Chrome executable required');
-const root=join(tmpdir(),'pose-m06-agent');await mkdir(root,{recursive:true});
+const root=join(tmpdir(),'pose-m06-cards');await mkdir(root,{recursive:true});
 let server,child,ws,send,checks=0;
 const check=(value,label)=>{assert.ok(value,label);checks++;};
 try{
@@ -22,7 +22,7 @@ try{
  let next=0;const pending=new Map();ws.addEventListener('message',({data})=>{const m=JSON.parse(data);if(pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);if(m.error)p.reject(Error(JSON.stringify(m.error)));else p.resolve(m.result);}});
  send=(method,params={})=>new Promise((resolve,reject)=>{const id=++next,timer=setTimeout(()=>{pending.delete(id);reject(Error(method+' timeout'));},10000);pending.set(id,{resolve:r=>{clearTimeout(timer);resolve(r);},reject:e=>{clearTimeout(timer);reject(e);}});ws.send(JSON.stringify({id,method,params}));});
  const evaluate=async expression=>{const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
- const wait=async condition=>{for(let i=0;i<100;i++){if(await evaluate(condition))return;await delay(50);}throw Error('Timed out: '+condition+'; '+await evaluate("JSON.stringify({active:document.activeElement?.tagName,panel:!!document.querySelector('.ai-panel'),text:document.body.innerText.slice(-1800)})"));};
+ const wait=async condition=>{for(let i=0;i<100;i++){if(await evaluate(condition))return;await delay(50);}throw Error('Timed out: '+condition+'; '+await evaluate("JSON.stringify({active:document.activeElement?.tagName,panel:!!document.querySelector('.ai-panel'),error:document.querySelector('.ai-error')?.textContent,text:document.body.innerText.slice(-1800)})"));};
  const click=label=>evaluate(`document.querySelector('[aria-label=${JSON.stringify(label)}]').click()`);
  const type=text=>evaluate(`(()=>{const e=document.querySelector('#ai-message');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,${JSON.stringify(text)});e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
  const key=async(shift=false)=>{await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',unmodifiedText:'\r',windowsVirtualKeyCode:13,modifiers:shift?8:0});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,modifiers:shift?8:0});};
@@ -35,7 +35,7 @@ try{
  window.SpeechSynthesisUtterance=class{constructor(text){this.text=text;}};
  Object.defineProperty(window,'speechSynthesis',{value:{getVoices:()=>[{lang:'vi-VN'}],cancel(){window.cancelCount++;},speak(u){window.spoken.push(u);}}});
  const originalFetch=window.fetch.bind(window);window.fetch=async(url,options)=>{
- if(url==='/api/ai/chat'){const body=JSON.parse(options.body);window.chatRequests.push(body);await new Promise(r=>setTimeout(r,500));return new Response(JSON.stringify({session:{id:'f6300000-0000-4000-8000-000000000009'},reply:'Tôi là trợ lý AI của TERAVA. Q7-R01 giá thuê 25.000.000 VND/tháng, còn cho thuê.',sources:[{id:'f6300000-0000-4000-8000-000000000003',code:'Q7-R01',name:'Căn hộ 2 phòng ngủ Quận 7',price:25000000,transaction_type:'Rent',price_period:'Month',availability:'Available',updated_at:'2026-10-15T00:00:00Z'}]}),{status:200});}
+ if(url==='/api/ai/chat'){const body=JSON.parse(options.body);window.chatRequests.push(body);await new Promise(r=>setTimeout(r,500));return new Response(JSON.stringify({session:{id:'f6300000-0000-4000-8000-000000000009'},reply:'Tôi là trợ lý AI của TERAVA. Q7-R01 giá thuê 25.000.000 VND/tháng, còn cho thuê.',sources:[{id:'f6300000-0000-4000-8000-000000000003',code:'Q7-R01',name:'Căn hộ 2 phòng ngủ Quận 7',number:1,cover_id:null,area:80,bedrooms:2,location:'Quận 7',reason:'Gần chợ và trường học.',price:25000000,transaction_type:'Rent',price_period:'Month',availability:'Available',updated_at:'2026-10-15T00:00:00Z'}]}),{status:200});}
  return originalFetch(url,options);};`});
  for(const width of [1280,380]){
   await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===380});
@@ -43,7 +43,10 @@ try{
   check(await evaluate("document.querySelectorAll('.ai-suggestions button').length===3 && !document.querySelector('.ai-switch input').checked"),width+' welcome and explicit consent');
   await screenshot('welcome-'+width);
   await evaluate("document.querySelector('.ai-suggestions button').click()");await wait("!!document.querySelector('.ai-typing')");check(await evaluate("document.querySelector('.ai-switch input').disabled"),'consent locked during request');
-  await wait("!!document.querySelector('.ai-source')");check(await evaluate("document.querySelector('.ai-source').innerText.includes('25.000.000 VND/tháng') && document.querySelector('.ai-source').innerText.includes('Cập nhật') && document.querySelector('.ai-switch input').disabled"),'rental card, evidence, consent lock');
+  await wait("!!document.querySelector('.ai-property-card')");check(await evaluate("document.querySelector('.ai-source')?.innerText.includes('25.000.000 VND/tháng') && document.querySelector('.ai-property-card') && document.querySelector('.ai-switch input').disabled"),'rental card, evidence, consent lock');
+  check(await evaluate("document.querySelectorAll('.ai-property-card').length===1 && document.querySelector('.ai-property-number').textContent==='[1]' && document.querySelector('.ai-property-placeholder') && document.querySelector('.ai-property-reason').textContent.includes('Gần chợ')"),'card placeholder, badge and reason');
+  check(await evaluate("document.querySelector('.ai-property-specs').textContent.includes('80') && document.querySelector('.ai-property-location').textContent.includes('Quận 7')"),'card specs and live location');
+  check(await evaluate("document.querySelector('.ai-property-actions a[href=\"/sign-in\"]')?.textContent.includes('Đăng nhập')"),'guest card action requests sign-in');
   await type('Dòng một');await evaluate("document.querySelector('#ai-message').focus()");await key(true);await wait("document.querySelector('#ai-message').value.includes('\\n')");check(await evaluate('chatRequests.length===1'),'Shift Enter does not send');await key();await wait('chatRequests.length===2');await wait("!document.querySelector('.ai-typing')");
   await click('Nói thay vì gõ');await evaluate("recognitions.at(-1).emit('Tôi cần căn hộ',true)");await wait("document.querySelector('#ai-message').value==='Tôi cần căn hộ'");check(await evaluate("recognitions.at(-1).lang==='vi-VN' && chatRequests.length===2"),'dictation only edits textarea');
   await click('Trò chuyện bằng giọng nói');await wait("document.querySelector('.ai-voice').dataset.state==='listening'");await evaluate("recognitions.at(-1).emit('Tìm căn hộ Quận 7',true)");await wait("document.querySelector('.ai-voice').dataset.state==='thinking'");await wait("document.querySelector('.ai-voice').dataset.state==='speaking'");

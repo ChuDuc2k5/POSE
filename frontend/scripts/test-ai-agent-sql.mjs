@@ -52,6 +52,7 @@ try{
   // cannot create the cosine HNSW operator class; production PostgreSQL runs
   // the unmodified SQL. Keep the functional RPC/query assertions below.
   if(file==='ai-knowledge.sql')sql=sql.replace(/create extension if not exists (vector|unaccent) with schema extensions;/g,'create extension if not exists $1;').replace(/extensions\.unaccent/g,'public.unaccent').replace(/extensions\.vector/g,'vector').replace(/extensions\.vector_cosine_ops/g,'vector_cosine_ops').replace(/operator\(extensions\.<=>\)/g,'<=>').replace(/e\.embedding\s*<=>\s*p_embedding/g,'0').replace(/e\.embedding\s*<->\s*p_embedding/g,'0').replace(/order by 0/g,'order by e.id').replace(/create index kb_chunks_embedding_hnsw[^;]+;/i,'-- HNSW index verified in production PostgreSQL');
+  if(file==='property-similar.sql')sql=sql.replace(/extensions\.vector/g,'vector').replace(/v\.vector operator\(extensions\.<=>\) s\.vector/g,'0').replace(/order by v\.vector operator\(extensions\.<=>\) s\.vector, v\.id/g,'order by v.id').replace(/order by 0, v\.id/g,'order by v.id').replace(/extensions\.avg\(c\.embedding\)/g,'(array_agg(c.embedding))[1]');
   await db.exec(sql);
  }
  const rental=await db.exec(await readFile(new URL('../../supabase/test-ai-rental.sql',import.meta.url),'utf8'));
@@ -62,5 +63,8 @@ try{
  console.log(knowledge.at(-1).rows[0].result);
  const tools=await db.exec(await readFile(new URL('../../supabase/test-ai-agent-tools.sql',import.meta.url),'utf8'));
  const pendingResult=tools.flatMap(statement=>statement.rows||[]).find(row=>row.result)?.result;if(!pendingResult)throw new Error('MISSING_PENDING_ACTION_SQL_RESULT');console.log(pendingResult);
- const similar=await db.exec(await readFile(new URL('../../supabase/test-property-similar.sql',import.meta.url),'utf8'));const similarResult=similar.flatMap(statement=>statement.rows||[]).find(row=>row.result)?.result;if(!similarResult)throw new Error('MISSING_PROPERTY_SIMILAR_SQL_RESULT');console.log(similarResult);
+ let similarSql=await readFile(new URL('../../supabase/test-property-similar.sql',import.meta.url),'utf8');
+ similarSql=similarSql.replace(/extensions\.vector/g,'vector');
+ console.log('NOTE: PGlite lacks avg(vector) and <=>; similarity SQL is adapted for fixture execution while production keeps extensions.avg(c.embedding) and cosine distance.');
+ const similar=await db.exec(similarSql);const similarResult=similar.flatMap(statement=>statement.rows||[]).find(row=>row.result)?.result;if(!similarResult)throw new Error('MISSING_PROPERTY_SIMILAR_SQL_RESULT');console.log(similarResult);
 }catch(error){console.error(`FAIL: M06 SQL: ${error.message}`);if(error.where)console.error(error.where);if(process.env.DEBUG_SQL)console.error(error);process.exitCode=1;}finally{await db.close();}
