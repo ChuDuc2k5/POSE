@@ -16,6 +16,9 @@ describe('M06 change 1', () => {
     expect(referencedListingCodes('Dự án này do chủ đầu tư nào phát triển?', one).codes).toEqual(['CFR-0FC7C10BB520419B']);
     expect(referencedListingCodes('Bên em còn căn nào khác ở Quận 7 không?', one).codes).toEqual([]);
     expect(referencedListingCodes('Ban công nhà này hướng nào?', one).codes).toEqual(['CFR-0FC7C10BB520419B']);
+    expect(referencedListingCodes('Tiền cọc mấy tháng và hợp đồng thuê tối thiểu bao lâu?', one).codes).toEqual(['CFR-0FC7C10BB520419B']);
+    expect(referencedListingCodes('Tiền cọc mấy tháng?', [...one, { role: 'assistant', content: 'Căn hộ 2PN ở Quận 7.' }]).codes).toEqual([]);
+    expect(referencedListingCodes('Tiền cọc mấy tháng?', history).codes).toEqual([]);
   });
 
   it('uses word edges for transaction inference', () => {
