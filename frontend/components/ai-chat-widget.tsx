@@ -143,8 +143,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
     pending.current=true;setBusy(true);setError('');
     setMessages(list=>[...list,{role:'user',content}]);
     try{
-      const requestHistory=history.current.slice(-10).map(({role,content,sources})=>({role,content:role==='assistant'&&sources?.length?`${content}\nMÃ£: ${sources.map(source=>source.code).join(', ')}`.slice(0,8000):content}));
-      requestHistory.forEach(turn=>{if(turn.role==='assistant')turn.content=turn.content.replace(/MÃ£:/g,'M\u00e3:');});
+      const requestHistory=history.current.slice(-10).map(({role,content,sources})=>({role,content:role==='assistant'&&sources?.length?`${content}\nM\u00e3: ${sources.map(source=>source.code).join(', ')}`.slice(0,8000):content}));
       const response=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',Accept:'text/event-stream'},signal:controller.signal,body:JSON.stringify({session_id:requestSession,message:content,history:requestHistory,store_transcript:store,property_id:propertyId || null})});
       if(epoch!==conversationEpoch.current)return null;
       if(!response.ok)throw new Error((await response.json()).message);

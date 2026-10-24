@@ -1,26 +1,23 @@
 import { moneyAmounts } from './money.js';
 
 export type InferredSearch = { location?: string; type?: string; minPrice?: number; maxPrice?: number; transaction_type?: 'Sale'|'Rent' };
-
-// `\b` does not understand Vietnamese letters, so word edges use Unicode lookarounds.
 const word = (source: string) => new RegExp(`(?<![\\p{L}])(?:${source})(?![\\p{L}])`, 'iu');
+
 export function inferTransactionType(text: string): 'Sale'|'Rent'|undefined {
-  const normalized=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-  if (/(?:thue|trieu\/thang|\/thang|hang thang)/.test(normalized)) return 'Rent';
-  if (/(?:mua|ban)/.test(normalized) || /\d[\d.,\s]*\s*ty\b/.test(normalized)) return 'Sale';
-  if (word('thuÃª|triá»‡u/thÃ¡ng|/thÃ¡ng|hÃ ng thÃ¡ng').test(text)) return 'Rent';
-  if (word('mua|bÃ¡n').test(text) || /\d[\d.,\s]*\s*(?:tá»·|tá»‰)\b/iu.test(text)) return 'Sale';
+  const n = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const mua = word('mua').test(text) || word('mua').test(n);
+  if (!mua && (word('thue').test(n) || word('thuê').test(text) || /\d[\d.,\s]*\s*trieu\s*\/\s*thang/.test(n) || /\/\s*thang|hang\s*thang|moi\s*thang/.test(n))) return 'Rent';
+  if (mua || /\d[\d.,\s]*\s*ty\b/.test(n) || /\d[\d.,\s]*\s*(?:tỷ|tỉ)(?![\p{L}])/iu.test(text)) return 'Sale';
   return undefined;
 }
+
 const types: [RegExp, string][] = [
   [word('biệt thự'), 'Villa'], [word('căn hộ|chung cư|studio|penthouse|duplex'), 'Apartment'], [word('văn phòng'), 'Office'],
   [word('mặt bằng|shophouse|kiot|cửa hàng'), 'Shop'], [word('đất nền|lô đất|đất'), 'Land'], [word('nhà phố|nhà riêng|nhà'), 'House'],
 ];
 const places = ['Thủ Đức', 'Bình Thạnh', 'Gò Vấp', 'Tân Bình', 'Tân Phú', 'Phú Nhuận', 'Bình Tân', 'Nhà Bè', 'Củ Chi', 'Hóc Môn', 'Bình Chánh', 'Cần Giờ', 'Thảo Điền', 'Phú Mỹ Hưng', 'Thủ Thiêm'];
-const propertyWords = /căn hộ|chung cư|nhà|đất|biệt thự|văn phòng|mặt bằng|bất động sản|bđs|thuê|mua|bán|giá|tỷ|triệu|phòng ngủ|quận|khu vực/i;
+const propertyWords = /căn hộ|chung cư|nhà|đất|biệt thự|văn phòng|mặt bằng|bất động sản|thuê|mua|bán|giá|tỷ|triệu|phòng ngủ|quận|khu vực|apartment|house/i;
 
-// Turns a customer question into catalogue filters so the assistant always answers
-// from a real search instead of relying on the model to request one.
 export function inferSearch(text: string): InferredSearch | null {
   if (!propertyWords.test(text)) return null;
   const filters: InferredSearch = {};

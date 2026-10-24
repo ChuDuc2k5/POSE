@@ -10,7 +10,7 @@ import { uuidPattern } from '../../common/catalog.js';
 import { object } from './extraction.js';
 import { inferSearch, inferTransactionType } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
-import { correctionData, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteRequest, explicitWriteIntent, type Evidence } from './guard.js';
+import { correctionData, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
@@ -191,7 +191,7 @@ export class AiService {
       return {error:'unknown_read_tool'};
     };
     const createPending=async(name:string,args:unknown)=>{
-      if(!explicitWriteRequest(source) && !explicitWriteIntent(source)) { log(name,args,guest?'SIGN_IN_REQUIRED':'WRITE_NOT_REQUESTED','flagged'); return null; }
+      if(!explicitWriteIntent(source)) { log(name,args,guest?'SIGN_IN_REQUIRED':'WRITE_NOT_REQUESTED','flagged'); return null; }
       if(guest) { log(name,args,'SIGN_IN_REQUIRED','flagged'); return null; }
       const summary=name==='request_handoff' ? String((args as {summary:string}).summary) : name==='propose_appointment' ? `Đề nghị lịch xem ${(args as {code?:string}).code || ''} lúc ${(args as {preferred_start:string}).preferred_start}` : `Lưu ${(args as {code:string}).code} vào yêu thích`;
       const pending=await who.client!.rpc('pose_ai_create_pending',{p_session:id,p_tool:name,p_args:args,p_summary:summary,p_key:`${id}:${hash(JSON.stringify({name,args}))}`});
@@ -222,6 +222,8 @@ export class AiService {
     }
     items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5);
     const finalRag=rag as RetrievalResult|null;if(finalRag){const rendered=renderRetrievedContextWithCards(finalRag.chunks,new Set(items.map(x=>x.id)));rag={...finalRag,...rendered};items=items.map(item=>({...item,number:((rendered.sources.find(s=>(s as {id?:string}).id===item.id) as {number?:number}|undefined)?.number),source_type:'Property'}));}else items=items.map((item,index)=>({...item,number:index+1,source_type:'Property'}));
+    const referencedAnswer=codeReference.codes.length>0 || pureReference;
+    items=sourcesFromCitations(result.reply,items,referencedAnswer);
     if(!violation){violation=this.guard.outputReason(result.reply,items,source,{retrievalFound:rag?.found??items.length>0,faqOnly:items.length>0&&items.every(x=>x.source_type==='Faq')});if(violation){log('output',result.reply,violation);console.warn(JSON.stringify({event:'guard_block',reason:violation,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:items.map(x=>x.number??null)}));}}
     let blocked=false;
     if(violation){
@@ -243,9 +245,6 @@ export class AiService {
         for(const entry of modelNeeds.entries) extracted[entry.field]={value:entry.value,confidence:1,evidence:entry.evidence};
       } catch { log('extraction','needs_v1','extraction_failed','flagged'); }
     }
-    /*
-    const reply=sanitizeReply((count===0 ? `${disclosure}\n`:'')+(related.length && !items.length ? 'KhÃ´ng cÃ³ báº¥t Ä‘á»™ng sáº£n nÃ o khá»›p cÃ¡c tiÃªu chÃ­ báº¡n nÃªu.\n' : '')+(blocked ? groundedSummary(items):result.reply));
-    */
     const fields=blocked ? {}:this.extraction.extractNeeds(extracted,source,(key,field)=>log('invalid_need',{field:key,value:field},'invalid_need','flagged'));
     const acceptedFields=guest || !input.store_transcript ? {}:fields;
     const merged:Record<string,{value:unknown;evidence?:string;confirmed_by?:unknown}>|null=scoring ? {...scoring.needs,...acceptedFields}:null;

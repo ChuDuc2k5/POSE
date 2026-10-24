@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 import { zodFunction, zodResponseFormat } from 'openai/helpers/zod';
 import { z } from 'zod';
 import { object, extractNeeds } from './extraction.ts';
-import { explicitWriteIntent, explicitWriteRequest, toolAllowed } from './guard.ts';
+import { toolAllowed } from './guard.ts';
 import { ToolArgs, ToolCallSchema, SearchQuerySchema, AnswerMetaSchema, NeedsV1Schema, NeedEntrySchema, type ToolName } from './schemas.ts';
 import { prompt, promptVersion } from './prompts.js';
 import { logAiRequest, requestStatus } from './request-log.js';
@@ -25,12 +25,6 @@ const tools = [
   zodFunction({ name: 'propose_appointment', description: 'Đề nghị lịch xem sau khi khách xác nhận.', parameters: ToolArgs.propose_appointment }),
 ];
 export const AGENT_TOOLS = tools.map(tool => ({ type: 'function' as const, function: tool.function }));
-function writeToolsAllowed(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]) {
-  const user = [...messages].reverse().find(message => message.role === 'user');
-  if (!user || typeof user.content !== 'string') return false;
-  try { const match = user.content.match(/BEGIN_UNTRUSTED_DATA\n([\s\S]*?)\nEND_UNTRUSTED_DATA/); const data = match ? JSON.parse(match[1]) : null; const text = typeof data?.customer_text === 'string' ? data.customer_text : user.content; return explicitWriteRequest(text) || explicitWriteIntent(text); } catch { return explicitWriteRequest(user.content) || explicitWriteIntent(user.content); }
-}
-
 export function providerConfig() {
   const raw = process.env.AI_API_URL?.trim(), model = process.env.AI_MODEL?.trim() || 'gpt-4.1-mini', key = process.env.AI_API_KEY?.trim();
   if (!raw) throw new Error('AI_UNAVAILABLE');
@@ -96,14 +90,14 @@ export async function complete(data: unknown): Promise<ModelResult> {
   }
   throw new Error('INVALID_MODEL_JSON');
 }
-export async function agentStep(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[], temperature = 0.2) { const started=Date.now(); const { api, config } = client(); try { const result=await api.chat.completions.create({ model: config.model, temperature, max_tokens: 600, tool_choice: 'auto', parallel_tool_calls: false, tools: AGENT_TOOLS, messages }); const calls=result.choices[0]?.message?.tool_calls?.map(call=>call.type==='function'?call.function.name:'').filter(name=>name && (writeToolsAllowed(messages) || !['save_favorite','request_handoff','propose_appointment'].includes(name))) || []; logAiRequest({kind:'chat',model:config.model,promptName:'assistant',promptVersion:SYSTEM_PROMPT_VERSION,toolsCalled:calls,promptTokens:result.usage?.prompt_tokens,completionTokens:result.usage?.completion_tokens,totalTokens:result.usage?.total_tokens,latencyMs:Date.now()-started,status:'ok'}); return result; } catch(error) { logAiRequest({kind:'chat',model:config.model,promptName:'assistant',promptVersion:SYSTEM_PROMPT_VERSION,latencyMs:Date.now()-started,status:requestStatus(error),errorCode:error instanceof Error?error.message:'UNKNOWN'}); throw error; } }
+export async function agentStep(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[], temperature = 0.2) { const started=Date.now(); const { api, config } = client(); try { const result=await api.chat.completions.create({ model: config.model, temperature, max_tokens: 600, tool_choice: 'auto', parallel_tool_calls: false, tools: AGENT_TOOLS, messages }); const calls=result.choices[0]?.message?.tool_calls?.map(call=>call.type==='function'?call.function.name:'').filter(Boolean) || []; logAiRequest({kind:'chat',model:config.model,promptName:'assistant',promptVersion:SYSTEM_PROMPT_VERSION,toolsCalled:calls,promptTokens:result.usage?.prompt_tokens,completionTokens:result.usage?.completion_tokens,totalTokens:result.usage?.total_tokens,latencyMs:Date.now()-started,status:'ok'}); return result; } catch(error) { logAiRequest({kind:'chat',model:config.model,promptName:'assistant',promptVersion:SYSTEM_PROMPT_VERSION,latencyMs:Date.now()-started,status:requestStatus(error),errorCode:error instanceof Error?error.message:'UNKNOWN'}); throw error; } }
 export async function streamAgentStep(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[], onDelta: (text:string)=>void) {
   const started=Date.now(); const config=providerConfig(); const response=await fetch(config.url,{method:'POST',headers:{'Content-Type':'application/json',...(config.key?{Authorization:`Bearer ${config.key}`}:{})},signal:AbortSignal.timeout(config.timeout),body:JSON.stringify({model:config.model,temperature:.2,max_tokens:600,tool_choice:'auto',parallel_tool_calls:false,tools:AGENT_TOOLS,messages,stream:true,stream_options:{include_usage:true}})});
   if(!response.ok||!response.body) throw new Error('AI_UNAVAILABLE');
   const reader=response.body.getReader(), decoder=new TextDecoder(); let buffer='',content='',usage:any,toolCalls:Record<number,{id:string;type:'function';function:{name:string;arguments:string}}>= {};
   const consume=(line:string)=>{if(!line.startsWith('data:'))return; const value=line.slice(5).trim(); if(value==='[DONE]')return; const chunk=JSON.parse(value); usage=chunk.usage||usage; const delta=chunk.choices?.[0]?.delta; if(delta?.content){content+=delta.content;onDelta(delta.content);} for(const call of delta?.tool_calls||[]){const item=toolCalls[call.index] ||= {id:call.id||'',type:'function',function:{name:'',arguments:''}}; item.id+=call.id||''; item.function.name+=call.function?.name||''; item.function.arguments+=call.function?.arguments||'';}};
   while(true){const part=await reader.read(); if(part.done)break; buffer+=decoder.decode(part.value,{stream:true}); let index; while((index=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,index).replace(/\r$/,'');buffer=buffer.slice(index+1);consume(line);}}
-  logAiRequest({kind:'chat',model:config.model,promptName:'assistant',promptVersion:SYSTEM_PROMPT_VERSION,toolsCalled:Object.values(toolCalls).map(call=>call.function.name).filter(name=>writeToolsAllowed(messages)||!['save_favorite','request_handoff','propose_appointment'].includes(name)),promptTokens:usage?.prompt_tokens,completionTokens:usage?.completion_tokens,totalTokens:usage?.total_tokens,latencyMs:Date.now()-started,status:'ok'});
+  logAiRequest({kind:'chat',model:config.model,promptName:'assistant',promptVersion:SYSTEM_PROMPT_VERSION,toolsCalled:Object.values(toolCalls).map(call=>call.function.name).filter(Boolean),promptTokens:usage?.prompt_tokens,completionTokens:usage?.completion_tokens,totalTokens:usage?.total_tokens,latencyMs:Date.now()-started,status:'ok'});
   return {choices:[{message:{role:'assistant',content,tool_calls:Object.values(toolCalls)},usage}]} as unknown as OpenAI.Chat.Completions.ChatCompletion;
 }
 export async function querySearch(customerText: string, history: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = []) { return structured(SearchQuerySchema, 'search_query', [{ role: 'system', content: prompt('query').text }, ...history.slice(-6), { role: 'user', content: customerText }]); }
