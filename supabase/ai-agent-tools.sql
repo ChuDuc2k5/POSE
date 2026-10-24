@@ -16,8 +16,14 @@ create policy ai_pending_owner on public.ai_pending_actions for select to authen
 create function pose_private.ai_pending_create(p_session uuid,p_tool text,p_args jsonb,p_summary text,p_key text) returns jsonb language plpgsql security definer set search_path='' as $$
 declare actor uuid:=pose_private.require_account(); a public.ai_pending_actions;
 begin
+ if auth.uid() is null or coalesce(auth.role(),'')<>'authenticated' then raise exception 'GUEST_NOT_ALLOWED' using errcode='42501'; end if;
  if p_tool not in ('save_favorite','request_handoff','propose_appointment') or p_args is null or p_key is null or char_length(p_key)<8 then raise exception 'INVALID_INPUT' using errcode='22023'; end if;
- insert into public.ai_pending_actions(session_id,user_id,tool,args,summary_vi,idempotency_key) values(p_session,actor,p_tool,p_args,btrim(p_summary),p_key) on conflict(idempotency_key) do update set idempotency_key=excluded.idempotency_key returning * into a;
+ select * into a from public.ai_pending_actions where idempotency_key=p_key and user_id=actor for update;
+ if found then
+   if a.session_id<>p_session or a.tool<>p_tool or a.args<>p_args then raise exception 'IDEMPOTENCY_CONFLICT' using errcode='23505'; end if;
+   return to_jsonb(a);
+ end if;
+ insert into public.ai_pending_actions(session_id,user_id,tool,args,summary_vi,idempotency_key) values(p_session,actor,p_tool,p_args,btrim(p_summary),p_key) returning * into a;
  return to_jsonb(a);
 end $$;
 
@@ -31,13 +37,13 @@ begin
  if not p_confirm then update public.ai_pending_actions set status='Cancelled',decided_at=now(),result='{"status":"cancelled"}'::jsonb where id=a.id; return '{"status":"cancelled"}'::jsonb; end if;
  begin
   if a.tool='save_favorite' then
-   code:=a.args->>'code'; select id into prop from public.property_public_catalog where code=code and publication_status='Published' limit 1;
+   code:=a.args->>'code'; select pc.id into prop from public.property_public_catalog pc where pc.code=code and pc.publication_status='Published' limit 1;
    if prop is null then raise exception 'PROPERTY_NOT_FOUND' using errcode='P0002'; end if;
    r:=public.pose_set_favorite(prop,true);
   elsif a.tool='request_handoff' then
    r:=public.pose_ai_request_handoff(a.session_id,a.args->>'summary',null,null,'pending:'||a.id::text);
   else
-   code:=nullif(a.args->>'code',''); select id into prop from public.property_public_catalog where code=code and publication_status='Published' limit 1;
+   code:=nullif(a.args->>'code',''); select pc.id into prop from public.property_public_catalog pc where pc.code=code and pc.publication_status='Published' limit 1;
    r:=public.pose_ai_request_handoff(a.session_id,'Đề nghị lịch xem'||coalesce(' '||code,''), (a.args->>'preferred_start')::timestamptz, coalesce((a.args->>'preferred_end')::timestamptz,(a.args->>'preferred_start')::timestamptz+interval '1 hour'),'pending:'||a.id::text);
   end if;
   if coalesce(p_consents->>'Call','false')='true' or coalesce(p_consents->>'AIVoice','false')='true' then

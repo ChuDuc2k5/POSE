@@ -60,6 +60,18 @@ export async function dispatch<P>(request: ExpressRequest, response: ExpressResp
     result.headers.forEach((value,key) => { if (key !== 'set-cookie') response.setHeader(key,value); });
     const setCookies = [...result.headers.getSetCookie(), ...context.getStore()!.changes.values()];
     if (setCookies.length) response.setHeader('Set-Cookie',setCookies);
+    if (result.body && result.headers.get('content-type')?.includes('text/event-stream')) {
+      const reader = result.body.getReader();
+      response.flushHeaders?.();
+      try {
+        while (true) {
+          const part = await reader.read();
+          if (part.done) break;
+          response.write(Buffer.from(part.value));
+        }
+      } finally { response.end(); }
+      return;
+    }
     response.end(Buffer.from(await result.arrayBuffer()));
   });
 }

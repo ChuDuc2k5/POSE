@@ -145,7 +145,21 @@ const provider=createServer(async(req,res)=>{
    const response=await fetch('http://localhost:1234/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.timeout(60000)});
    const body=await response.json();modelOutputs.push(body.choices?.[0]?.message?.content);return reply(response.status,body);
   }
-  modelCalls++;prompt=input;
+  modelCalls++;if(input.response_format?.json_schema?.name==='assistant_turn')prompt=input;
+  if(mode==='down')return reply(503,{});
+  if(mode==='invalid' && modelCalls>1)return reply(503,{});
+  if(mode==='timeout'){await delay(6000);return reply(200,{choices:[{message:{content:''}}]});}
+  if(input.tools){
+   if(!prompt)prompt=input;
+   check(input.tools.length===6 && input.tools.every(t=>['search_properties','get_property_detail','list_my_appointments','save_favorite','request_handoff','propose_appointment'].includes(t.function.name)),'Native six-tool schema');
+   const hasToolResult=input.messages.some(m=>m.role==='tool');
+   const redacted=input.messages.some(m=>typeof m.content==='string'&&m.content.includes('contact_redacted":true'));
+   const nativeMessage=redacted ? {role:'assistant',content:'Vui lòng đăng nhập hoặc dùng biểu mẫu tư vấn để chia sẻ thông tin liên hệ.'} : hasToolResult ? {role:'assistant',content:input.messages.filter(m=>m.role==='tool').map(m=>{try{return JSON.parse(m.content).join('\n')}catch{return String(m.content)}}).join('\n')} : {role:'assistant',tool_calls:[{id:'native-1',type:'function',function:{name:'search_properties',arguments:JSON.stringify({query:'Q7',filters:{}})}}]};
+   if(input.stream){res.writeHead(200,{'Content-Type':'text/event-stream'});const text=nativeMessage.content||'';if(text)for(const part of text.match(/.{1,18}/g)||[])res.write(`data: ${JSON.stringify({choices:[{delta:{content:part}}]})}\n\n`);res.write('data: [DONE]\n\n');return res.end();}
+   modelOutputs.push({...nativeMessage,reply:nativeMessage.content||''}); return reply(200,{choices:[{message:nativeMessage}]});
+  }
+  if(input.response_format?.json_schema?.name==='search_query') return reply(200,{choices:[{message:{content:JSON.stringify({standalone_question:input.messages.at(-1)?.content||'câu hỏi',filters:{transaction_type:null,property_type:null,location:null,min_price_vnd:null,max_price_vnd:null,bedrooms:null},refers_to_previous:[]})}}]});
+  if(input.response_format?.json_schema?.name==='answer_meta') return reply(200,{choices:[{message:{content:JSON.stringify({grounding:'grounded',cited:[],claims:[]})}}]});
   check(input.response_format.type==='json_schema' && input.response_format.json_schema.name==='assistant_turn' && input.response_format.json_schema.strict && input.response_format.json_schema.schema.additionalProperties===false,'Strict provider JSON Schema');
   check(!req.headers.authorization,'Local provider accepts empty key without Authorization');
   check(input.max_tokens===600 && input.messages[0].content.length<800 && JSON.stringify(input.response_format.json_schema.schema).length<1500,'Bounded generation and compact prompt/schema');
@@ -298,7 +312,7 @@ try{
  const phone=await call('/api/ai/chat',{...base,message:'Gọi 0901234567 cho tôi',store_transcript:true});check(phone.ok,'Guest phone handled');const phoneData=await phone.json();
  check(!messages.some(m=>m.content.includes('0901234567')) && leads.size===0,'Guest phone not stored, no Lead');
  check(phoneData.reply.includes('biểu mẫu tư vấn'),'Guest gets contact guidance');
- for(const failure of ['down','invalid','timeout']){mode=failure;const before=[sessions.size,messages.length,logs.length],calls=modelCalls;const result=await call('/api/ai/chat',base);const data=await result.json();check(result.status===503 && data.code==='AI_UNAVAILABLE' && data.retry && data.inquiry_url==='/customer/inquiries/new',`${failure} clear retry error`);check(JSON.stringify(before)===JSON.stringify([sessions.size,messages.length,logs.length]),`${failure} no partial writes`);check(modelCalls-calls===(failure==='invalid' ? 2:1),`${failure} bounded retry count`);}
+for(const failure of ['down','invalid','timeout']){mode=failure;const before=[sessions.size,messages.length,logs.length],calls=modelCalls;const result=await call('/api/ai/chat',base);const data=await result.json();check(result.status===503 && data.code==='AI_UNAVAILABLE' && data.retry && data.inquiry_url==='/customer/inquiries/new',`${failure} clear retry error`);check(JSON.stringify(before)===JSON.stringify([sessions.size,messages.length,logs.length]),`${failure} no partial writes`);check(modelCalls-calls===1,`${failure} bounded retry count`);}
  mode='retry';const beforeRetry=modelCalls;const retried=await (await call('/api/ai/chat',{...base,message:'xin chào'})).json();check(modelCalls===beforeRetry+2 && retried.reply.includes('Xin chào!'),'Invalid JSON then valid succeeds on exactly one retry');
  mode='regenerate';const beforeRegeneration=modelData.length;const regenerated=await (await call('/api/ai/chat',{...base,filters:{}})).json();check(!regenerated.blocked && regenerated.reply===`Tôi là trợ lý AI của TERAVA.\n${modelOutputs.at(-1).reply}` && modelData.slice(beforeRegeneration).filter(d=>d.regeneration).length===1 && modelData.at(-1).violations.includes('UNSUPPORTED_PRICE'),'One grounded regeneration after unsupported price');
  mode='rooms';const correctedRooms=await (await call('/api/ai/chat',{...base,filters:{},message:'Tôi cần căn hộ 2 phòng ngủ'})).json();check(!correctedRooms.blocked && !correctedRooms.reply.includes('2 phòng ngủ') && modelData.at(-1).violations.includes('UNSUPPORTED_ROOM_COUNT') && modelData.at(-1).correction.includes('Số phòng ngủ'),'Unsupported room claim corrected once using concrete guard DATA');

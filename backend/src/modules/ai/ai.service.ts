@@ -11,8 +11,10 @@ import { uuidPattern } from '../../common/catalog.js';
 import { object } from './extraction.js';
 import { inferSearch } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
-import { correctionData, disclosure, GUARD_VERSION, safeReply, type Evidence } from './guard.js';
+import { disclosure, GUARD_VERSION, safeReply, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContext, type RetrievalResult } from './retrieval.js';
+import { runAgent } from './agent.ts';
+import { querySearch, checkAnswer, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
 
 export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI hiện chưa khả dụng. Vui lòng thử lại hoặc gửi yêu cầu tư vấn.',retry:true,inquiry_url:'/customer/inquiries/new'},503);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -78,56 +80,60 @@ export class AiService {
     // Small models rarely ask for a search on their own; search the catalogue from the
     // question itself, and if nothing matches widen once so the answer can compare.
     const inferred=searchPerformed ? null:inferSearch(source);
-    if(inferred && Object.keys(inferred).length){
-      items=await search(inferred,null);
-      if(!items.length && Object.keys(inferred).length){const {location,transaction_type}=inferred;items=await search({...location ? {location}:{},...transaction_type ? {transaction_type}:{}},null);}
-      searchPerformed=true;
-    }
+    // `inferSearch` is only an input to the validated query step below.
     const actions:{tool:string;args_hash:string;decision:string;reason:string;rule_version:string}[]=[];
     const log=(tool:string,args:unknown,reason:string|null,decision?:'flagged')=>actions.push({tool,args_hash:hash(JSON.stringify(args) || 'null'),decision:decision || (reason ? 'blocked':'allowed'),reason:reason || 'VALIDATED',rule_version:GUARD_VERSION});
     const safeEvidence=(list:Evidence[])=>list.filter(item=>{const reason=this.guard.evidenceReason(item);if(reason)log('retrieval',{id:item.id},reason);return !reason;});
     items=safeEvidence(items);
     const suspected=this.guard.injection(input.message) || sanitizedHistory.some(t=>this.guard.injection(t.content));
     if(suspected)log('input',source,'PROMPT_INJECTION','flagged');
-    const data=()=>({customer_text:source,history:sanitizedHistory,properties:items,retrieval:{found:rag?.found??items.length>0,grounding:rag?.grounding??(items.length?'catalog':'none'),context:rag?.context||''},search_performed:searchPerformed,injection_suspected:suspected,contact_redacted:guest && source!==input.message,signed_in:!guest});
+    // Query understanding is a separate, validated step. The deterministic
+    // inference is deliberately only the fallback (or the no-history fast path).
+    let standalone=source, queryFilters:Record<string,unknown>=inferred || {};
+    const realEstateIntent=Object.keys(queryFilters).length>0 || /căn|nhà|đất|phòng|giá|thuê|mua|bất động sản|Q\d|RV-/i.test(source);
+    if(realEstateIntent && !(history.length===0 && Object.keys(queryFilters).length)) {
+      try {
+        const query=await querySearch(source, sanitizedHistory as never[]);
+        standalone=query.standalone_question;
+        const qf=Object.fromEntries(Object.entries(query.filters).filter(([,v])=>v!==null));
+        queryFilters={location:qf.location,type:qf.property_type,minPrice:qf.min_price_vnd,maxPrice:qf.max_price_vnd,transaction_type:qf.transaction_type,bedrooms:qf.bedrooms};
+        queryFilters=Object.fromEntries(Object.entries(queryFilters).filter(([,v])=>v!==null&&v!==undefined));
+      } catch { log('query_step',source,'invalid_query','flagged'); }
+    }
+    if(realEstateIntent && !searchPerformed) { items=await search(queryFilters,null); searchPerformed=true; }
     const extracted:Record<string,unknown>={};
-    const turn=async(input:unknown)=>{const result=await this.llm.complete(input);Object.assign(extracted,result.needs);for(const flag of result.flags)log(flag.tool,flag.args,flag.reason,'flagged');return result;};
-    let result=await turn(data()),violation:string|null=null,proposals:unknown[]=[];
-    const tools=result.tool_calls || [];
-    for(const t of tools)if(!this.guard.toolAllowed(t)){violation='TOOL_NOT_ALLOWED_OR_INVALID';log(object(t) && typeof t.name==='string' ? t.name:'invalid_tool',t,violation);}
-    let searched=false;
-    if(!violation)for(const t of tools){
-      if(!this.guard.toolAllowed(t))continue;
-      if(t.name==='search_properties'){
-        if(searched){violation='TOOL_LIMIT';log(t.name,t.arguments,violation);break;}
-        log(t.name,t.arguments,null);const toolItems=safeEvidence(await search({...t.arguments,...inferred?.transaction_type ? {transaction_type:inferred.transaction_type}:{}},null));const ta=t.arguments as Record<string,unknown>;items=toolItems.filter(item=>(typeof ta.maxPrice!=='number'||item.price!==null&&item.price<=ta.maxPrice)&&(typeof ta.minPrice!=='number'||item.price!==null&&item.price>=ta.minPrice)&&(typeof ta.location!=='string'||item.location.toLocaleLowerCase('vi').includes(ta.location.toLocaleLowerCase('vi')))&&(typeof ta.type!=='string'||item.property_type===ta.type));searchPerformed=true;searched=true;
-      }else if(guest){violation='SIGN_IN_REQUIRED';log(t.name,t.arguments,violation);}
-      else{log(t.name,t.arguments,null);proposals.push(t);}
-    }
-    if(searched && !violation){
-      result=await turn({...data(),tools_complete:true});
-      if(result.tool_calls?.length){violation='TOOL_RECURSION_BLOCKED';for(const t of result.tool_calls)log('recursive_tool',t,violation);}
-    }
+    const contextBlocks=items.map((item,index)=>`[${item.number || index+1}] ${item.code || ''} ${item.name || ''} ${item.location || ''} price=${item.price ?? 'unknown'} availability=${item.availability || 'unknown'}`).join('\n');
+    const agentMessages=[{role:'system' as const,content:SYSTEM_PROMPT},{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({question:standalone,history:sanitizedHistory,properties:contextBlocks,customer_text:source,contact_redacted:guest && source!==input.message})}\nEND_UNTRUSTED_DATA`}];
+    const proposals:{tool:string;args_hash:string;decision:string;reason:string;rule_version:string}[]=[];
+    const pendingActions:unknown[]=[];
+    const execute=async(name:string,args:unknown)=>{
+      if(name==='search_properties') { const a=args as Record<string,unknown>; const raw=object(a.filters) ? a.filters as Record<string,unknown> : {}; const f=Object.fromEntries(Object.entries(raw).filter(([,v])=>v!==null&&v!==undefined)); const found=await search(f,null); const labels:Record<string,string>={Available:'Đang mở bán',Sold:'Đã bán, không còn mở bán',Reserved:'Đã giữ chỗ, không còn mở bán',Unavailable:'Chưa khả dụng, không còn mở bán'}; return found.map((p,i)=>`[${p.number || i+1}] ${p.code}: ${p.name}, ${p.price===null ? 'giá chưa công bố':`${p.price.toLocaleString('vi-VN')} VND`}. ${labels[p.availability] || 'Chưa rõ khả dụng'}. Cập nhật ${p.updated_at}.`); }
+      if(name==='get_property_detail') { const code=(args as {code:string}).code; const result=await authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type,transaction_type,price_period').eq('code',code).maybeSingle(); return result.error || !result.data ? {found:false} : {found:true,property:result.data}; }
+      if(name==='list_my_appointments') { if(guest) return {requires_sign_in:true}; const result=await who.client!.from('appointments').select('*').order('starts_at',{ascending:true}).limit(20); return result.error ? {error:'unavailable'} : {appointments:result.data || []}; }
+      return {error:'unknown_read_tool'};
+    };
+    const createPending=async(name:string,args:unknown)=>{
+      if(guest) return null;
+      const summary=name==='request_handoff' ? String((args as {summary:string}).summary) : name==='propose_appointment' ? `Đề nghị lịch xem ${(args as {code?:string}).code || ''} lúc ${(args as {preferred_start:string}).preferred_start}` : `Lưu ${(args as {code:string}).code} vào yêu thích`;
+      const pending=await who.client!.rpc('pose_ai_create_pending',{p_session:id,p_tool:name,p_args:args,p_summary:summary,p_key:`${id}:${hash(JSON.stringify({name,args}))}`});
+      if(pending.error) throw new Error(pending.error.message || 'PENDING_FAILED');
+      pendingActions.push(pending.data);
+      return String((pending.data as {id:string}).id);
+    };
+    const streamedDeltas:string[]=[];
+    const streamRequested=request.headers.get('accept')?.includes('text/event-stream')===true;
+    const agent=await runAgent(agentMessages as never,execute,createPending,undefined,streamRequested ? ((messages:Parameters<typeof streamAgentStep>[0])=>streamAgentStep(messages,text=>streamedDeltas.push(text))) as never : undefined);
+    for(const blockedReason of agent.blocked) log('agent',blockedReason,blockedReason,'flagged');
+    let result={reply:agent.text || 'Hiện tôi chưa đủ dữ liệu để trả lời chính xác.',tool_calls:[] as unknown[],needs:{},flags:[] as never[]};
+    let violation:string|null=agent.blocked.length ? 'AGENT_BLOCKED':null;
+    if(!violation) { try { const meta=await checkAnswer(result.reply,{sources:items,question:source}); const cited=new Set(items.map(x=>x.number)); if(meta.grounding==='none' && ( /\b\d{3,}\b/.test(result.reply) || /RV-\w+/i.test(result.reply))) violation='C3_META_UNGROUNDED'; if(meta.cited.some(n=>!cited.has(n))) violation='C3_CITATION_NOT_IN_CONTEXT'; } catch { /* C3 failure never fails the turn; guard remains authoritative. */ } }
     items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5);
     const finalRag=rag as RetrievalResult|null;if(finalRag){const rendered=renderRetrievedContext(finalRag.chunks,new Set(items.map(x=>x.id)));rag={...finalRag,...rendered};items=items.map(item=>({...item,number:(rendered.sources.find(s=>s.id===item.id)?.number as number|undefined),source_type:'Property'}));}else items=items.map((item,index)=>({...item,number:index+1,source_type:'Property'}));
     if(!violation){violation=this.guard.outputReason(result.reply,items,source,{retrievalFound:rag?.found??items.length>0,faqOnly:items.length>0&&items.every(x=>x.source_type==='Faq')});if(violation)log('output',result.reply,violation);}
     let blocked=false;
     if(violation){
-      proposals=[];
-      result=await turn({...data(),regeneration:true,tools_complete:true,...correctionData(violation)});
-      items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5);
-      const regenRag=rag as RetrievalResult|null;if(regenRag){const rendered=renderRetrievedContext(regenRag.chunks,new Set(items.map(x=>x.id)));rag={...regenRag,...rendered};items=items.map(item=>({...item,number:(rendered.sources.find(s=>s.id===item.id)?.number as number|undefined),source_type:'Property'}));}else items=items.map((item,index)=>({...item,number:index+1,source_type:'Property'}));
-      const failed=result.tool_calls?.length ? 'TOOL_RECURSION_BLOCKED':this.guard.outputReason(result.reply,items,source,{retrievalFound:rag?.found??items.length>0,faqOnly:items.length>0&&items.every(x=>x.source_type==='Faq')});
-      if(failed){log('final_output',result.tool_calls?.length ? result.tool_calls:result.reply,failed);blocked=true;}
-      else log('regeneration',{},null);
-    }
-    const pendingActions:unknown[]=[];
-    if(!blocked && who.client && proposals.length) for(const proposal of proposals){
-      if(!object(proposal) || typeof proposal.name!=='string' || !object(proposal.arguments))continue;
-      const args=proposal.arguments as Record<string,unknown>, value=(key:string)=>typeof args[key]==='string' ? args[key] as string:'';
-      const summary=proposal.name==='request_handoff' ? value('summary')||'Khách đề nghị chuyên viên liên hệ' : proposal.name==='propose_appointment' ? `Đề nghị lịch xem${value('code') ? ` ${value('code')}`:''} lúc ${value('preferred_start')}` : `Lưu ${value('code')} vào yêu thích`;
-      const pending=await who.client.rpc('pose_ai_create_pending',{p_session:id,p_tool:proposal.name,p_args:args,p_summary:summary,p_key:`${id}:${hash(JSON.stringify(proposal))}`});
-      if(!pending.error)pendingActions.push(pending.data);
+      log('final_output',result.reply,violation);
+      blocked=true;
     }
     const fields=blocked ? {}:this.extraction.extractNeeds(extracted,source,(key,field)=>log('invalid_need',{field:key,value:field},'invalid_need','flagged'));
     const reply=(count===0 ? `${disclosure}\n`:'')+(blocked ? safeReply:result.reply);
@@ -146,10 +152,19 @@ export class AiService {
     const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:reply,p_sources:items,p_actions:actions,p_fields:acceptedFields,p_score:score});
     if(committed.error)return catalogDatabaseError(committed.error);
     if(guest)(await cookies()).set('pose-ai-session',who.token,{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',path:'/',maxAge:86400*7});
-    const payload={session:committed.data,reply,sources:items,blocked,proposals,pending_actions:pendingActions,inquiry_url:'/customer/inquiries/new'};
+    const action=pendingActions[0];
+    const payload={session:committed.data,reply,sources:items,blocked,proposals,pending_actions:pendingActions,action,inquiry_url:'/customer/inquiries/new'};
     if(request.headers.get('accept')?.includes('text/event-stream')){
-      const events=[{type:'meta',session_id:committed.data.id,sources:items},{type:'delta',text:reply},...pendingActions.map(action=>({type:'action',action})),{type:'done',message:reply,blocked}];
-      return new Response(events.map(event=>`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''),{headers:{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','Connection':'keep-alive'}});
+      const encoder=new TextEncoder();
+      const stream=new ReadableStream<Uint8Array>({start(controller){
+        const send=(type:string,value:unknown)=>controller.enqueue(encoder.encode(`event: ${type}\ndata: ${JSON.stringify(value)}\n\n`));
+        send('meta',{session_id:committed.data.id,sources:items});
+        const deltas=streamedDeltas.length ? streamedDeltas : Array.from({length:Math.ceil(reply.length/48)},(_,i)=>reply.slice(i*48,i*48+48));
+        for(const text of deltas)send('delta',{text});
+        for(const pending of pendingActions)send('action',{action:pending});
+        send('done',{message:reply,blocked,guard:violation}); controller.close();
+      }});
+      return new Response(stream,{headers:{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','Connection':'keep-alive','X-Accel-Buffering':'no'}});
     }
     return catalogJson(payload);
   }catch{return unavailable();}

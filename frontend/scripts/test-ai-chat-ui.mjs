@@ -9,7 +9,7 @@ import { stopProcess } from './campaign-test-process.mjs';
 let chrome;
 for(const candidate of [process.env.CHROME_PATH,process.env.PROGRAMFILES&&join(process.env.PROGRAMFILES,'Google/Chrome/Application/chrome.exe'),process.env['PROGRAMFILES(X86)']&&join(process.env['PROGRAMFILES(X86)'],'Google/Chrome/Application/chrome.exe')].filter(Boolean)){try{await access(candidate);chrome=candidate;break;}catch{}}
 assert.ok(chrome,'Chrome executable required');
-const root=join(tmpdir(),'pose-m06-chat-ui');await mkdir(root,{recursive:true});
+const root=join(tmpdir(),'pose-m06-agent');await mkdir(root,{recursive:true});
 let server,child,ws,send,checks=0;
 const check=(value,label)=>{assert.ok(value,label);checks++;};
 try{

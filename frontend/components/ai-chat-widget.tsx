@@ -7,11 +7,11 @@ import { availabilityLabels } from '@/lib/catalog';
 import { chatStorageKey } from '@/lib/chat-storage';
 
 type Source={id:string;code:string;name:string;updated_at:string;price:number|null;availability:keyof typeof availabilityLabels;transaction_type:'Sale'|'Rent';price_period:'Total'|'Month';number?:number};
-type PendingAction={id:string;tool:string;summary_vi:string;status?:string};
+type PendingAction={id:string;tool:string;summary_vi:string;status?:string;requires_verified_phone?:boolean};
 type Message={role:'user'|'assistant';content:string;sources?:Source[];action?:PendingAction};
 function validMessage(message:Message){
   return message && (message.role==='user'||message.role==='assistant') && typeof message.content==='string' &&
-    (!message.sources || Array.isArray(message.sources) && message.sources.every(source=>source && typeof source.id==='string' && typeof source.name==='string' && typeof source.code==='string' && typeof source.updated_at==='string' && (source.price===null || typeof source.price==='number') && Object.hasOwn(availabilityLabels,source.availability)));
+    (!message.sources || Array.isArray(message.sources) && message.sources.every(source=>source && typeof source.id==='string' && typeof source.name==='string' && typeof source.code==='string' && typeof source.updated_at==='string' && (source.price===null || typeof source.price==='number') && Object.hasOwn(availabilityLabels,source.availability))) && (!message.action || typeof message.action.id==='string' && typeof message.action.summary_vi==='string');
 }
 type VoiceState='idle'|'listening'|'thinking'|'speaking';
 type Recognition={lang:string;interimResults:boolean;continuous:boolean;start():void;stop():void;abort():void;
@@ -38,6 +38,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   const [messages,setMessages]=useState<Message[]>([]),[text,setText]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [dictating,setDictating]=useState(false),[voice,setVoice]=useState<VoiceState|null>(null),[heard,setHeard]=useState('');
   const [handoffOpen,setHandoffOpen]=useState(false),[preferred,setPreferred]=useState(''),[handoffKey,setHandoffKey]=useState<string>(),[notice,setNotice]=useState('');
+  const [consents,setConsents]=useState<Record<string,{Call:boolean;AIVoice:boolean}>>({}),[deciding,setDeciding]=useState<string>();
   // Speech support is a browser capability: false during server rendering, real value after hydration.
   const speechSupported=useSyncExternalStore(subscribeNever,()=>!!recognitionCtor(),()=>false);
   const pending=useRef(false),recognition=useRef<Recognition|null>(null),voiceOn=useRef(false),log=useRef<HTMLDivElement>(null),input=useRef<HTMLTextAreaElement>(null);
@@ -163,7 +164,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   function close(){stopVoice();setOpen(false);requestAnimationFrame(()=>launcher.current?.focus());}
 
   async function decide(id:string,confirm:boolean){
-    try{const response=await fetch(`/api/ai/actions/${id}/${confirm?'confirm':'cancel'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});const result=await response.json();if(!response.ok)throw new Error(result.message);setNotice(result.message||'Đã cập nhật yêu cầu.');setMessages(list=>list.map(m=>m.action?.id===id?{...m,action:{...m.action,status:result.action?.status|| (confirm?'Confirmed':'Cancelled')}}:m));}catch(e){setError(e instanceof Error?e.message:'Không thể cập nhật yêu cầu.');}
+    setDeciding(id);try{const response=await fetch(`/api/ai/actions/${id}/${confirm?'confirm':'cancel'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({consents:confirm?(consents[id]||{Call:false,AIVoice:false}):{}})});const result=await response.json();if(!response.ok)throw new Error(result.message);setNotice(result.message||'Đã cập nhật yêu cầu.');setMessages(list=>list.map(m=>m.action?.id===id?{...m,action:{...m.action,status:result.action?.status|| (confirm?'Confirmed':'Cancelled'),requires_verified_phone:result.action?.no_verified_phone}}:m));}catch(e){setError(e instanceof Error?e.message:'Không thể cập nhật yêu cầu.');}finally{setDeciding(undefined);}
   }
 
   async function handoff(){
@@ -204,6 +205,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
 
       {error && <div className="ai-error" role="alert"><p>{error}</p><Link href="/customer/inquiries/new">Gửi biểu mẫu tư vấn</Link></div>}
 
+      {messages.filter(m=>m.action && (!m.action.status||m.action.status==='Pending') && (m.action.tool==='request_handoff'||m.action.tool==='propose_appointment')).map(m=>{const action=m.action!;const chosen=consents[action.id]||{Call:false,AIVoice:false};return <div className="ai-action-consent" key={`consent-${action.id}`}><p>Contact consent</p><label><input type="checkbox" checked={chosen.Call} onChange={e=>setConsents(c=>({...c,[action.id]:{...chosen,Call:e.target.checked}}))}/> Call</label><label><input type="checkbox" checked={chosen.AIVoice} onChange={e=>setConsents(c=>({...c,[action.id]:{...chosen,AIVoice:e.target.checked}}))}/> AI voice</label></div>})}
       {voice ? <div className="ai-voice" data-state={voice}>
         <button type="button" className="ai-orb" onClick={()=>{if(voice==='idle')voiceTurn();}} aria-label={voiceLabels[voice]}><span/><span/><span/></button>
         <strong role="status" aria-live="polite">{voiceLabels[voice]}</strong>
