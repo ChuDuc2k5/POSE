@@ -4,7 +4,7 @@ create table public.ai_chat_sessions (
  id uuid primary key default gen_random_uuid(), user_id uuid references auth.users(id), guest_token_hash text,
  store_transcript boolean not null default false, lead_id uuid references public.leads(id),
  status text not null default 'Active' check(status in ('Active','HandedOff','Closed')),
- message_count integer not null default 0 check(message_count>=0), property_ids uuid[] not null default '{}', created_at timestamptz not null default now(), last_message_at timestamptz,
+ message_count integer not null default 0 check(message_count>=0), property_ids uuid[] not null default '{}', suggested_property_ids uuid[] not null default '{}' check(cardinality(suggested_property_ids)<=20), created_at timestamptz not null default now(), last_message_at timestamptz,
  check ((user_id is null) <> (guest_token_hash is null)), check(guest_token_hash is null or guest_token_hash ~ '^[a-f0-9]{64}$'),
  check(user_id is not null or lead_id is null)
 );
@@ -65,7 +65,7 @@ create function pose_private.ai_lead_assignee(p_lead uuid) returns uuid language
 $$;
 revoke all on function pose_private.ai_lead_assignee(uuid) from public,anon,authenticated;
 create function pose_private.ai_interest_ids(p_lead uuid) returns uuid[] language sql stable security definer set search_path='' as $$
- select coalesce(array(select distinct unnest(s.property_ids) from public.ai_chat_sessions s where s.lead_id=p_lead limit 100),'{}'::uuid[]);
+ select coalesce(array(select distinct unnest(coalesce(s.suggested_property_ids,s.property_ids)) from public.ai_chat_sessions s where s.lead_id=p_lead limit 100),'{}'::uuid[]);
 $$;
 revoke all on function pose_private.ai_interest_ids(uuid) from public,anon,authenticated;
 create function pose_private.ai_strip_phones(p_text text) returns text language plpgsql immutable security invoker set search_path='' as $$
@@ -234,7 +234,7 @@ begin
  for a in select * from jsonb_array_elements(p_actions) loop
   insert into public.ai_action_log(session_id,tool,args_hash,decision,reason,rule_version) values(s.id,a->>'tool',a->>'args_hash',a->>'decision',a->>'reason',a->>'rule_version');
  end loop;
- update public.ai_chat_sessions set message_count=message_count+2,last_message_at=now(),property_ids=array(select distinct x from unnest(s.property_ids||array(select (v->>'id')::uuid from jsonb_array_elements(p_sources) v)) x limit 100) where id=s.id;
+ update public.ai_chat_sessions set message_count=message_count+2,last_message_at=now(),property_ids=array(select distinct x from unnest(s.property_ids||array(select (v->>'id')::uuid from jsonb_array_elements(p_sources) v)) x limit 100),suggested_property_ids=array(select distinct x from unnest(s.suggested_property_ids||array(select (v->>'id')::uuid from jsonb_array_elements(p_sources) v)) x limit 20) where id=s.id;
  if s.lead_id is not null and s.store_transcript and p_fields<>'{}'::jsonb then
   merged_needs:=pose_private.ai_record_extraction(s.lead_id,'Chat',s.id,'needs.v1',p_fields,'chat-extract:'||s.id||':'||s.message_count);
   needs_changed:=exists(select 1 from jsonb_object_keys(p_fields) k where before_needs->k->'value' is distinct from merged_needs->k->'value');

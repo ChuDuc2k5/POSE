@@ -12,7 +12,7 @@ import { object } from './extraction.js';
 import { inferSearch } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
 import { correctionData, disclosure, GUARD_VERSION, safeReply, type Evidence } from './guard.js';
-import { RetrievalService, type RetrievalResult } from './retrieval.js';
+import { RetrievalService, renderRetrievedContext, type RetrievalResult } from './retrieval.js';
 
 export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI hiện chưa khả dụng. Vui lòng thử lại hoặc gửi yêu cầu tư vấn.',retry:true,inquiry_url:'/customer/inquiries/new'},503);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -78,7 +78,7 @@ export class AiService {
     // Small models rarely ask for a search on their own; search the catalogue from the
     // question itself, and if nothing matches widen once so the answer can compare.
     const inferred=searchPerformed ? null:inferSearch(source);
-    if(inferred){
+    if(inferred && Object.keys(inferred).length){
       items=await search(inferred,null);
       if(!items.length && Object.keys(inferred).length){const {location,transaction_type}=inferred;items=await search({...location ? {location}:{},...transaction_type ? {transaction_type}:{}},null);}
       searchPerformed=true;
@@ -108,14 +108,16 @@ export class AiService {
       result=await turn({...data(),tools_complete:true});
       if(result.tool_calls?.length){violation='TOOL_RECURSION_BLOCKED';for(const t of result.tool_calls)log('recursive_tool',t,violation);}
     }
-    items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5).map((item,index)=>({...item,number:index+1}));
-    if(!violation){violation=this.guard.outputReason(result.reply,items,source);if(violation)log('output',result.reply,violation);}
+    items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5);
+    const finalRag=rag as RetrievalResult|null;if(finalRag){const rendered=renderRetrievedContext(finalRag.chunks,new Set(items.map(x=>x.id)));rag={...finalRag,...rendered};items=items.map(item=>({...item,number:(rendered.sources.find(s=>s.id===item.id)?.number as number|undefined),source_type:'Property'}));}else items=items.map((item,index)=>({...item,number:index+1,source_type:'Property'}));
+    if(!violation){violation=this.guard.outputReason(result.reply,items,source,{retrievalFound:rag?.found??items.length>0,faqOnly:items.length>0&&items.every(x=>x.source_type==='Faq')});if(violation)log('output',result.reply,violation);}
     let blocked=false;
     if(violation){
       proposals=[];
       result=await turn({...data(),regeneration:true,tools_complete:true,...correctionData(violation)});
-      items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5).map((item,index)=>({...item,number:index+1}));
-      const failed=result.tool_calls?.length ? 'TOOL_RECURSION_BLOCKED':this.guard.outputReason(result.reply,items,source);
+      items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5);
+      const regenRag=rag as RetrievalResult|null;if(regenRag){const rendered=renderRetrievedContext(regenRag.chunks,new Set(items.map(x=>x.id)));rag={...regenRag,...rendered};items=items.map(item=>({...item,number:(rendered.sources.find(s=>s.id===item.id)?.number as number|undefined),source_type:'Property'}));}else items=items.map((item,index)=>({...item,number:index+1,source_type:'Property'}));
+      const failed=result.tool_calls?.length ? 'TOOL_RECURSION_BLOCKED':this.guard.outputReason(result.reply,items,source,{retrievalFound:rag?.found??items.length>0,faqOnly:items.length>0&&items.every(x=>x.source_type==='Faq')});
       if(failed){log('final_output',result.tool_calls?.length ? result.tool_calls:result.reply,failed);blocked=true;}
       else log('regeneration',{},null);
     }

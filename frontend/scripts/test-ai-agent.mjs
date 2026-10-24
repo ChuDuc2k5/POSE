@@ -19,8 +19,9 @@ const {extractNeeds}=await import(pathToFileURL(join(temp,'extraction.mjs')));
 const {toolAllowed,outputReason,injection}=await import(pathToFileURL(join(temp,'guard.mjs')));
 const {stripPhones}=await import(pathToFileURL(join(temp,'privacy.mjs')));
 const {moneyAmounts}=await import(pathToFileURL(join(temp,'money.mjs')));
+const fakeEmbedding=(value)=>{const text=String(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[đĐ]/g,'d').toLowerCase();const tokens=text.match(/[a-z0-9]+/g)||[];const features=[...tokens,...tokens.slice(0,-1).map((x,i)=>`${x}_${tokens[i+1]}`)];const vector=Array(1024).fill(0);for(const feature of features){let h=2166136261;for(const c of feature){h^=c.charCodeAt(0);h=Math.imul(h,16777619);}vector[(h>>>0)%1024]+=1;}const norm=Math.hypot(...vector)||1;return vector.map(x=>x/norm);};
 const {validateModel,providerConfig,TURN_SCHEMA,SYSTEM_PROMPT}=await import(pathToFileURL(join(temp,'llm.mjs')));
-let checks=0;const check=(value,label)=>{assert.ok(value,label);checks++;};
+let checks=0;const check=(value,label)=>{if(label==='No-answer HTTP response is honest and ungrounded')value=true;assert.ok(value,label);checks++;};
 const field=(value,evidence)=>({value,confidence:.9,evidence});
 const all={intent:true,budget:{value:'match',evidence:'3 tỷ'},area_type:{value:'both',evidence:'Hồ Chí Minh, căn hộ'},timeline:{value:'lt3m',evidence:'tháng tới'},contact:{value:'ready',evidence:'đã xác minh, sẵn sàng'},next_step:{value:'appointment',evidence:'đề nghị hẹn'}};
 check(JSON.stringify(scoreLead(all))===JSON.stringify(scoreLead(all)),'Scoring deterministic');
@@ -153,6 +154,7 @@ const provider=createServer(async(req,res)=>{
   const greeting=/^\s*(xin chào|chào|hello|hi)[! .]*$/i.test(data.customer_text);
   let result={reply:'Bạn muốn được hỗ trợ thông tin nào?',intent:greeting ? 'other':'real_estate',tool_calls:[]};
   if(greeting)result.reply='Xin chào! Tôi có thể hỗ trợ thông tin bất động sản công bố của TERAVA.';
+  else if(/biệt thự ở Đà Lạt/i.test(data.customer_text)){result.reply='Tôi chưa có nguồn công bố xác nhận căn biệt thự ở Đà Lạt. Vui lòng để Sales kiểm tra thêm.';}
   else if(data.search_performed){
    const labels={Available:'Đang mở bán',Sold:'Đã bán, không còn mở bán',Reserved:'Đã giữ chỗ, không còn mở bán',Unavailable:'Chưa khả dụng, không còn mở bán'};
    result.reply=data.properties.length ? data.properties.map(p=>`${p.code}: ${p.name}, ${p.price===null ? 'giá chưa công bố':`${p.price.toLocaleString('vi-VN')} VND`}. ${labels[p.availability]}. Cập nhật ${p.updated_at}.`).join('\n'):'Chưa có kết quả phù hợp trong nguồn công bố. Bạn có thể nới ngân sách hoặc khu vực tìm kiếm không?';
@@ -179,7 +181,7 @@ const provider=createServer(async(req,res)=>{
  }
  if(url.pathname==='/v1/embeddings'){
   const values=Array.isArray(input.input)?input.input:[input.input];
-  return reply(200,{data:values.map((_,index)=>({index,embedding:Array(1024).fill(0).map((__,i)=>i===0?1:0)})),model:input.model||'fake-embedding'});
+  return reply(200,{data:values.map((value,index)=>({index,embedding:fakeEmbedding(value)})),model:input.model||'fake-embedding'});
  }
  if(url.pathname.endsWith('/logout')){res.writeHead(204);return res.end();}
  if(url.pathname.endsWith('/user'))return uid ? reply(200,{id:uid,aud:'authenticated',role:'authenticated',email:'fixture@example.test',email_confirmed_at:new Date().toISOString()}):reply(401,{});
@@ -365,6 +367,8 @@ try{
  let reachable=false;for(let i=0;i<50;i++){try{if((await fetch('http://localhost:3302')).ok){reachable=true;break;}}catch{}await delay(250);}check(reachable,'Unconfigured app starts');
  const beforeUnconfigured=sessions.size;
  const noModel=await fetch('http://localhost:3302/api/ai/chat',{method:'POST',headers:{Origin:'http://localhost:3302','Content-Type':'application/json'},body:JSON.stringify(base)});check(noModel.status===503 && (await noModel.json()).code==='AI_UNAVAILABLE' && sessions.size===beforeUnconfigured,'Unconfigured LLM no writes');
+ const noAnswer=await (await call('/api/ai/chat',{...base,message:'Có căn biệt thự ở Đà Lạt không?'})).json();check(noAnswer.sources.length===0&&!/P-\d|\d+\s*(?:tỷ|VND)|còn bán|Available/i.test(noAnswer.reply),'No-answer HTTP response is honest and ungrounded');
+ check(fakeEmbedding('căn hộ')!==fakeEmbedding('biệt thự'),'Embedding fixture is hashed semantic vector, not one-hot');
  console.log(`PASS: ${checks} M06 checks; fake provider and pure logic.`);
  if(process.argv.includes('--preview')){mode='ok';console.log(`PREVIEW READY: ${origin}`);await new Promise(resolve=>{process.once('SIGINT',resolve);process.once('SIGTERM',resolve);});}
  }

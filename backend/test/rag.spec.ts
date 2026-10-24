@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CHUNK_OVERLAP, CHUNK_SINGLE_MAX, CHUNK_SIZE, cleanKnowledgeText, propertyChunks, splitKnowledgeText } from '../src/modules/ai/chunking.js';
 import { embeddingConfig, EmbeddingService, EMBEDDING_BATCH_MAX } from '../src/modules/ai/embeddings.js';
-import { applyThresholds, currentModelRows, reciprocalRankFusion, type RankedChunk } from '../src/modules/ai/retrieval.js';
+import { applyThresholds, currentModelRows, reciprocalRankFusion, renderRetrievedContext, type RankedChunk } from '../src/modules/ai/retrieval.js';
 import { indexNeedsEmbedding } from '../src/modules/ai/indexing.js';
 
 const env={...process.env};
@@ -42,6 +42,7 @@ describe('hybrid ranking',()=>{
  it('returns no answer below the threshold when full text found nothing',()=>{expect(applyThresholds([row('a','p1',{vector_rank:1,similarity:.25})],{minScore:.2,relativeGap:.15,noAnswerScore:.3,topK:5})).toEqual([]);});
  it('keeps full-text fallback and isolates vectors by model through ranked input',()=>{expect(applyThresholds([row('text','faq',{text_rank:1})],{minScore:.5,relativeGap:.1,noAnswerScore:.5,topK:5})).toHaveLength(1);const current=[row('current','p1',{vector_rank:1,similarity:.7})];expect(reciprocalRankFusion(current).map(x=>x.chunk_id)).not.toContain('old-model');});
  it('filters vector candidates to the current model while retaining text candidates',()=>{const rows=[row('new','p1',{embed_model:'bge-m3',vector_rank:1}),row('old','p2',{embed_model:'old',vector_rank:1}),row('text','faq',{text_rank:1})];expect(currentModelRows(rows,'bge-m3').map(x=>x.chunk_id)).toEqual(['new','text']);});
+ it('keeps citation numbers stable per property after a sold result is removed',()=>{const first=row('a','p1',{content:'first'}),second=row('b','p1',{content:'second'}),sold=row('c','p2',{availability:'Sold'});const rendered=renderRetrievedContext([first,second,sold],new Set(['p1']));expect(rendered.sources.map(x=>x.number)).toEqual([1]);expect(rendered.chunks.map(x=>x.citation_number)).toEqual([1,1]);expect(rendered.context.match(/\[1\]/g)).toHaveLength(2);});
 });
 
 describe('index idempotency',()=>{it('skips only when both hash and model match',()=>{expect(indexNeedsEmbedding({content_hash:'h',embed_model:'m'},'h','m')).toBe(false);expect(indexNeedsEmbedding({content_hash:'h',embed_model:'m'},'h','other')).toBe(true);expect(indexNeedsEmbedding({content_hash:'h',embed_model:null},'h',null)).toBe(false);});});
