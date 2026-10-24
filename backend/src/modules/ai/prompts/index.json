@@ -1,5 +1,5 @@
 {
-  "assistant": { "file": "assistant.system.md", "version": "assistant@4" },
+  "assistant": { "file": "assistant.system.md", "version": "assistant@5" },
   "query": { "file": "query.system.md", "version": "query@3" },
   "answer-meta": { "file": "answer-meta.system.md", "version": "answer-meta@2" },
   "needs": { "file": "needs.system.md", "version": "needs@2" },

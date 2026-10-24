@@ -52,6 +52,12 @@ async function retrieveIds(ids:string[]):Promise<Evidence[]> {
   const order=new Map(ids.map((id,index)=>[id,index]));
   return (result.data || []).sort((a,b)=>(order.get(a.id)??Number.MAX_SAFE_INTEGER)-(order.get(b.id)??Number.MAX_SAFE_INTEGER)).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[];
 }
+// The whole catalogue is in Ho Chi Minh City, whose name is written many ways ("TP.HCM",
+// "Thành phố Hồ Chí Minh"…); a city-level location is not a filter and would only miss rows.
+const cityOnly=/^(?:tp\.?\s*|thành phố\s*)?(?:hcm|hồ chí minh|ho chi minh|sài gòn|saigon)$/i;
+// "khoảng 25 triệu" is extracted as min = max; an approximate figure becomes a ±20% range.
+export function approximatePriceRange(filters: Record<string, unknown>) { if (typeof filters.minPrice==='number' && filters.minPrice===filters.maxPrice) { filters.minPrice=Math.round(filters.minPrice*0.8); filters.maxPrice=Math.round((filters.maxPrice as number)*1.2); } return filters; }
+export function locationFilter(value: unknown) { return typeof value==='string' && value.trim() && !cityOnly.test(value.trim().replace(/[.,]$/,'')) ? value.trim() : undefined; }
 function relaxedLocation(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return undefined;
   const match=value.match(/(?:quận|huyện|thành phố|tp\.?|q\.?)[\s\d-]+/i);
@@ -127,6 +133,8 @@ export class AiService {
         queryKeywords=query.keywords;
         const qf=Object.fromEntries(Object.entries(query.filters).filter(([,v])=>v!==null));
         queryFilters={location:qf.location,type:qf.property_type,minPrice:qf.min_price_vnd,maxPrice:qf.max_price_vnd,transaction_type:qf.transaction_type,bedrooms:qf.bedrooms};
+        queryFilters.location=locationFilter(queryFilters.location);
+        approximatePriceRange(queryFilters);
         queryFilters=Object.fromEntries(Object.entries(queryFilters).filter(([,v])=>v!==null&&v!==undefined));
         referenceIds=query.refers_to_previous.map(index=>interestIds[index-1]).filter((value):value is string=>typeof value==='string');
       } catch(error) { if(!(error instanceof Error && error.message==='NOT_A_PROPERTY_QUERY'))log('query_step',source,'invalid_query','flagged'); }
