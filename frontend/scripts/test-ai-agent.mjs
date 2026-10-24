@@ -295,8 +295,9 @@ try{
  if(previewOnly){
   console.log(`PREVIEW READY: ${origin}`);
   await new Promise(resolve=>{process.once('message',message=>{if(message==='stop')resolve();});process.once('SIGINT',resolve);process.once('SIGTERM',resolve);});
- }else if(live){
-  for(const [message,code,period] of [['Căn hộ dưới 3,5 tỷ ở Thủ Đức','TD-A01','Total'],['Cho thuê căn hộ 2 phòng ngủ Quận 7','Q7-R01','Month']]){
+}else if(live){
+  const liveTurns=[['Căn hộ dưới 3,5 tỷ ở Thủ Đức','TD-A01','Total'],['Cho thuê căn hộ 2 phòng ngủ Quận 7','Q7-R01','Month']];let completedTurns=0;
+  for(const [message,code,period] of liveTurns){
    const started=performance.now(),response=await call('/api/ai/chat',{...base,message});
    const raw=await response.text();assert.ok(response.headers.get('content-type')?.includes('application/json'),`${response.status}: ${raw}; ${output}`);const data=JSON.parse(raw);
    console.log(`LIVE: ${message}; ${Math.round(performance.now()-started)} ms`);console.log(`reply: ${data.reply || data.message}`);console.log(`sources: ${JSON.stringify(data.sources)}`);
@@ -304,8 +305,9 @@ try{
    assert.equal(response.status,200);assert.equal(data.blocked,false);
    const source=data.sources.find(p=>p.code===code && p.price_period===period);assert.ok(source);assert.ok(moneyAmounts(data.reply).includes(source.price));
    assert.ok(data.sources.every(p=>p.price_period===period));
+   completedTurns++;
   }
-  console.log('PASS: 2/2 live Qwen chat turns grounded with sale/rental sources.');
+  console.log(`PASS: ${completedTurns}/${liveTurns.length} live Qwen chat turns grounded with sale/rental sources.`);
  }else{
  check((await call('/api/ai/chat',base,'','POST','https://other.test')).status===403,'Origin denied');
  check((await call('/api/ai/chat',{...base,message:'x'.repeat(2001)})).status===400,'Length limit');
