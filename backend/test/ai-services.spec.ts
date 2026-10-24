@@ -3,10 +3,15 @@ import { classifyScore, scoreLead } from '../src/modules/ai/lead-scoring.js';
 import { injection, toolAllowed } from '../src/modules/ai/guard.js';
 import { providerConfig, SYSTEM_PROMPT, TURN_SCHEMA, validateModel } from '../src/modules/ai/llm.js';
 import { stripPhones } from '../src/modules/ai/privacy.js';
+import { currentAiRequestSession, withAiRequestSession } from '../src/modules/ai/request-log.js';
 const evidence = [{ id: '00000000-0000-4000-8000-000000000001', code: 'RV-A0805', name: 'Căn hộ', price: 3500000000, availability: 'Available', updated_at: '2026-10-14', location: 'Thủ Đức', property_type: 'Apartment' }];
 const field = (value: unknown, quote: string) => ({ value, confidence: 1, evidence: quote });
 describe('M06 services', () => {
   afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+  it('keeps overlapping AI request sessions isolated', async () => {
+    const turn = (id: string, wait: number) => withAiRequestSession(id, async () => { await new Promise(resolve => setTimeout(resolve, wait)); return currentAiRequestSession(); });
+    await expect(Promise.all([turn('session-a', 15), turn('session-b', 1)])).resolves.toEqual(['session-a', 'session-b']);
+  });
   it('grounds prices, products and availability while allowing refusals', () => {
     const guard = new AiGuardService();
     expect(guard.outputReason('RV-A0805 giá 3,5 tỷ, còn bán.', evidence)).toBeNull();

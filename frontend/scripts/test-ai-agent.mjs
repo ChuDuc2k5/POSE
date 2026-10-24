@@ -144,12 +144,19 @@ const provider=createServer(async(req,res)=>{
  const url=new URL(req.url,'http://localhost'),token=req.headers.authorization?.slice(7),who=token?.replace('fixture-',''),role=who==='Other' ? 'User':who,uid=users[who];
   const reply=(status,body)=>{if(body?.choices?.length && !body.usage){body.usage={prompt_tokens:11,completion_tokens:7,total_tokens:18};body.choices[0].usage=body.usage;}res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(body));};
  const error=(code,message,status=400)=>reply(status,{code,message});
+ if(url.pathname==='/fixture/mode'){
+  mode=typeof input.mode==='string' ? input.mode : 'ok'; providerOffline=mode==='offline'; rerankNoAnswer=mode==='no-answer';
+  return reply(200,{mode,providerOffline,rerankNoAnswer});
+ }
   const requestedMode=req.headers['x-fake-provider-mode'];if(requestedMode)mode=requestedMode;
   if(providerOffline)return reply(503,{message:'Unavailable'});
  if(previewOnly && url.pathname.endsWith('/pose_search_properties')){const items=properties.filter(p=>p.publication==='Published' && !p.archived);return reply(200,{items,total:items.length,page:1,pageSize:12,snapshot:randomUUID(),expiresAt:'2027-01-01T00:00:00Z'});}
  if(previewOnly && url.pathname.endsWith('/property_projects'))return reply(200,[]);
  if(url.pathname==='/v1/chat/completions'){
-   if(input.response_format?.json_schema?.name==='rag_rerank')return reply(200,{choices:[{message:{content:JSON.stringify(rerankNoAnswer?{has_answer:false,ranked:[{n:1,relevance:3}]}:{has_answer:true,ranked:[{n:2,relevance:3},{n:1,relevance:2},{n:3,relevance:2},{n:4,relevance:2}]})}}]});
+   if(input.response_format?.json_schema?.name==='rag_rerank'){
+    const promptText=String(input.messages?.at(-1)?.content||''), noResult=/kh.{0,8}ng t.{0,8}n t.{0,8}i|m.{0,5}t n.{0,8}i r.{0,8}t xa/i.test(promptText), hasAnswer=!rerankNoAnswer&&!noResult;
+    return reply(200,{choices:[{message:{content:JSON.stringify(hasAnswer?{has_answer:true,ranked:[{n:2,relevance:3},{n:1,relevance:2},{n:3,relevance:2},{n:4,relevance:2}]}:{has_answer:false,ranked:[{n:1,relevance:3}]})}}]});
+   }
   if(live){
    const response=await fetch('http://localhost:1234/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.timeout(60000)});
    const body=await response.json();modelOutputs.push(body.choices?.[0]?.message?.content);return reply(response.status,body);
@@ -161,6 +168,7 @@ const provider=createServer(async(req,res)=>{
    if(mode==='timeout'){await delay(6000);return reply(200,{choices:[{message:{content:''}}]});}
    if(mode==='empty')return reply(200,{choices:[{message:{content:''}}]});
    if(input.tools){
+   if(!input.messages.some(m=>m.role==='tool')){const requestText=JSON.stringify(input);if(/ngh.{0,20}l.{0,15}ch xem/i.test(requestText))mode='appointment';else if(/L.{0,20}RV-A0805/i.test(requestText))mode='favorite';else if(/chuy.{0,20}n vi.{0,20}n/i.test(requestText))mode='handoff';}
    if(!prompt)prompt=input;
    check(input.tools.length===6 && input.tools.every(t=>['search_properties','get_property_detail','list_my_appointments','save_favorite','request_handoff','propose_appointment'].includes(t.function.name)),'Native six-tool schema');
    check(input.max_tokens===600 && input.messages[0].content.length<800,'Bounded generation and compact prompt/schema');
@@ -290,7 +298,7 @@ const provider=createServer(async(req,res)=>{
   if(mode==='rag-failure')return reply(500,{message:'fixture retrieval failure'});
   const context=Array.isArray(input.p_context)?input.p_context:[];
   const knownContext=context.filter(id=>properties.some(p=>p.id===id));
-  const rows=properties.filter(p=>p.publication==='Published'&&!p.archived&&(!context.length||knownContext.length>0)).map((p,i)=>({chunk_id:`chunk-${i}`,document_id:`doc-${i}`,source_id:p.id,source_type:'Property',header:`${p.code} ${p.name}`,content:`${p.name} ${p.location} published listing.`,vector_rank:context.includes(p.id)?Math.max(1,i):i+1,text_rank:context.includes(p.id)?1:i+1,similarity:context.includes(p.id)?.95:.9,embed_model:'fixture',code:p.code,name:p.name,location:p.location,property_type:p.property_type,transaction_type:p.transaction_type,price:p.price,price_period:p.price_period,availability:p.availability,updated_at:p.updated_at})).sort((a,b)=>(b.similarity-a.similarity)||(a.vector_rank-b.vector_rank));
+  const rows=properties.filter(p=>p.publication==='Published'&&!p.archived&&(!context.length||knownContext.includes(p.id))).map((p,i)=>({chunk_id:`chunk-${i}`,document_id:`doc-${i}`,source_id:p.id,source_type:'Property',header:`${p.code} ${p.name}`,content:`${p.name} ${p.location} published listing.`,vector_rank:context.includes(p.id)?Math.max(1,i):i+1,text_rank:context.includes(p.id)?1:i+1,similarity:context.includes(p.id)?.95:.9,embed_model:'fixture',code:p.code,name:p.name,location:p.location,property_type:p.property_type,transaction_type:p.transaction_type,price:p.price,price_period:p.price_period,availability:p.availability,updated_at:p.updated_at})).sort((a,b)=>(b.similarity-a.similarity)||(a.vector_rank-b.vector_rank));
   return reply(200,rows);
  }
  if(url.pathname.endsWith('/property_public_catalog')){
