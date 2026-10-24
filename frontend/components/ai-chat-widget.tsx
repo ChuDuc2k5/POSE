@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowUp, AudioLines, ChevronLeft, ChevronRight, Maximize2, Menu, Mic, MicOff, Minimize2, Plus, Search, UserRound, X } from 'lucide-react';
@@ -45,13 +45,13 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   const [open,setOpen]=useState(false),[store,setStore]=useState(false),[session,setSession]=useState<string>();
   const [messages,setMessages]=useState<Message[]>([]),[text,setText]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [historyItems,setHistoryItems]=useState<HistoryItem[]>([]),[historyOpen,setHistoryOpen]=useState(false),[historyCollapsed,setHistoryCollapsed]=useState(false),[historySearch,setHistorySearch]=useState(''),[citation,setCitation]=useState<number>();
-  const [dictating,setDictating]=useState(false),[voice,setVoice]=useState<VoiceState|null>(null),[heard,setHeard]=useState('');
+  const [dictating,setDictating]=useState(false),[voice,setVoice]=useState<VoiceState|null>(null),[heard,setHeard]=useState(''),[showLatest,setShowLatest]=useState(false);
   const [handoffOpen,setHandoffOpen]=useState(false),[preferred,setPreferred]=useState(''),[handoffKey,setHandoffKey]=useState<string>(),[notice,setNotice]=useState('');
   const [consents,setConsents]=useState<Record<string,{Call:boolean;AIVoice:boolean}>>({}),[deciding,setDeciding]=useState<string>();
   void deciding;
   // Speech support is a browser capability: false during server rendering, real value after hydration.
   const speechSupported=useSyncExternalStore(subscribeNever,()=>!!recognitionCtor(),()=>false);
-  const pending=useRef(false),recognition=useRef<Recognition|null>(null),voiceOn=useRef(false),log=useRef<HTMLDivElement>(null),input=useRef<HTMLTextAreaElement>(null);
+  const pending=useRef(false),recognition=useRef<Recognition|null>(null),voiceOn=useRef(false),log=useRef<HTMLDivElement>(null),input=useRef<HTMLTextAreaElement>(null),atBottom=useRef(true);
   const history=useRef<Message[]>([]),sessionRef=useRef<string|undefined>(undefined),relatedRef=useRef<Source[]>([]);
   const panel=useRef<HTMLElement>(null),launcher=useRef<HTMLButtonElement>(null),finishSpeech=useRef<(()=>void)|null>(null),voiceEpoch=useRef(0);
   const voiceActive=voice!==null;
@@ -105,7 +105,11 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   // The route is an external navigation state; opening the existing panel keeps its state intact.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(()=>{if(fullPage)setOpen(true);},[fullPage]);
-  useEffect(()=>{log.current?.scrollTo({top:log.current.scrollHeight,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant':'smooth'});},[messages,busy,heard]);
+  useEffect(()=>{
+    const element=log.current;if(!element)return;
+    if(atBottom.current){element.scrollTo({top:element.scrollHeight,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant':'smooth'});setShowLatest(false);}
+    else if(messages.length)window.setTimeout(()=>setShowLatest(true),0);
+  },[messages,busy,heard]);
   useEffect(()=>{const el=input.current;if(el){el.style.height='auto';el.style.height=`${Math.min(el.scrollHeight,160)}px`;}},[text]);
   useEffect(()=>()=>{voiceOn.current=false;voiceEpoch.current++;if(recognition.current){recognition.current.onend=null;recognition.current.onresult=null;recognition.current.onerror=null;recognition.current.abort();}window.speechSynthesis?.cancel();finishSpeech.current?.();},[]);
 
@@ -226,7 +230,26 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   }
   function deleteLocalHistory(id:string){try{const current=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');const next=Array.isArray(current)?current.filter((item:HistoryItem)=>item.id!==id):[];window.localStorage.setItem(localHistoryKey,JSON.stringify(next));setHistoryItems(next);}catch{}}
   function cite(number:number){setCitation(number);const target=panel.current?.querySelector<HTMLElement>(`[data-source-number="${number}"]`);target?.scrollIntoView({behavior:'smooth',block:'center'});window.setTimeout(()=>setCitation(undefined),1800);}
-  function renderReply(content:string){return content.split(/(\[\d{1,3}\])/g).map((part,index)=>/^\[\d{1,3}\]$/.test(part)?<button type="button" key={index} className="ai-citation-chip" onClick={()=>cite(Number(part.slice(1,-1)))}>{part}</button>:<span key={index}>{part}</span>);}
+  function renderInline(content:string):ReactNode[]{
+    const tokens=content.split(/(\[\d{1,3}\]|\*\*[^*\n]+\*\*|__[^_\n]+__|(?<!\*)\*[^*\n]+\*(?!\*)|(?<!_)_[^_\n]+_(?!_))/g);
+    return tokens.filter(Boolean).map((part,index)=>{
+      if(/^\[\d{1,3}\]$/.test(part))return <button type="button" key={index} className="ai-citation-chip" onClick={()=>cite(Number(part.slice(1,-1)))}>{part}</button>;
+      if((part.startsWith('**')&&part.endsWith('**'))||(part.startsWith('__')&&part.endsWith('__')))return <strong key={index}>{part.slice(2,-2)}</strong>;
+      if((part.startsWith('*')&&part.endsWith('*'))||(part.startsWith('_')&&part.endsWith('_')))return <em key={index}>{part.slice(1,-1)}</em>;
+      return <span key={index}>{part}</span>;
+    });
+  }
+  function renderReply(content:string){
+    const lines=content.split(/\r?\n/);const nodes:ReactNode[]=[];let index=0;
+    while(index<lines.length){
+      const match=lines[index].match(/^\s*[-*]\s+(.+)$/);const ordered=lines[index].match(/^\s*\d+[.)]\s+(.+)$/);
+      if(match||ordered){const items:ReactNode[]=[];const isOrdered=!!ordered;while(index<lines.length){const current=lines[index].match(isOrdered?/^\s*\d+[.)]\s+(.+)$/:/^\s*[-*]\s+(.+)$/);if(!current)break;items.push(<li key={index}>{renderInline(current[1])}</li>);index++;}const List=isOrdered?'ol':'ul';nodes.push(<List key={`list-${index}`}>{items}</List>);if(index<lines.length)nodes.push(<br key={`break-${index}`}/>);continue;}
+      if(lines[index])nodes.push(<span key={`line-${index}`}>{renderInline(lines[index])}</span>);
+      if(index<lines.length-1)nodes.push(<br key={`line-break-${index}`}/>);index++;
+    }
+    return nodes;
+  }
+  function scrollToLatest(){const element=log.current;if(!element)return;atBottom.current=true;element.scrollTo({top:element.scrollHeight,behavior:'smooth'});setShowLatest(false);}
 
   if(!visible || !restored)return null;
   const pageSuggestions=fullPage?['Thuê chung cư Thủ Đức','Mua căn hộ Quận 7','Thuê nhà phố Bình Thạnh','Mua nhà phố Quận 10']:suggestions;
@@ -248,7 +271,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
           : <button type="button" className="ai-icon" onClick={close} title="Đóng" aria-label="Đóng"><X size={18}/></button>}
       </header>
 
-      <div className="ai-log" ref={log} role="log" aria-live="polite" aria-relevant="additions">
+      <div className="ai-log" ref={log} onScroll={event=>{const element=event.currentTarget;const next=element.scrollTop+element.clientHeight>=element.scrollHeight-24;atBottom.current=next;if(next)setShowLatest(false);}} role="log" aria-live="polite" aria-relevant="additions">
         {!messages.length && <div className="ai-welcome">
           {fullPage && <div className="ai-suggestions ai-full-suggestions">{pageSuggestions.map(s=><button type="button" key={`full-${s}`} disabled={busy} onClick={()=>void ask(s)}>{s}</button>)}</div>}
           <span className="ai-welcome-mark"><TeravaMark size={44}/></span>
@@ -264,7 +287,8 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
                {!!m.related?.length && <section className="ai-related"><h3>Có thể bạn quan tâm</h3><div className="ai-property-list">{m.related.slice(0,3).map(s=><RecommendationCard key={s.id} source={s} related onAsk={message=>void ask(message)} signedIn={signedIn}/>)}</div></section>}
              </div></div>)}
         {busy && voice!=='thinking' && <div className="ai-row ai-row-assistant"><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><span className="ai-typing-bubble" role="status" aria-label="Trợ lý đang tìm dữ liệu…"><span>Trợ lý đang tìm dữ liệu…</span><span className="ai-typing"><i/><i/><i/></span></span></div>}
-        {notice && <p className="ai-notice" role="status">{notice}</p>}
+         {notice && <p className="ai-notice" role="status">{notice}</p>}
+        {showLatest && <button type="button" className="ai-latest" onClick={scrollToLatest}>Xuống tin mới nhất <ArrowUp size={15}/></button>}
       </div>
 
       {error && <div className="ai-error" role="alert"><p>{error}</p><Link href="/customer/inquiries/new">Gửi biểu mẫu tư vấn</Link></div>}
