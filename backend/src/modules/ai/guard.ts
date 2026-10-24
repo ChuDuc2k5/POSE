@@ -1,6 +1,7 @@
 import { object, propertyTypes } from './extraction.ts';
 import { moneyAmounts } from './money.ts';
 export { stripPhones } from './privacy.ts';
+import { withFormerDistrict } from './ward-label.js';
 export const GUARD_VERSION='guard.v3';
 export const safeReply='Tôi chưa thể xác nhận câu trả lời an toàn từ dữ liệu hiện có. Bạn có thể yêu cầu chuyên viên tư vấn hỗ trợ.';
 export const disclosure='Tôi là trợ lý AI của TERAVA.';
@@ -35,7 +36,7 @@ export function groundedSummary(evidence:Evidence[]) {
   if(!properties.length)return safeReply;
   const status:Record<string,string>={Available:'đang mở bán',Sold:'Đã bán, không còn mở bán',Reserved:'Đã giữ chỗ',Unavailable:'Tạm ngưng giao dịch'};
   const price=(e:Evidence)=>e.price===null ? 'giá chưa công bố' : `${Number(e.price).toLocaleString('vi-VN')} VND${e.price_period==='Month' || e.transaction_type==='Rent' ? '/tháng':''}`;
-  const lines=properties.map((e,index)=>`[${e.number ?? index+1}] ${e.name} – ${e.location} – ${price(e)} – ${status[e.availability] || e.availability}`);
+  const lines=properties.map((e,index)=>`[${e.number ?? index+1}] ${e.name} – ${withFormerDistrict(e.location)} – ${price(e)} – ${status[e.availability] || e.availability}`);
   return `Mình tìm thấy ${properties.length} bất động sản phù hợp trong dữ liệu đã công bố (giá và tình trạng lấy trực tiếp từ hệ thống):\n${lines.join('\n')}\nBạn muốn xem chi tiết, lưu hoặc đề nghị lịch xem căn nào?`;
 }
 export type Evidence={id:string;code:string;name:string;price:number|null;availability:string;updated_at:string;location:string;property_type:string;transaction_type?:'Sale'|'Rent';price_period?:'Total'|'Month';number?:number;source_type?:'Property'|'Faq';reason?:string};

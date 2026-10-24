@@ -20,3 +20,13 @@ describe('post-2025 HCMC ward mapping', () => {
     expect(result).toEqual({ needed: true, question: 'Bạn muốn thuê ở Quận 7 như trước hay khu vực khác?', options: ['Quận 7', 'Khu vực khác', 'Không giới hạn khu vực'] });
   });
 });
+
+import { withFormerDistrict } from '../src/modules/ai/ward-label.js';
+describe('former district label', () => {
+  it('labels new wards with their former district and leaves district addresses alone', () => {
+    expect(withFormerDistrict('Phường Tân Mỹ, Thành phố Hồ Chí Minh')).toBe('Phường Tân Mỹ (Quận 7 cũ), Thành phố Hồ Chí Minh');
+    expect(withFormerDistrict('Phường Tân Mỹ, Thành phố Hồ Chí Minh'.normalize('NFD'))).toBe('Phường Tân Mỹ (Quận 7 cũ), Thành phố Hồ Chí Minh');
+    expect(withFormerDistrict('Quận 7, TP. Hồ Chí Minh')).toBe('Quận 7, TP. Hồ Chí Minh');
+    expect(withFormerDistrict('Phường Tân Hưng Thuận, TP.HCM')).not.toContain('Quận 7');
+  });
+});
