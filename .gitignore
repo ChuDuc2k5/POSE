@@ -7,3 +7,11 @@ dist/
 !.env.example
 
 *.log
+
+# Generated coding-assistant instructions (Next.js / Prisma)
+AGENTS.md
+CLAUDE.md
+.agents/
+.claude/
+.cursor/
+.devin/
