@@ -71,8 +71,12 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
   const uuid=/[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}/gi;
   if([...reply.matchAll(uuid)].some(m=>!evidence.some(e=>e.id.toLowerCase()===m[0].toLowerCase())))return 'UNSUPPORTED_PROPERTY';
   const withoutDates=reply.replace(/(?<![a-z\d_-])\d{4}-\d{2}-\d{2}(?:T[\d:.+Z-]+)?/gi,'').replace(uuid,'');
-  const codes=[...withoutDates.matchAll(/\b[a-z][a-z\d]{0,19}(?:[-_][a-z\d]{1,20})+\b|\b[a-z]{1,12}\d[a-z\d]{0,20}\b|(?:mã sản phẩm|mã căn hộ|mã|code)\s*:?\s*([a-z\d_-]{2,40})/gi)];
-  if(codes.some(m=>!evidence.some(e=>e.code.toLowerCase()===(m[1] || m[0]).toLowerCase())))return 'UNSUPPORTED_PROPERTY';
+  // Listing codes look like CFR-79F29F4A…, RVL-…, P-1 (uppercase prefix + hyphen) or follow an explicit
+  // "mã"/"code" label. Plain tokens such as "Q7", "M8", "2PN" are building/district words, not codes,
+  // and anything already present in the cited listings' names or locations is allowed.
+  const evidenceText=evidence.map(e=>`${e.name||''} ${e.location||''}`).join(' ').toLowerCase();
+  const codes=[...withoutDates.matchAll(/(?<![\p{L}\d])[A-Z][A-Z\d]{0,5}-[A-Z\d]{1,24}(?![\p{L}\d])|(?:mã sản phẩm|mã căn hộ|mã căn|mã|code)\s*:?\s*([A-Za-z\d][A-Za-z\d_-]{1,40})/gu)];
+  if(codes.some(m=>{const code=(m[1] || m[0]).toLowerCase();return !evidence.some(e=>e.code.toLowerCase()===code) && !evidenceText.includes(code);}))return 'UNSUPPORTED_PROPERTY';
   const customerAmounts=moneyAmounts(customerText),allowed=[...customerAmounts,...evidence.flatMap(e=>e.price===null ? []:[e.price])];
   if(moneyAmounts(moneyText(reply,evidence)).some(amount=>!allowed.includes(amount)))return 'UNSUPPORTED_PRICE';
   for(const clause of clauses(reply)){
