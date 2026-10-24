@@ -326,7 +326,7 @@ const provider=createServer(async(req,res)=>{
  return reply(404,{});
 });
 await new Promise(resolve=>provider.listen(3301,'127.0.0.1',resolve));
-const stack=await startStack(3300,{SUPABASE_URL:'http://127.0.0.1:3301',SUPABASE_PUBLISHABLE_KEY:'fixture-public',SUPABASE_SECRET_KEY:'fixture-secret',AI_API_URL:'http://127.0.0.1:3301/v1/',AI_API_KEY:'',AI_MODEL:live ? 'qwen3-4b-instruct-2507':'fixture',AI_TIMEOUT_MS:live ? '60000':'5000'},{build:false,backendPort:3303});
+const stack=await startStack(3300,{SUPABASE_URL:'http://127.0.0.1:3301',SUPABASE_PUBLISHABLE_KEY:'fixture-public',SUPABASE_SECRET_KEY:'fixture-secret',AI_API_URL:'http://127.0.0.1:3301/v1/',AI_API_KEY:'',AI_MODEL:live ? 'qwen3-4b-instruct-2507':'fixture',AI_TIMEOUT_MS:live ? '60000':'5000'},{build:false,rebuildBackend:!previewOnly,backendPort:3303});
 const app=stack.app;
 let unconfigured;
 let output='';app.stdout.on('data',c=>output+=c);app.stderr.on('data',c=>output+=c);
