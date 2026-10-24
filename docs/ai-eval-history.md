@@ -33,6 +33,7 @@ chấm `has_answer=false` cho cả 6 ứng viên đúng — giới hạn của m
 | 2026-10-24 | bge-m3, ngưỡng mặc định ban đầu | 0,500 | 0,376 | 0,00 |
 | 2026-10-24 | ngữ cảnh phiên chỉ cộng điểm, khớp quận trong header, 40 ứng viên, hiệu chỉnh ngưỡng | **0,567** | **0,443** | **0,30** |
 | 2026-10-24 | + rerank bằng Qwen3-4B (20 ứng viên, lô 10) | 0,533 | 0,465 | 0,30 |
+| 2026-10-25 | + `AI_RAG_RERANK_KEEP_SIM=0.65` (giữ truy hồi khi rerank loại hết) | 0,533 | 0,465 | 0,30 — không câu nào kích hoạt; để tắt mặc định |
 
 Rerank tăng MRR (căn đúng lên cao hơn) nhưng mô hình 4B đôi khi loại cả ứng viên đúng; mục tiêu
 recall@5 ≥ 0,75 sẽ đo lại khi có `gpt-4.1-mini` (chỉ đổi biến môi trường).
