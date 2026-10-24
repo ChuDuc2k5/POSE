@@ -13,6 +13,9 @@ import { createCampaignDatabase } from './campaign-test-db.mjs';
 const db=await createCampaignDatabase();
 const fixture=await readFile(new URL('../../supabase/test-campaign-management.sql',import.meta.url),'utf8');
 await db.exec(fixture.split('-- Fixtures begin (also used by the isolated HTTP test gateway).')[1].split('-- Fixtures end.')[0]);
+await db.exec("update public.customers set auth_user_id='f7100000-0000-4000-8000-000000000003' where id='f7300000-0000-4000-8000-000000000003'; update public.customers set auth_user_id='f7100000-0000-4000-8000-000000000002' where id='f7300000-0000-4000-8000-000000000002';");
+await db.exec("insert into public.account_profiles(user_id,display_name) values ('f7100000-0000-4000-8000-000000000002','Fixture unverified'),('f7100000-0000-4000-8000-000000000003','Fixture user') on conflict (user_id) do nothing;");
+await db.exec(await readFile(new URL('../../supabase/campaign-audience.sql',import.meta.url),'utf8'));
 const id=(prefix,n=1)=>`f7${prefix}0000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const adminId=id('10'),publishedId=id('80'),productId=id('60');
 const origin='http://localhost:3400',base='/api/admin/campaigns',cron='m07-cron-secret-with-at-least-32-characters';
@@ -20,29 +23,30 @@ let chain=Promise.resolve(),offline=false,tickNow=null,previewId='';
 const previewOnly=process.argv.includes('--preview-only');
 const previewReadyId='f7900000-0000-4000-8000-000000000002';
 const waitPreview=()=>new Promise(resolve=>{process.once('SIGINT',resolve);process.once('SIGTERM',resolve);process.once('message',resolve);});
-function transaction(role,fn){const task=chain.then(async()=>{await db.exec('begin');try{await db.exec(`set local role ${role==='System' ? 'service_role':role==='Guest' ? 'anon':'authenticated'}`);const n=role==='Admin' ? 1:role==='Sales' ? 2:3;await db.query("select set_config('request.jwt.claims',$1,true)",[JSON.stringify(role==='System' ? {role:'service_role'}:role==='Guest' ? {}:{sub:id('10',n),session_id:id('20',n),role:'authenticated'})]);const value=await fn();await db.exec('commit');return value;}catch(e){await db.exec('rollback');throw e;}});chain=task.catch(()=>{});return task;}
+function transaction(role,fn,token=''){const task=chain.then(async()=>{await db.exec('begin');try{await db.exec(`set local role ${role==='System' ? 'service_role':role==='Guest' ? 'anon':'authenticated'}`);const n=token==='fixture-unverified' ? 2:role==='Admin' ? 1:role==='Sales' ? 2:3;await db.query("select set_config('request.jwt.claims',$1,true)",[JSON.stringify(role==='System' ? {role:'service_role'}:role==='Guest' ? {}:{sub:id('10',n),session_id:id('20',n),role:'authenticated'})]);const value=await fn();await db.exec('commit');return value;}catch(e){await db.exec('rollback');throw e;}});chain=task.catch(()=>{});return task;}
 const quote=x=>`"${String(x).replaceAll('"','""')}"`;
 const provider=createServer(async(req,res)=>{
  try {
-  const url=new URL(req.url,'http://localhost'),token=req.headers.authorization?.replace('Bearer ',''),role=token==='fixture-service' ? 'System':token==='fixture-admin' ? 'Admin':token==='fixture-sales' ? 'Sales':token==='fixture-user' ? 'User':'Guest';
+  const url=new URL(req.url,'http://localhost'),token=req.headers.authorization?.replace('Bearer ',''),role=token==='fixture-service' ? 'System':token==='fixture-admin' ? 'Admin':token==='fixture-sales' ? 'Sales':token==='fixture-user'||token==='fixture-unverified' ? 'User':'Guest';
   const reply=(status,body)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(body));};
   if(offline)return reply(503,{message:'Unavailable'});
   if(url.pathname==='/fixture' && (previewOnly || process.argv.includes('--preview'))){res.writeHead(302,{'Set-Cookie':'pose-access=fixture-admin; Path=/; HttpOnly; SameSite=Lax',Location:`${origin}/admin/campaigns${url.searchParams.has('detail') ? '/'+(url.searchParams.has('ready') ? previewReadyId:previewId):''}${url.searchParams.has('tab') ? '?tab='+Number(url.searchParams.get('tab')):''}`});res.end();return;}
-  if(url.pathname.endsWith('/user')){const n=role==='Admin' ? 1:role==='Sales' ? 2:3;return role==='Guest' ? reply(401,{msg:'Invalid token'}):reply(200,{id:id('10',n),aud:'authenticated',role:'authenticated',email:`m07-${n}@example.test`,email_confirmed_at:new Date().toISOString(),app_metadata:{role},user_metadata:{role:'Admin'}});}
+  if(url.pathname==='/fixture-account' && previewOnly){res.writeHead(302,{'Set-Cookie':'pose-access=fixture-unverified; Path=/; HttpOnly; SameSite=Lax',Location:`${origin}/account#lien-he`});res.end();return;}
+  if(url.pathname.endsWith('/user')){const n=role==='Admin' ? 1:role==='Sales' ? 2:token==='fixture-unverified' ? 2:3;return role==='Guest' ? reply(401,{msg:'Invalid token'}):reply(200,{id:id('10',n),aud:'authenticated',role:'authenticated',email:`m07-${n}@example.test`,email_confirmed_at:new Date().toISOString(),app_metadata:{role},user_metadata:{role:'Admin'}});}
   const chunks=[];for await(const chunk of req)chunks.push(chunk);const input=chunks.length ? JSON.parse(Buffer.concat(chunks).toString()):{};
   if(url.pathname.includes('/rpc/')){
    const name=url.pathname.split('/').at(-1);
    if(!/^pose_[a-z_]+$/.test(name))return reply(404,{});
    if(name==='pose_system_campaign_tick' && tickNow)input.p_now=tickNow;
-   const result=await transaction(role,()=>db.query(`select public.${quote(name)}(${Object.keys(input).map((k,i)=>`${quote(k)} => $${i+1}`).join(',')}) as result`,Object.values(input).map(x=>x!==null && typeof x==='object' ? JSON.stringify(x):x)));
+   const result=await transaction(role,()=>db.query(`select public.${quote(name)}(${Object.keys(input).map((k,i)=>`${quote(k)} => $${i+1}`).join(',')}) as result`,Object.values(input).map(x=>x!==null && typeof x==='object' ? JSON.stringify(x):x)),token);
    return reply(200,result.rows[0].result);
   }
   if(url.pathname.startsWith('/rest/v1/')){
    const table=url.pathname.split('/').at(-1);
-   if(!['campaigns','call_scripts','call_script_versions','property_products','property_projects','property_subdivisions'].includes(table))return reply(404,{});
+   if(!['campaigns','call_scripts','call_script_versions','property_products','property_projects','property_subdivisions','account_history'].includes(table))return reply(404,{});
    const values=[],where=[];
    for(const [key,value] of url.searchParams){if(['select','order','offset','limit'].includes(key))continue;const p=value.indexOf('.'),op=value.slice(0,p),v=value.slice(p+1);if(!['eq','ilike'].includes(op))throw Error('Unsupported fake filter');values.push(v);where.push(`${quote(key)} ${op==='eq' ? '=':'ilike'} $${values.length}`);}
-   const result=await transaction(role,()=>db.query(`select * from public.${quote(table)}${where.length ? ' where '+where.join(' and '):''}${url.searchParams.get('order') ? ' order by '+url.searchParams.get('order').split(',').map(x=>{const [key,dir]=x.split('.');return `${quote(key)} ${dir==='desc' ? 'desc':'asc'}`;}).join(','):''}`,values));
+   const result=await transaction(role,()=>db.query(`select * from public.${quote(table)}${where.length ? ' where '+where.join(' and '):''}${url.searchParams.get('order') ? ' order by '+url.searchParams.get('order').split(',').map(x=>{const [key,dir]=x.split('.');return `${quote(key)} ${dir==='desc' ? 'desc':'asc'}`;}).join(','):''}`,values),token);
    const offset=Number(url.searchParams.get('offset') || req.headers['range']?.split('-')[0] || 0),limit=Number(url.searchParams.get('limit') || (req.headers.range ? Number(req.headers.range.split('-')[1])-offset+1:10000));
    res.setHeader('content-range',`${offset}-${Math.max(offset,offset+limit-1)}/${result.rows.length}`);
    const rows=result.rows.slice(offset,offset+limit);
@@ -57,6 +61,8 @@ for(const key of ['TELEPHONY_PROVIDER','TELEPHONY_API_URL','TELEPHONY_API_KEY','
 let app,stack,output='';
 async function start(configured=true){await stack?.close();output='';const env={...appEnv,...(configured ? {}:{TELEPHONY_API_KEY:''})};stack=await startStack(3400,env,{build:false,backendPort:3403});app=stack.app;app.stdout.on('data',x=>output+=x);app.stderr.on('data',x=>output+=x);for(let i=0;i<80;i++){try{const r=await fetch(`${origin}/api/admin/campaigns`,{headers:{Cookie:'pose-access=fixture-admin'}});if(r.ok)return;}catch{}await delay(250);}throw Error(output);}
 const call=(path='',method='GET',body,cookie='pose-access=fixture-admin',requestOrigin=origin)=>fetch(`${origin}${base}${path}`,{method,headers:{...(cookie ? {Cookie:cookie}:{}),...(method!=='GET' ? {Origin:requestOrigin,'Content-Type':'application/json'}:{})},...(body!==undefined ? {body:JSON.stringify(body)}:{})});
+const accountCall=(method='GET',body,cookie='pose-access=fixture-user',requestOrigin=origin)=>fetch(`${origin}/api/account/contact-consents`,{method,headers:{Cookie:cookie,...(method!=='GET'?{Origin:requestOrigin,'Content-Type':'application/json'}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});
+const viewCall=(property,cookie)=>fetch(`${origin}/api/catalog/properties/${property}/view`,{method:'POST',headers:{...(cookie?{Cookie:cookie}:{}),Origin:origin}});
 const tick=()=>fetch(`${origin}/api/system/campaigns/tick`,{method:'POST',headers:{Authorization:`Bearer ${cron}`}});
 let checks=0;
 const check=(value,message)=>{assert.ok(value,message);checks++;};
@@ -86,13 +92,31 @@ try {
  check((await call('','POST',{...config,script_version_id:id('80',2)})).status===400,'Published only script');
  let c=await item(await call('','POST',config),201);
  check(c.status==='DRAFT' && c.timezone==='Asia/Ho_Chi_Minh','create defaults');
+ await db.query("insert into campaign_customers(campaign_id,customer_id,lead_id,phone_e164,status) values($1,$2,$3,'+84901230003','PENDING')",[c.id,id('30',3),id('40',3)]);
+ const pending=(await db.query("insert into call_jobs(campaign_id,membership_id,attempt_no,scheduled_at,idempotency_key) select campaign_id,id,1,now(),'contact-off:'||id from campaign_customers where campaign_id=$1 returning id",[c.id])).rows[0];
+ check((await accountCall()).status===200,'contact consent own account');
+ check((await accountCall('POST',{purpose:'Call',granted:false,text:'M07 test'} ,'pose-access=fixture-user','https://other.test')).status===403,'contact consent origin enforced');
+ const unverified=await accountCall('POST',{purpose:'Call',granted:false},'pose-access=fixture-unverified'); check([400,401,403].includes(unverified.status),'unverified contact consent disabled/denied');
+ check((await accountCall('POST',{purpose:'Call',granted:false})).status===200,'contact Call off accepted');
+ check(await scalar("select status from call_jobs where id=$1",[pending.id])==='Cancelled','Call off cancels pending job');
+ check(await scalar("select count(*)::integer from contact_suppressions where phone_e164='+84901230003' and source='Customer'")===1,'contact suppression belongs to own account');
+ check((await viewCall(productId,null)).status===401,'property view requires sign-in');
+ const firstView=await viewCall(productId,'pose-access=fixture-user');const secondView=await viewCall(productId,'pose-access=fixture-user');const secondViewBody=await secondView.clone().json();
+ check(firstView.status===200&&secondView.status===200&&secondViewBody.recorded===false,'property view writer is daily idempotent');
+ check((await viewCall(productId,'pose-access=fixture-unverified')).status===403,'property view rejects non-customer role');
  check((await call(`/${c.id}`)).headers.get('cache-control')==='no-store','no-store');
  check((await call(`/${c.id}`,'PATCH',{name:'Stale',version:99})).status===409,'version conflict');
  let preview=await item(await call(`/${c.id}/audience-preview`,'POST',{filter:{}}));
+ const matchPreview=await item(await call(`/${c.id}/audience-preview`,'POST',{filter:{match_campaign_products:true,min_match:40}}));
+ check(Number.isInteger(matchPreview.matched)&&matchPreview.excluded&&matchPreview.sample.every(x=>Array.isArray(x.reasons)),'match preview counts and reasons');
+ check(matchPreview.sample.every((x,i,a)=>i===0||x.match_score<=a[i-1].match_score),'match preview ordering');
+ const badFilter=await call(`/${c.id}/audience-preview`,'POST',{filter:{not_a_filter:true}});check(badFilter.status===400&&(await badFilter.json()).code==='INVALID_FILTER','match preview rejects invalid filter key');
  check(preview.total===12 && preview.eligible===4,'preview counts');
  check(preview.deferred.DAILY_CAP===1 && preview.deferred.WEEKLY_CAP===1 && preview.skipped.LEAD_CLOSED===2,'temporary caps separated from exclusions');
  check(preview.sample.length<=20 && !JSON.stringify(preview.sample).includes('+849'),'masked sample');
  check((await call(`/${c.id}/audience-preview`,'POST',{filter:{lead_ids:Array(501).fill(id('40'))}})).status===400,'500 lead limit');
+ c=await audience(c,{match_campaign_products:true,min_match:0});
+ check(await scalar("select count(*)::integer from campaign_customers where campaign_id=$1 and snapshot ? 'match' and priority=(snapshot->'match'->>'score')::integer",[c.id])===12,'set audience freezes match snapshot and priority');
  c=await audience(c);c=await audience(c);
  await db.query("update campaign_customers set added_at=now()+right(phone_e164,4)::integer*interval '1 second' where campaign_id=$1 and phone_e164 is not null",[c.id]);
  check(await scalar('select count(*)::integer from campaign_customers where campaign_id=$1',[c.id])===12,'idempotent audience');

@@ -11,6 +11,7 @@ import * as media from './catalog-media-id.handlers.js';
 import * as adminCatalog from './admin-catalog-kind.handlers.js';
 import * as adminItem from './admin-catalog-kind-id.handlers.js';
 import * as upload from './admin-catalog-properties-id-media.handlers.js';
+import * as propertyView from './catalog-property-view.handlers.js';
 
 // Handlers enforce session, role and origin checks to preserve existing error responses.
 @Controller()
@@ -27,6 +28,9 @@ export class CatalogController {
   @Get('catalog/properties/:id')
   @Public()
   readProperty(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, property.GET); }
+  @Post('catalog/properties/:id/view')
+  @Public()
+  recordPropertyView(@Req() request: Request, @Res() response: Response) { return dispatch<{id:string}>(request, response, propertyView.POST); }
   @Get('properties/:id/similar')
   @Public()
   similarProperties(@Req() request: Request, @Res() response: Response) { return dispatch<{id:string}>(request, response, similar.GET); }

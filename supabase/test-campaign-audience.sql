@@ -4,6 +4,10 @@ insert into auth.users(id,aud,role,email,email_confirmed_at,raw_app_meta_data,cr
 values('fa100000-0000-4000-8000-000000000001','authenticated','authenticated','audience@example.test',now(),'{"role":"Admin"}',now(),now());
 insert into auth.sessions(id,user_id,created_at,updated_at) values('fa200000-0000-4000-8000-000000000001','fa100000-0000-4000-8000-000000000001',now(),now());
 insert into public.customers(id,full_name,phone,auth_user_id,phone_verified_at) values('fa300000-0000-4000-8000-000000000001','Audience customer','+84987654321','fa100000-0000-4000-8000-000000000001',now());
+insert into auth.users(id,aud,role,email,email_confirmed_at,raw_app_meta_data,created_at,updated_at)
+values('fa100000-0000-4000-8000-000000000002','authenticated','authenticated','audience-user@example.test',now(),'{"role":"User"}',now(),now());
+insert into auth.sessions(id,user_id,created_at,updated_at) values('fa200000-0000-4000-8000-000000000002','fa100000-0000-4000-8000-000000000002',now(),now());
+insert into public.customers(id,full_name,phone,auth_user_id,phone_verified_at) values('fa300000-0000-4000-8000-000000000002','Audience view customer','+84987654322','fa100000-0000-4000-8000-000000000002',now());
 insert into public.leads(id,customer_id,source,needs) values('fa400000-0000-4000-8000-000000000001','fa300000-0000-4000-8000-000000000001','Manual','{"locations":{"value":["Thu Duc"],"confirmed_by":"sales"}}');
 insert into public.contact_consents(phone_e164,customer_id,lead_id,purpose,status,channel,source,evidence,policy_version) values
  ('+84987654321','fa300000-0000-4000-8000-000000000001','fa400000-0000-4000-8000-000000000001','Call','Granted','Web','Test','Audience test consent','v1'),
@@ -19,15 +23,26 @@ do $$ declare c jsonb; p jsonb; begin
   perform set_config('audience.priority_campaign',c->>'id',true);
 end $$;
 set local role service_role;
-select set_config('request.jwt.claims','{"role":"service_role"}',true);
-do $$ declare cid uuid:=current_setting('audience.priority_campaign')::uuid; first_id uuid:='fa300000-0000-4000-8000-000000000001'; second_id uuid:='fa300000-0000-4000-8000-000000000002'; first_lead uuid:='fa400000-0000-4000-8000-000000000001'; second_lead uuid:='fa400000-0000-4000-8000-000000000002'; job_customer uuid;
+insert into public.property_projects(id,code,name,location) values('fa500000-0000-4000-8000-000000000001','AUD-P','Audience project','Thu Duc');
+insert into public.property_products(id,project_id,code,name,location,description,property_type,area,publication) values('fa600000-0000-4000-8000-000000000001','fa500000-0000-4000-8000-000000000001','AUD-1','Audience home','Thu Duc','Audience property view test listing','Apartment',70,'Published');
+set local role authenticated;
+select set_config('request.jwt.claims','{"sub":"fa100000-0000-4000-8000-000000000002","session_id":"fa200000-0000-4000-8000-000000000002","role":"authenticated"}',true);
+do $$ declare first_view jsonb; second_view jsonb;
 begin
- insert into public.customers(id,full_name,phone,phone_verified_at) values(second_id,'Priority customer','+84987654322',now());
+ first_view:=public.pose_record_property_view('fa600000-0000-4000-8000-000000000001');
+ second_view:=public.pose_record_property_view('fa600000-0000-4000-8000-000000000001');
+ if first_view->>'recorded' <> 'true' or second_view->>'recorded' <> 'false' then raise exception 'VIEW_NOT_DAILY_DEDUPED'; end if;
+end $$;
+set local role service_role;
+select set_config('request.jwt.claims','{"role":"service_role"}',true);
+do $$ declare cid uuid:=current_setting('audience.priority_campaign')::uuid; first_id uuid:='fa300000-0000-4000-8000-000000000001'; second_id uuid:='fa300000-0000-4000-8000-000000000003'; first_lead uuid:='fa400000-0000-4000-8000-000000000001'; second_lead uuid:='fa400000-0000-4000-8000-000000000003'; job_customer uuid;
+begin
+ insert into public.customers(id,full_name,phone,phone_verified_at) values(second_id,'Priority customer','+84987654323',now());
  insert into public.leads(id,customer_id,source,needs) values(second_lead,second_id,'Manual','{}');
- insert into public.contact_consents(phone_e164,customer_id,lead_id,purpose,status,channel,source,evidence,policy_version) values('+84987654322',second_id,second_lead,'Call','Granted','Web','Test','Priority test','v1'),('+84987654322',second_id,second_lead,'AIVoice','Granted','Web','Test','Priority test','v1');
+ insert into public.contact_consents(phone_e164,customer_id,lead_id,purpose,status,channel,source,evidence,policy_version) values('+84987654323',second_id,second_lead,'Call','Granted','Web','Test','Priority test','v1'),('+84987654323',second_id,second_lead,'AIVoice','Granted','Web','Test','Priority test','v1');
  update public.campaigns set status='RUNNING',weekdays='{3}',window_start='00:00',window_end='23:59',daily_call_limit=1,budget_limit_vnd=1000,cost_reserve_per_call_vnd=100 where id=cid;
  update public.campaign_customers set priority=10,status='PENDING',next_attempt_at=null where campaign_id=cid and customer_id=first_id;
- insert into public.campaign_customers(campaign_id,customer_id,lead_id,phone_e164,snapshot,status,priority) values(cid,second_id,second_lead,'+84987654322','{}','PENDING',90);
+ insert into public.campaign_customers(campaign_id,customer_id,lead_id,phone_e164,snapshot,status,priority) values(cid,second_id,second_lead,'+84987654323','{}','PENDING',90);
  perform public.pose_system_campaign_tick('2026-10-14 03:00Z');
  select m.customer_id into job_customer from public.call_jobs j join public.campaign_customers m on m.id=j.membership_id where j.campaign_id=cid order by j.id limit 1;
  if job_customer is distinct from second_id then raise exception 'PRIORITY_ORDER_FAILED'; end if;

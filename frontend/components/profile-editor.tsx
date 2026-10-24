@@ -9,7 +9,7 @@ import { LogoutButton } from './logout-button';
 import { roleHome, roleLabels, type Role } from '@/lib/roles';
 import { validateProfile } from '@/lib/profile-validation';
 import type { Profile } from '@/lib/profile';
-import { ContactSettings } from './contact-settings-v2';
+import { ContactSettings } from './contact-settings';
 
 type User = { name: string; email: string; role: Role };
 type History = { id: string; action: string; changed_fields: string[]; created_at: string };

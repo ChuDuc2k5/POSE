@@ -8,27 +8,20 @@ create unique index if not exists contact_consents_source_ref_idx
 alter table public.campaign_customers add column if not exists priority integer not null default 0;
 create index if not exists campaign_customers_priority_idx on public.campaign_customers(campaign_id,priority desc,id);
 
--- The base discovery module names favorites customer_property_favorites. These
--- small activity tables keep the scorer compatible with deployments that also
--- record views/favorites as first-class events.
+-- The base discovery module names favorites customer_property_favorites. Views
+-- are recorded here by the signed-in property-detail writer.
 create table if not exists public.property_views (
   id uuid primary key default extensions.gen_random_uuid(),
   customer_id uuid references public.customers(id) on delete cascade,
   user_id uuid references auth.users(id) on delete cascade,
   property_id uuid not null references public.property_products(id) on delete cascade,
+  viewed_on date not null default current_date,
   created_at timestamptz not null default now(),
   check (customer_id is not null or user_id is not null)
 );
+alter table public.property_views add column if not exists viewed_on date;
 create index if not exists property_views_match_idx on public.property_views(property_id,created_at desc);
-create table if not exists public.property_favorites (
-  id uuid primary key default extensions.gen_random_uuid(),
-  customer_id uuid references public.customers(id) on delete cascade,
-  user_id uuid references auth.users(id) on delete cascade,
-  property_id uuid not null references public.property_products(id) on delete cascade,
-  created_at timestamptz not null default now(),
-  check (customer_id is not null or user_id is not null)
-);
-create index if not exists property_favorites_match_idx on public.property_favorites(property_id,created_at desc);
+create unique index if not exists property_views_daily_idx on public.property_views(user_id,property_id,viewed_on) where user_id is not null and viewed_on is not null;
 
 create or replace function pose_private.inquiry_consent_bridge() returns trigger
 language plpgsql security definer set search_path='' as $$
@@ -103,7 +96,6 @@ begin
     return jsonb_build_object('rule_version','MATCH.v1','score',0,'excluded','TRANSACTION_MISMATCH','breakdown',jsonb_build_object('budget',b,'area_type',a,'direct_interest',0,'recency',0),'unknown',to_jsonb(unknown),'reasons',to_jsonb(reasons));
   end if;
   has_interest:=exists(select 1 from public.customer_property_favorites f where f.user_id=c.auth_user_id and f.property_id=any(coalesce(camp.property_ids,'{}'::uuid[])))
-    or exists(select 1 from public.property_favorites f where (f.customer_id=c.id or f.user_id=c.auth_user_id) and f.property_id=any(coalesce(camp.property_ids,'{}'::uuid[])))
     or exists(select 1 from public.property_views f where (f.customer_id=c.id or f.user_id=c.auth_user_id) and f.property_id=any(coalesce(camp.property_ids,'{}'::uuid[])))
     or exists(select 1 from public.property_inquiries i where i.customer_id=c.id and i.property_id=any(coalesce(camp.property_ids,'{}'::uuid[])))
     or exists(select 1 from unnest(pose_private.ai_interest_ids(l.id)) x where x=any(coalesce(camp.property_ids,'{}'::uuid[])));
@@ -194,6 +186,7 @@ begin
  values(cust.phone,cust.id,p_purpose,case when p_granted then 'Granted' else 'Withdrawn' end,'Web','Contact settings',btrim(coalesce(p_text,''))||' | '||now_value::text,'CONTACT_POLICY_VERSION',uid) returning * into c;
  if not p_granted and p_purpose in ('Call','AIVoice') then
    insert into public.contact_suppressions(phone_e164,reason,source,actor_id) values(cust.phone,'Customer withdrew consent for '||p_purpose,'Customer',uid) on conflict do nothing;
+   if p_purpose='Call' then update public.call_jobs set status='Cancelled',cancel_reason='CONSENT_WITHDRAWN',updated_at=now_value where membership_id in (select id from public.campaign_customers where phone_e164=cust.phone) and status in ('Pending','Claimed'); end if;
  elsif p_granted and p_purpose='Call' then
    update public.contact_suppressions set lifted_at=now_value,lifted_by=uid,lift_consent_id=c.id where phone_e164=cust.phone and lifted_at is null and source='Customer';
  end if;
@@ -253,4 +246,26 @@ begin
 end $$;
 revoke all on function pose_private.call_context(uuid) from public,anon,authenticated;
 grant execute on function pose_private.call_context(uuid) to service_role;
+create or replace function pose_private.record_property_view(p_property uuid) returns jsonb language plpgsql security definer set search_path='' as $$
+declare actor uuid:=pose_private.require_customer(); customer uuid; seen integer; now_day date:=current_date; already boolean;
+begin
+ if p_property is null or not exists(select 1 from public.property_public_catalog where id=p_property) then raise exception 'NOT_FOUND' using errcode='P0002'; end if;
+ select id into customer from public.customers where auth_user_id=actor limit 1;
+ if customer is null then raise exception 'CUSTOMER_REQUIRED' using errcode='42501'; end if;
+ select count(*) into seen from public.property_views where user_id=actor and created_at>=now()-interval '1 day';
+ if seen>=100 then raise exception 'VIEW_RATE_LIMIT' using errcode='22023'; end if;
+ select exists(select 1 from public.property_views v where v.user_id=actor and v.property_id=p_property and v.viewed_on=now_day) into already;
+ if already then return jsonb_build_object('property_id',p_property,'recorded',false,'viewed_on',now_day); end if;
+ begin
+  insert into public.property_views(customer_id,user_id,property_id,viewed_on,created_at) values(customer,actor,p_property,now_day,now());
+ exception when unique_violation then
+  return jsonb_build_object('property_id',p_property,'recorded',false,'viewed_on',now_day);
+ end;
+ return jsonb_build_object('property_id',p_property,'recorded',true,'viewed_on',now_day);
+end $$;
+revoke all on function pose_private.record_property_view(uuid) from public,anon,authenticated;
+grant execute on function pose_private.record_property_view(uuid) to authenticated;
+create or replace function public.pose_record_property_view(p_property uuid) returns jsonb language sql security invoker set search_path='' as $$ select pose_private.record_property_view(p_property); $$;
+revoke all on function public.pose_record_property_view(uuid) from public,anon;
+grant execute on function public.pose_record_property_view(uuid) to authenticated;
 commit;

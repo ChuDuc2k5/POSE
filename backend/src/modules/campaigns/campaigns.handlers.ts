@@ -75,6 +75,7 @@ export async function campaignRoute(request:NextRequest,path:string[]=[],schedul
   if(uuidPattern.test(path[0]) && path.length===2){
    if(path[1]==='audience-preview' || path[1]==='audience'){
     const errors:Record<string,string>=filterErrors(i.filter);
+    if(errors.filter)return catalogError('INVALID_FILTER',errors.filter,400,errors);
     if(!only(path[1]==='audience' ? ['version','filter','reason']:['filter']))errors.input='Trường không hợp lệ.';
     if(path[1]==='audience' && (!Number.isSafeInteger(i.version) || Number(i.version)<0 || i.reason!==undefined && (typeof i.reason!=='string' || i.reason.length>1000)))errors.version='Phiên bản hoặc lý do không hợp lệ.';
     if(Object.keys(errors).length)return invalid(errors);
