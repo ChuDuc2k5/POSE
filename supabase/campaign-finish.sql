@@ -9,13 +9,13 @@ alter table public.campaigns add constraint campaigns_provider_failure_count_non
 
 alter function pose_private.save_campaign(uuid,integer,jsonb,text) rename to save_campaign_m07_base;
 create function pose_private.save_campaign(p_id uuid,p_version integer,p_data jsonb,p_reason text) returns jsonb language plpgsql security definer set search_path='' as $$
-declare actor uuid:=pose_private.campaign_admin(); result jsonb; cid uuid; requested uuid;
+declare actor uuid:=pose_private.campaign_admin(); result jsonb; cid uuid; requested uuid; saved public.campaigns;
 begin
  requested:=case when p_data ? 'owner_id' and p_data->>'owner_id' is not null then (p_data->>'owner_id')::uuid else null end;
  if requested is not null and not exists(select 1 from public.users u where u.auth_user_id=requested and u.role in ('Admin','Sales') and u.account_status='active') then raise exception 'INVALID_OWNER' using errcode='22023'; end if;
- result:=pose_private.save_campaign(p_id,p_version,p_data-'owner_id',p_reason); cid:=(result->>'id')::uuid;
- update public.campaigns set owner_id=coalesce(requested,owner_id,created_by),updated_at=now() where id=cid returning * into result;
- return to_jsonb(result);
+ result:=pose_private.save_campaign_m07_base(p_id,p_version,p_data-'owner_id',p_reason); cid:=(result->>'id')::uuid;
+ update public.campaigns set owner_id=coalesce(requested,owner_id,created_by),updated_at=now() where id=cid returning * into saved;
+ return to_jsonb(saved);
 end $$;
 
 -- Keep the pause admission fix local to this delta: the M08 function is renamed
@@ -90,7 +90,7 @@ begin
  perform pose_private.campaign_admin();
  if p_page<1 or p_page_size not between 1 and 100 then raise exception 'INVALID_INPUT' using errcode='22023'; end if;
  select count(*) into total from public.campaign_customers where campaign_id=p_campaign and (p_status is null or status=p_status);
- select coalesce(jsonb_agg(jsonb_build_object('id',m.id,'lead_id',m.lead_id,'lead',coalesce(c.full_name,''),'phone','+'||repeat('•',greatest(0,length(m.phone_e164)-8))||right(m.phone_e164,4),'status',m.status,'reason',m.skip_reason,'attempts',m.retry_count,'last_call',lc.status,'last_outcome',lc.end_reason,'duration',lc.duration_seconds,'cost',coalesce(lc.cost_actual,lc.cost_estimated_vnd,0),'match_score',m.priority,'script_version',lc.script_version_id) order by m.added_at,m.id),'[]') into rows
+ select coalesce(jsonb_agg(jsonb_build_object('id',m.id,'lead_id',m.lead_id,'lead',coalesce(c.full_name,''),'phone',left(m.phone_e164,3)||repeat('•',greatest(0,length(m.phone_e164)-7))||right(m.phone_e164,4),'status',m.status,'reason',m.skip_reason,'attempts',m.retry_count,'last_call',lc.status,'last_outcome',lc.end_reason,'duration',lc.duration_seconds,'cost',coalesce(lc.cost_actual,lc.cost_estimated_vnd,0),'match_score',m.priority,'script_version',lc.script_version_id) order by m.added_at,m.id),'[]') into rows
  from public.campaign_customers m join public.customers c on c.id=m.customer_id left join lateral (select x.* from public.calls x where x.membership_id=m.id order by x.created_at desc limit 1) lc on true where m.campaign_id=p_campaign and (p_status is null or m.status=p_status) offset (p_page-1)*p_page_size limit p_page_size;
  return jsonb_build_object('items',rows,'total',total,'page',p_page,'page_size',p_page_size);
 end $$;
@@ -99,7 +99,7 @@ create function pose_private.campaign_report(p_campaign uuid) returns jsonb lang
 declare rows jsonb; summary jsonb;
 begin
  perform pose_private.campaign_admin();
- select coalesce(jsonb_agg(jsonb_build_object('lead_id',m.lead_id,'phone','+'||repeat('•',greatest(0,length(m.phone_e164)-8))||right(m.phone_e164,4),'match_score',m.priority,'final_status',m.status,'reason',m.skip_reason,'attempts',m.retry_count,'last_call_status',lc.status,'last_call_outcome',lc.end_reason,'duration',lc.duration_seconds,'cost_vnd',coalesce(lc.cost_actual,lc.cost_estimated_vnd,0),'script_version',lc.script_version_id) order by m.id),'[]') into rows from public.campaign_customers m left join lateral (select x.* from public.calls x where x.membership_id=m.id order by x.created_at desc limit 1) lc on true where m.campaign_id=p_campaign;
+ select coalesce(jsonb_agg(jsonb_build_object('lead_id',m.lead_id,'phone',left(m.phone_e164,3)||repeat('•',greatest(0,length(m.phone_e164)-7))||right(m.phone_e164,4),'match_score',m.priority,'final_status',m.status,'reason',m.skip_reason,'attempts',m.retry_count,'last_call_status',lc.status,'last_call_outcome',lc.end_reason,'duration',lc.duration_seconds,'cost_vnd',coalesce(lc.cost_actual,lc.cost_estimated_vnd,0),'script_version',lc.script_version_id) order by m.id),'[]') into rows from public.campaign_customers m left join lateral (select x.* from public.calls x where x.membership_id=m.id order by x.created_at desc limit 1) lc on true where m.campaign_id=p_campaign;
  select jsonb_build_object('total',count(*),'waiting',count(*) filter(where status in ('PENDING','QUEUED','RETRYING')),'calling',count(*) filter(where status='IN_PROGRESS'),'finished',count(*) filter(where status in ('COMPLETED','SKIPPED','OPTED_OUT','FAILED','EXHAUSTED','CANCELLED')),'calls',(select count(*) from public.calls where campaign_id=p_campaign),'connected',(select count(*) from public.calls where campaign_id=p_campaign and answered_at is not null),'cost_vnd',(select coalesce(sum(coalesce(cost_actual,cost_estimated_vnd,0)),0) from public.calls where campaign_id=p_campaign)) into summary from public.campaign_customers where campaign_id=p_campaign;
  return jsonb_build_object('summary',summary,'rows',rows);
 end $$;
@@ -132,4 +132,15 @@ create function public.pose_remove_campaign_member(p_campaign uuid,p_membership 
 revoke all on function pose_private.campaign_members(uuid,text,integer,integer),pose_private.campaign_report(uuid),pose_private.remove_campaign_member(uuid,uuid),public.pose_campaign_members(uuid,text,integer,integer),public.pose_campaign_report(uuid),public.pose_remove_campaign_member(uuid,uuid),public.pose_record_provider_failure(uuid,text) from public,anon;
 grant execute on function pose_private.campaign_members(uuid,text,integer,integer),pose_private.campaign_report(uuid),pose_private.remove_campaign_member(uuid,uuid),public.pose_campaign_members(uuid,text,integer,integer),public.pose_campaign_report(uuid),public.pose_remove_campaign_member(uuid,uuid) to authenticated;
 grant execute on function public.pose_record_provider_failure(uuid,text) to service_role;
+-- Replaced functions get the same privileges as the originals (new functions default to PUBLIC execute).
+revoke all on function pose_private.save_campaign(uuid,integer,jsonb,text) from public,anon,authenticated;
+grant execute on function pose_private.save_campaign(uuid,integer,jsonb,text) to authenticated;
+revoke all on function pose_private.claim_call_job(text,integer,timestamptz,integer) from public,anon,authenticated;
+grant execute on function pose_private.claim_call_job(text,integer,timestamptz,integer) to service_role;
+revoke all on function pose_private.campaign_complete(uuid) from public,anon,authenticated;
+revoke all on function pose_private.campaign_progress(uuid) from public,anon,authenticated;
+grant execute on function pose_private.campaign_progress(uuid) to authenticated;
+revoke all on function pose_private.save_campaign_m07_base(uuid,integer,jsonb,text),pose_private.claim_call_job_m07_base(text,integer,timestamptz,integer),pose_private.campaign_complete_m07_base(uuid),pose_private.campaign_progress_m07_base(uuid) from public,anon,authenticated;
+revoke all on function pose_private.record_provider_failure(uuid,text),public.pose_record_provider_failure(uuid,text) from public,anon,authenticated;
+grant execute on function pose_private.record_provider_failure(uuid,text),public.pose_record_provider_failure(uuid,text) to service_role;
 commit;

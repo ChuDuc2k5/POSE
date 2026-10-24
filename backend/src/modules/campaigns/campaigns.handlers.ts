@@ -21,6 +21,11 @@ export async function campaignRoute(request:NextRequest,path:string[]=[],schedul
   const rpc=async(name:string,args:Record<string,unknown>,status=200)=>{const r=await client.rpc(name,args);return r.error ? campaignDatabaseError(r.error):catalogJson({item:r.data},status);};
   if(!mutate){
    if(path.length===1 && path[0]==='scheduler' && scheduler)return catalogJson(scheduler());
+   if(path.length===1 && path[0]==='owners'){
+    // Campaign owners: active Admin/Sales accounts (readable by Admins through users_admin_read).
+    const r=await client.from('users').select('auth_user_id,full_name,email,role').in('role',['Admin','Sales']).eq('account_status','active').order('full_name');
+    return r.error ? campaignDatabaseError(r.error):catalogJson({items:(r.data||[]).filter(u=>u.auth_user_id).map(u=>({id:u.auth_user_id,name:u.full_name||u.email||'',role:u.role}))});
+   }
    if(!path.length){
     const search=request.nextUrl.searchParams.get('search') || '',page=Number(request.nextUrl.searchParams.get('page') || 1);
     if(search.length>160 || !Number.isSafeInteger(page) || page<1 || page>10000)return catalogError('INVALID_INPUT','Từ khóa hoặc trang không hợp lệ.',400);
@@ -49,7 +54,9 @@ export async function campaignRoute(request:NextRequest,path:string[]=[],schedul
     const value=report.data as {summary:Record<string,unknown>;rows:Array<Record<string,unknown>>};
     const headers=['lead_id','masked_phone','match_score','final_status','reason','attempts','last_call_status','last_call_outcome','duration','cost_vnd','script_version'];
     const csvRow=(row:Record<string,unknown>)=>headers.map(h=>{const key=h==='masked_phone'?'phone':h;return `"${String(row[key]??'').replaceAll('"','""')}"`;}).join(',');
-    const body=['# SUMMARY',JSON.stringify(value.summary),headers.join(','),...value.rows.map(csvRow)].join('\r\n');
+    const summaryLabels:Record<string,string>={total:'Tổng đối tượng',waiting:'Chờ gọi',calling:'Đang gọi',finished:'Đã kết thúc',calls:'Cuộc gọi',connected:'Đã kết nối',cost_vnd:'Chi phí (VND)'};
+    const summary=Object.entries(summaryLabels).map(([key,label])=>`"${label}","${String(value.summary[key]??0)}"`);
+    const body=[...summary,'',headers.join(','),...value.rows.map(csvRow)].join('\r\n');
     const code=path[0].slice(0,8),date=new Date().toISOString().slice(0,10).replaceAll('-','');
     return new Response(`\uFEFF${body}`,{status:200,headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':`attachment; filename="campaign-${code}-${date}.csv"`}});
    }

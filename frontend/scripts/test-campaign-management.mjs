@@ -15,8 +15,9 @@ const fixture=await readFile(new URL('../../supabase/test-campaign-management.sq
 await db.exec(fixture.split('-- Fixtures begin (also used by the isolated HTTP test gateway).')[1].split('-- Fixtures end.')[0]);
 await db.exec("update public.customers set auth_user_id='f7100000-0000-4000-8000-000000000003' where id='f7300000-0000-4000-8000-000000000003'; update public.customers set auth_user_id='f7100000-0000-4000-8000-000000000002' where id='f7300000-0000-4000-8000-000000000002';");
 await db.exec("insert into public.account_profiles(user_id,display_name) values ('f7100000-0000-4000-8000-000000000002','Fixture unverified'),('f7100000-0000-4000-8000-000000000003','Fixture user') on conflict (user_id) do nothing;");
-await db.exec(await readFile(new URL('../../supabase/campaign-audience.sql',import.meta.url),'utf8'));
+// Live order: automated-calling.sql was applied before campaign-audience.sql (which replaces call_context).
 await db.exec(await readFile(new URL('../../supabase/automated-calling.sql',import.meta.url),'utf8'));
+await db.exec(await readFile(new URL('../../supabase/campaign-audience.sql',import.meta.url),'utf8'));
 await db.exec(await readFile(new URL('../../supabase/campaign-finish.sql',import.meta.url),'utf8'));
 const id=(prefix,n=1)=>`f7${prefix}0000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const adminId=id('10'),publishedId=id('80'),productId=id('60');
@@ -90,7 +91,7 @@ try {
  check((await call('','POST',config,'pose-access=fixture-admin','https://other.test')).status===403,'origin enforced');
  check((await call('','POST',{...config,actor_id:adminId})).status===400,'field allowlist');
  for(const [key,value] of [['max_concurrent_calls',3],['max_call_seconds',29],['max_call_seconds',301],['max_attempts',4],['max_attempts',1.5],['retry_after_hours',23],['daily_call_limit',0],['budget_limit_vnd',0],['cost_reserve_per_call_vnd',-1],['timezone','Bad/Zone'],['weekdays',[7]],['start_time','2026-10-14T10:00']])check((await call('','POST',{...config,[key]:value})).status===400,`validation ${key}`);
- check((await call('','POST',{...config,property_ids:[id('60',2)]})).status===400,'Published only product');
+ {const r=await call('','POST',{...config,property_ids:[id('60',2)]});check(r.status===400,'Published only product');}
  check((await call('','POST',{...config,script_version_id:id('80',2)})).status===400,'Published only script');
  let c=await item(await call('','POST',config),201);
  check(c.status==='DRAFT' && c.timezone==='Asia/Ho_Chi_Minh','create defaults');
