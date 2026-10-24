@@ -4,8 +4,8 @@ import { SiteHeader } from '@/components/site-header';
 import { publicPageSession } from '@/lib/page-session';
 
 export const metadata: Metadata = {
-  title: 'TERAVA AI assistant | Find a property',
-  description: 'Chat with the TERAVA AI assistant to find a suitable property.',
+  title: 'Trợ lý AI TERAVA | Tìm bất động sản',
+  description: 'Trò chuyện với trợ lý AI TERAVA để tìm bất động sản phù hợp.',
 };
 
 export default async function AiChatPageRoute() {
