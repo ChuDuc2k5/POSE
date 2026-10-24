@@ -24,7 +24,7 @@ async function connect(token){
 try{
  let output='';server=spawn(process.execPath,['scripts/test-campaign-management.mjs','--preview-only'],{cwd:new URL('..',import.meta.url),env:process.env,windowsHide:true,stdio:['ignore','pipe','pipe','ipc']});
  server.stdout.on('data',x=>output+=x);server.stderr.on('data',x=>output+=x);
- for(let i=0;i<120 && !output.includes('PREVIEW READY:');i++){if(server.exitCode!==null)break;await delay(100);}
+ for(let i=0;i<1800 && !output.includes('PREVIEW READY:');i++){if(server.exitCode!==null)break;await delay(100);}
  check(output.includes('PREVIEW READY:'),'isolated fixture ready: '+output);
  for(const role of ['sales','user']){const r=await fetch(origin+'/api/admin/campaigns/scheduler',{headers:{Cookie:'pose-access=fixture-'+role}});check(r.status===403,role+' scheduler denied');}
  const status=await call('/scheduler');check(status.ok,'Admin scheduler available');

@@ -61,6 +61,10 @@ export class CampaignsScheduler implements OnModuleInit, OnApplicationShutdown {
       return result;
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : 'CAMPAIGN_UNAVAILABLE';
+      try {
+        const campaigns = await systemClient().from('campaigns').select('id').eq('status','RUNNING');
+        for (const campaign of campaigns.data || []) await systemClient().rpc('pose_record_provider_failure',{p_campaign:campaign.id,p_reason:'PROVIDER_UNAVAILABLE'});
+      } catch { /* preserve the original scheduler failure */ }
       throw error;
     }
   }

@@ -21,6 +21,11 @@ export async function campaignRoute(request:NextRequest,path:string[]=[],schedul
   const rpc=async(name:string,args:Record<string,unknown>,status=200)=>{const r=await client.rpc(name,args);return r.error ? campaignDatabaseError(r.error):catalogJson({item:r.data},status);};
   if(!mutate){
    if(path.length===1 && path[0]==='scheduler' && scheduler)return catalogJson(scheduler());
+   if(path.length===1 && path[0]==='owners'){
+    // Campaign owners: active Admin/Sales accounts (readable by Admins through users_admin_read).
+    const r=await client.from('users').select('auth_user_id,full_name,email,role').in('role',['Admin','Sales']).eq('account_status','active').order('full_name');
+    return r.error ? campaignDatabaseError(r.error):catalogJson({items:(r.data||[]).filter(u=>u.auth_user_id).map(u=>({id:u.auth_user_id,name:u.full_name||u.email||'',role:u.role}))});
+   }
    if(!path.length){
     const search=request.nextUrl.searchParams.get('search') || '',page=Number(request.nextUrl.searchParams.get('page') || 1);
     if(search.length>160 || !Number.isSafeInteger(page) || page<1 || page>10000)return catalogError('INVALID_INPUT','Từ khóa hoặc trang không hợp lệ.',400);
@@ -35,6 +40,31 @@ export async function campaignRoute(request:NextRequest,path:string[]=[],schedul
    }
    if(!uuidPattern.test(path[0]))return catalogError('NOT_FOUND','Không tìm thấy chiến dịch.',404);
    if(path.length===2 && path[1]==='progress')return rpc('pose_campaign_progress',{p_campaign:path[0]});
+   if(path.length===2 && path[1]==='members'){
+    const status=request.nextUrl.searchParams.get('status'),page=Number(request.nextUrl.searchParams.get('page')||1);
+    if(!Number.isSafeInteger(page)||page<1||page>100000)return catalogError('INVALID_INPUT','Invalid page.',400);
+    return rpc('pose_campaign_members',{p_campaign:path[0],p_status:status||null,p_page:page,p_page_size:20});
+   }
+   if(path.length===2 && path[1]==='report'){
+    const format=request.nextUrl.searchParams.get('format')||'json';
+    if(!['csv','json'].includes(format))return catalogError('INVALID_INPUT','Invalid report format.',400);
+    const report=await client.rpc('pose_campaign_report',{p_campaign:path[0]});
+    if(report.error)return campaignDatabaseError(report.error);
+    if(format==='json')return catalogJson({item:report.data});
+    const value=report.data as {summary:Record<string,unknown>;rows:Array<Record<string,unknown>>};
+    const headers=['lead_id','masked_phone','match_score','final_status','reason','attempts','last_call_status','last_call_outcome','duration','cost_vnd','script_version'];
+    const csvRow=(row:Record<string,unknown>)=>headers.map(h=>{const key=h==='masked_phone'?'phone':h;return `"${String(row[key]??'').replaceAll('"','""')}"`;}).join(',');
+    const summaryLabels:Record<string,string>={total:'Tổng đối tượng',waiting:'Chờ gọi',calling:'Đang gọi',finished:'Đã kết thúc',calls:'Cuộc gọi',connected:'Đã kết nối',cost_vnd:'Chi phí (VND)'};
+    const summary=Object.entries(summaryLabels).map(([key,label])=>`"${label}","${String(value.summary[key]??0)}"`);
+    const body=[...summary,'',headers.join(','),...value.rows.map(csvRow)].join('\r\n');
+    const code=path[0].slice(0,8),date=new Date().toISOString().slice(0,10).replaceAll('-','');
+    return new Response(`\uFEFF${body}`,{status:200,headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':`attachment; filename="campaign-${code}-${date}.csv"`}});
+   }
+   if(path.length===2 && path[1]==='history'){
+    const [versions,events]=await Promise.all([client.from('campaign_config_versions').select('*').eq('campaign_id',path[0]).order('created_at',{ascending:false}),client.from('campaign_events').select('*').eq('campaign_id',path[0]).order('created_at',{ascending:false})]);
+    if(versions.error||events.error)return campaignDatabaseError(versions.error||events.error!);
+    return catalogJson({versions:versions.data,events:events.data});
+   }
    if(path.length===2 && path[1]==='preflight')return rpc('pose_campaign_preflight',{p_campaign:path[0],p_provider_ready:telephonyConfigured()});
    if(path.length===1){
     const r=await client.from('campaigns').select('*').eq('id',path[0]).maybeSingle();
@@ -85,6 +115,10 @@ export async function campaignRoute(request:NextRequest,path:string[]=[],schedul
     if(!only(['version','action','reason']) || !Number.isSafeInteger(i.version) || Number(i.version)<0 || !['schedule','start','pause','resume','cancel'].includes(String(i.action)) || i.reason!==undefined && (typeof i.reason!=='string' || i.reason.length>1000) || i.action==='cancel' && String(i.reason || '').trim().length<3)return invalid({action:'Kiểm tra hành động, phiên bản và lý do dừng (ít nhất 3 ký tự).'});
     return rpc('pose_campaign_action',{p_campaign:path[0],p_version:i.version,p_action:i.action,p_reason:i.reason || '',p_provider_ready:telephonyConfigured()});
    }
+  }
+  if(uuidPattern.test(path[0]) && path.length===3 && path[1]==='members' && request.method==='POST'){
+   if(!only(['membership_id']) || typeof i.membership_id!=='string' || !uuidPattern.test(i.membership_id))return invalid({membership_id:'Invalid membership.'});
+   return rpc('pose_remove_campaign_member',{p_campaign:path[0],p_membership:i.membership_id});
   }
   return catalogError('NOT_FOUND','Không tìm thấy thao tác.',404);
  }catch{return unavailable();}

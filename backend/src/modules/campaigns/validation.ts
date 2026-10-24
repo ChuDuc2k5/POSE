@@ -1,6 +1,6 @@
 import { uuidPattern } from '../../common/catalog.ts';
 import { object } from './script.ts';
-export const campaignFields=['name','description','objective','property_ids','start_time','end_time','timezone','window_start','window_end','weekdays','max_concurrent_calls','max_call_seconds','max_attempts','retry_after_hours','daily_call_limit','budget_limit_vnd','cost_reserve_per_call_vnd','script_version_id'];
+export const campaignFields=['name','description','objective','owner_id','property_ids','start_time','end_time','timezone','window_start','window_end','weekdays','max_concurrent_calls','max_call_seconds','max_attempts','retry_after_hours','daily_call_limit','budget_limit_vnd','cost_reserve_per_call_vnd','script_version_id'];
 export const labels:Record<string,string>={name:'Tên chiến dịch',description:'Mô tả',objective:'Mục tiêu',timezone:'Múi giờ IANA',start_time:'Bắt đầu',end_time:'Kết thúc',window_start:'Giờ gọi từ',window_end:'Giờ gọi đến',max_concurrent_calls:'Cuộc gọi đồng thời',max_call_seconds:'Thời lượng tối đa (giây)',max_attempts:'Số lần thử tối đa',retry_after_hours:'Khoảng cách thử lại (giờ)',daily_call_limit:'Hạn mức (cuộc/ngày)',budget_limit_vnd:'Ngân sách (VND)',cost_reserve_per_call_vnd:'Dự phòng mỗi cuộc (VND)'};
 export function campaignErrors(v:Record<string,unknown>,create=false) {
  const e:Record<string,string>={};
@@ -19,6 +19,7 @@ export function campaignErrors(v:Record<string,unknown>,create=false) {
  if(v.weekdays!==undefined && (!Array.isArray(v.weekdays) || !v.weekdays.length || v.weekdays.length>7 || v.weekdays.some(x=>!Number.isInteger(x) || x<0 || x>6)))e.weekdays='Chọn ngày gọi từ Chủ nhật (0) đến Thứ bảy (6).';
  if(v.property_ids!==undefined && (!Array.isArray(v.property_ids) || v.property_ids.length>500 || v.property_ids.some(x=>typeof x!=='string' || !uuidPattern.test(x))))e.property_ids='Chọn tối đa 500 sản phẩm đã công bố.';
  if(v.script_version_id!==undefined && v.script_version_id!==null && (typeof v.script_version_id!=='string' || !uuidPattern.test(v.script_version_id)))e.script_version_id='Chọn phiên bản đã công bố.';
+ if(v.owner_id!==undefined && v.owner_id!==null && (typeof v.owner_id!=='string' || !uuidPattern.test(v.owner_id)))e.owner_id='Owner không hợp lệ.';
  return e;
 }
 export function filterErrors(v:unknown):Record<string,string> {
