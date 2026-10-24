@@ -113,3 +113,13 @@ describe('rerank keep-similarity guard',()=>{
   expect((await rerank('q',rows,{model:reject})).found).toBe(false);
  });
 });
+
+describe('knowledge text cleaning keeps non-price Vietnamese words',()=>{
+ it('keeps "thời gian", "gia đình", "chiều rộng" and drops real price/broker clauses',async()=>{
+  const {cleanKnowledgeText,faqChunks}=await import('../src/modules/ai/chunking.js');
+  const text=cleanKnowledgeText('Phù hợp cho gia đình trẻ. Chiều rộng 5m, thời gian bàn giao quý 3. Giá bán 3,2 tỷ. Liên hệ anh Tuấn 0901234567.');
+  expect(text).toContain('gia đình');expect(text).toContain('Chiều rộng 5m');expect(text).toContain('thời gian bàn giao');
+  expect(text).not.toMatch(/3,2 tỷ|Giá bán|Liên hệ|0901234567/);
+  expect(faqChunks('Làm sao đăng ký xem nhà?','Thời gian chỉ được xác nhận sau khi chuyên viên liên hệ.')[0].content).toContain('liên hệ');
+ });
+});
