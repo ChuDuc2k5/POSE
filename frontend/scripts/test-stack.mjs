@@ -25,7 +25,7 @@ export async function startStack(port, providerEnv, options = {}) {
     }
     api = spawn(process.execPath, ['dist/main.js'], { cwd: backend, env, windowsHide: true, stdio: ['ignore','pipe','pipe'] });
     let output = '';
-    for (const stream of [api.stdout,api.stderr]) stream.on('data', chunk => { output += chunk; });
+    for (const stream of [api.stdout,api.stderr]) stream.on('data', chunk => { output += chunk; if (process.env.STACK_LOG) process.stderr.write(chunk); });
     let ready = false;
     for (let i = 0; i < 80; i++) {
       if (api.exitCode !== null) break;

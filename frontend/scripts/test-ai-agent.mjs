@@ -270,7 +270,7 @@ const provider=createServer(async(req,res)=>{
  }
  if(url.pathname.endsWith('/pose_system_search_knowledge')){
   const rows=properties.filter(p=>p.publication==='Published'&&!p.archived).map((p,i)=>({chunk_id:`chunk-${i}`,document_id:`doc-${i}`,source_id:p.id,source_type:'Property',header:`${p.code} ${p.name}`,content:`${p.name} ${p.location} published listing.`,vector_rank:i+1,text_rank:i+1,similarity:.9,embed_model:'fixture',code:p.code,name:p.name,location:p.location,property_type:p.property_type,transaction_type:p.transaction_type,price:p.price,price_period:p.price_period,availability:p.availability,updated_at:p.updated_at}));
-  return reply(200,{data:rows});
+  return reply(200,rows);
  }
  if(url.pathname.endsWith('/property_public_catalog')){
   searchReads++;
@@ -330,9 +330,7 @@ try{
  check((await call(`/api/ai/sessions/${chat.session.id}`,null,cookie)).status===200,'Own guest reads session');
  check(messages.length===0,'Default no transcript');
  check(chat.sources.length===4 && chat.sources.every(p=>p.updated_at),'Published-only timestamp evidence');
- const rerankHttp=await (await fetch('http://127.0.0.1:3301/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({response_format:{json_schema:{name:'rag_rerank'}},messages:[]})})).json();
- const rerankOrder=JSON.parse(rerankHttp.choices[0].message.content).ranked.map(item=>item.n);
- check(rerankOrder[0]===2 && chat.sources.some(p=>p.code==='P-1') && chat.sources.some(p=>p.code==='P-2'),'Real HTTP fake provider rerank reply reaches chat cards');
+ check(chat.sources.map(p=>p.code).join(',')==='P-2,P-1,P-3,P-4','Chat cards follow the rerank order (relevance desc, then RRF)');
  rerankNoAnswer=true;const noAnswerChat=await (await call('/api/ai/chat',{...base,message:'Có biệt thự ở Đà Lạt không?'})).json();rerankNoAnswer=false;
  check(noAnswerChat.sources.length===0&&!/P-\d|\d+\s*(?:tỷ|VND)|còn bán|Available/i.test(noAnswerChat.reply),'Real HTTP has_answer=false is honest and has no cards');
  check(chat.sources.every(p=>Number.isInteger(p.number) && Object.hasOwn(p,'cover_id') && Object.hasOwn(p,'area') && Object.hasOwn(p,'bedrooms') && Object.hasOwn(p,'location')),'Cards expose numbered source fields');
