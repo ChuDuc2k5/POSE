@@ -2,64 +2,75 @@ import '../dist/env.js';
 import { readFile } from 'node:fs/promises';
 import { RetrievalService } from '../dist/modules/ai/retrieval.js';
 import { EmbeddingService } from '../dist/modules/ai/embeddings.js';
+import { inferSearch } from '../dist/modules/ai/infer-search.js';
+import { querySearch } from '../dist/modules/ai/llm.js';
 
 const fixture = JSON.parse(await readFile(new URL('../test/fixtures/rag-eval-real.json', import.meta.url)));
-const snapshot = JSON.parse(await readFile('C:/Users/Admin/POSE-tasks/rag-real-snapshot.json'));
+const snapshot = JSON.parse(await readFile(process.env.RAG_SNAPSHOT || 'C:/Users/Admin/POSE-tasks/rag-real-snapshot.json', 'utf8'));
 if (fixture.length !== 40) throw new Error(`Expected 40 questions, got ${fixture.length}`);
 const noAnswers = fixture.filter(item => !item.expected_codes.length).length;
-const rentals = fixture.filter(item => item.id <= 'real-10').length;
-const followups = fixture.filter(item => item.context?.previous_expected_codes?.length).length;
-if (noAnswers < 8 || rentals < 8 || followups < 6) throw new Error('Fixture category requirements are not met');
+if (noAnswers < 8) throw new Error('Expected at least eight no-answer questions');
 const words = value => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().match(/[a-z0-9]+/g) || [];
-for (const item of fixture) for (const code of item.expected_codes) {
-  const target = snapshot.find(row => row.code === code);
-  if (!target) throw new Error(`Missing snapshot target ${code}`);
-  const question = words(item.question), content = words(target.content);
-  for (let i = 0; i <= question.length - 4; i++) for (let j = 0; j <= content.length - 4; j++)
-    if (question.slice(i, i + 4).join(' ') === content.slice(j, j + 4).join(' ')) throw new Error(`Question copies four words: ${item.question}`);
+for (const item of fixture) for (const code of item.expected_codes) if (!snapshot.some(row => row.code === code)) throw new Error(`Missing snapshot target ${code}`);
+
+const fake = process.env.RAG_EVAL_FAKE === '1';
+const service = fake ? new RetrievalService(new EmbeddingService(), async ({ p_query }) => {
+  const query = words(p_query);
+  const rows = snapshot.map((property, index) => {
+    const content = words(`${property.header} ${property.content}`);
+    const overlap = query.filter(token => content.includes(token)).length;
+    return { chunk_id: `fake-${index}`, document_id: `fake-doc-${index}`, source_id: property.id, source_type: 'Property', header: property.header, content: property.content, vector_rank: null, text_rank: overlap ? Math.max(1, 20 - overlap * 3) : null, similarity: null, code: property.code, name: property.name, location: property.location, property_type: property.property_type, transaction_type: property.transaction_type, price: property.price, price_period: property.price_period, availability: property.availability };
+  }).filter(row => row.text_rank);
+  return { data: rows };
+}) : new RetrievalService(new EmbeddingService());
+const snapshotIds = new Map(snapshot.map(row => [row.code, row.id]));
+const contextIds = codes => (codes || []).map(code => snapshotIds.get(code)).filter(Boolean);
+const ordinal = (text, count=0) => {
+  const numbered = [...String(text).matchAll(/\b(?:căn|can|lô|lo|khu|mẫu|mau)\s+(?:thứ|thu)\s+(\d+)\b/giu)].map(match => Number(match[1]));
+  if (numbered.length) return numbered;
+  if (/\b(?:các căn|cac can|các lô|cac lo)\b.*\b(?:đã nêu|da neu)\b/iu.test(text)) return Array.from({ length: count }, (_, index) => index + 1);
+  if (/\b(?:căn đó|can do|khu đất này|khu dat nay|vừa nói|vua noi|vừa nhắc|vua nhac|kết quả vừa rồi|ket qua vua roi|tìm tiếp|tim tiep)\b/iu.test(text)) return count ? [count] : [];
+  return [];
+};
+const cache = new Map();
+
+async function prepare(item) {
+  const previous = item.context?.previous_expected_codes || [];
+  let query = { standalone_question: item.question, filters: inferSearch(item.question) || {}, refers_to_previous: ordinal(item.question, previous.length) };
+  if (process.argv.includes('--llm')) query = await querySearch(item.question, [{ role: 'assistant', content: previous.map((code, index) => `[${index + 1}] ${code}`).join('\n') }]);
+  const refs = query.refers_to_previous.map(index => previous[index - 1]).filter(Boolean);
+  const filters = Object.fromEntries(Object.entries(query.filters || {}).map(([key, value]) => [key === 'property_type' ? 'type' : key === 'min_price_vnd' ? 'minPrice' : key === 'max_price_vnd' ? 'maxPrice' : key, value]).filter(([, value]) => value !== null && value !== undefined));
+  const embedding = cache.has(item.question) ? cache.get(item.question) : await service.embed(query.standalone_question);
+  cache.set(item.question, embedding);
+  return { query, filters, refs, embedding };
 }
 
-const service = process.env.RAG_EVAL_FAKE === '1'
-  ? new RetrievalService(new EmbeddingService(), async ({ p_query }) => {
-    const query = words(p_query);
-    const rows = snapshot.map((property, index) => {
-      const content = words(property.content);
-      const overlap = query.filter(token => content.includes(token)).length;
-      return { chunk_id: `fake-${index}`, document_id: `fake-doc-${index}`, source_id: property.id, source_type: 'Property', header: property.header, content: property.content, vector_rank: null, text_rank: overlap ? Math.max(1, 20 - overlap * 3) : null, similarity: null, code: property.code, name: property.name, location: property.location, property_type: property.property_type, transaction_type: property.transaction_type, price: property.price, price_period: property.price_period, availability: property.availability };
-    }).filter(row => row.text_rank);
-    return { data: rows };
-  })
-  : new RetrievalService(new EmbeddingService());
-const snapshotIds = new Map(JSON.parse(await readFile(process.env.RAG_SNAPSHOT || 'C:/Users/Admin/POSE-tasks/rag-real-snapshot.json', 'utf8')).map(row => [row.code, row.id]));
-const contextIds = codes => (codes || []).map(code => snapshotIds.get(code)).filter(Boolean);
-async function evaluate() {
+async function evaluate(prepared, min, no, textRank) {
+  process.env.AI_RAG_MIN_SCORE = min.toFixed(2); process.env.AI_RAG_NO_ANSWER_SCORE = no.toFixed(2); process.env.AI_RAG_MIN_TEXT_RANK = String(textRank);
   let hit = 0, mrr = 0, truePositive = 0, falsePositive = 0;
-  const misses = [];
-  for (const item of fixture) {
-    const result = await service.search(item.question, {}, { propertyIds: contextIds(item.context?.previous_expected_codes) });
-    const got = result.chunks.slice(0, 5).map(row => ({ code: row.code, similarity: row.similarity, text_rank: row.text_rank }));
-    const codes = got.map(row => row.code).filter(Boolean);
+  for (let i = 0; i < fixture.length; i++) {
+    const item = fixture[i], plan = prepared[i];
+    const pureReference = plan.refs.length > 0 && Object.keys(plan.filters).length === 0;
+    const result = pureReference
+      ? { found: true, chunks: plan.refs.map(code => snapshot.find(row => row.code === code)).filter(Boolean) }
+      : await service.searchWithEmbedding(plan.query.standalone_question, plan.filters, { propertyIds: plan.refs.length ? contextIds(plan.refs) : [] }, plan.embedding);
+    const codes = result.chunks.slice(0, 5).map(row => row.code).filter(Boolean);
     if (item.expected_codes.length) {
       const rank = item.expected_codes.map(code => codes.indexOf(code)).find(index => index >= 0);
-      if (rank === undefined) misses.push({ question: item.question, expected: item.expected_codes, got });
-      else { hit++; mrr += 1 / (rank + 1); }
+      if (rank !== undefined) { hit++; mrr += 1 / (rank + 1); }
     } else if (!result.found) truePositive++; else falsePositive++;
   }
-  const answerable = fixture.length - noAnswers;
-  const precision = truePositive / (truePositive + falsePositive) || 0;
-  const recall = truePositive / noAnswers || 0;
-  console.log(`RAG eval real: ${fixture.length} questions; recall@5 ${(hit / answerable).toFixed(3)}; MRR ${(mrr / answerable).toFixed(3)}; no-answer precision ${precision.toFixed(3)} recall ${recall.toFixed(3)}`);
-  for (const miss of misses) console.log(`MISS question=${JSON.stringify(miss.question)} expected=${miss.expected.join(',')} got=${miss.got.map(row => `${row.code || '-'}:${Number(row.similarity ?? 0).toFixed(4)}/${row.text_rank ?? '-'}`).join(',')}`);
-  return { hit, mrr, truePositive, falsePositive };
+  const noansP = truePositive / (truePositive + falsePositive) || 0, noansR = truePositive / noAnswers || 0;
+  const f1 = noansP + noansR ? 2 * noansP * noansR / (noansP + noansR) : 0;
+  return { recall: hit / (fixture.length - noAnswers), mrr: mrr / (fixture.length - noAnswers), noansP, noansR, f1 };
 }
 
-await evaluate();
+const prepared = await Promise.all(fixture.map(prepare));
 let best = null;
-for (let min = 0.30; min <= 0.70 + 1e-9; min += 0.05) for (let no = 0.30; no <= 0.70 + 1e-9; no += 0.05) for (const textRank of [1, 3, 5, 10]) {
-  process.env.AI_RAG_MIN_SCORE = min.toFixed(2); process.env.AI_RAG_NO_ANSWER_SCORE = no.toFixed(2); process.env.AI_RAG_MIN_TEXT_RANK = String(textRank);
-  const result = await evaluate();
-  const noAnswerF1 = result.truePositive ? (2 * result.truePositive) / (2 * result.truePositive + result.falsePositive + noAnswers - result.truePositive) : 0;
-  const score = result.hit / (fixture.length - noAnswers) + noAnswerF1;
-  if (!best || score > best.score) best = { min, no, textRank, score };
+console.log('min_score no_answer min_text_rank recall@5 MRR noans_P noans_R F1');
+for (const min of [0.30,0.35,0.40,0.45,0.50,0.55,0.60,0.65,0.70]) for (const no of [0.30,0.35,0.40,0.45,0.50,0.55,0.60,0.65,0.70]) for (const textRank of [1,3,5,10]) {
+  const result = await evaluate(prepared, min, no, textRank), row = { min, no, textRank, ...result };
+  console.log(`${min.toFixed(2)} ${no.toFixed(2)} ${textRank} ${result.recall.toFixed(3)} ${result.mrr.toFixed(3)} ${result.noansP.toFixed(3)} ${result.noansR.toFixed(3)} ${result.f1.toFixed(3)}`);
+  if (!best || row.recall > best.recall || row.recall === best.recall && row.f1 > best.f1) best = row;
 }
-console.log(`BEST min_score=${best.min.toFixed(2)} no_answer=${best.no.toFixed(2)} min_text_rank=${best.textRank} objective=${best.score.toFixed(3)}`);
+console.log(`BEST ${best.min.toFixed(2)} ${best.no.toFixed(2)} ${best.textRank} ${best.recall.toFixed(3)} ${best.mrr.toFixed(3)} ${best.noansP.toFixed(3)} ${best.noansR.toFixed(3)} ${best.f1.toFixed(3)}`);

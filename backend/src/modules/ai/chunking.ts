@@ -58,7 +58,15 @@ export function splitKnowledgeText(text: string) {
 }
 
 export type PropertyChunkSource = { code:string; name:string; location:string; property_type:string; transaction_type:'Sale'|'Rent'; description:string; project_name?:string|null; amenities?:string|null };
-export function propertyHeader(source: PropertyChunkSource) { return `M\u00e3 ${source.code} \u00b7 ${source.name} \u00b7 ${source.location} \u00b7 ${source.property_type} \u00b7 ${source.transaction_type === 'Rent' ? 'Cho thu\u00ea' : 'B\u00e1n'}`; }
+export function districtAliases(source: PropertyChunkSource) {
+  const text = [source.name, source.description, source.location, source.project_name, source.amenities].filter(Boolean).join(' ');
+  const aliases = new Set<string>();
+  for (const match of text.matchAll(/\bQ\.?\s*(\d{1,2})\b/giu)) aliases.add(`Qu\u1eadn ${match[1]}`);
+  for (const match of text.matchAll(/\bQu\u1eadn\s+(\d{1,2})\b/giu)) aliases.add(`Qu\u1eadn ${match[1]}`);
+  if (/\b(?:TP\.?|Th\u00e0nh\s*ph\u1ed1)\s+Th\u1ee7\s*\u0110\u1ee9c\b/iu.test(text)) aliases.add('Th\u00e0nh ph\u1ed1 Th\u1ee7 \u0110\u1ee9c');
+  return [...aliases];
+}
+export function propertyHeader(source: PropertyChunkSource) { const aliases=districtAliases(source); return `M\u00e3 ${source.code} \u00b7 ${source.name} \u00b7 ${source.location}${aliases.length ? ` \u00b7 ${aliases.join(' \u00b7 ')}` : ''} \u00b7 ${source.property_type} \u00b7 ${source.transaction_type === 'Rent' ? 'Cho thu\u00ea' : 'B\u00e1n'}`; }
 export function propertyChunks(source: PropertyChunkSource) { const content = [source.description, source.project_name, source.amenities].filter(Boolean).join('. '); const header = propertyHeader(source); return splitKnowledgeText(content).map((chunk, chunk_index) => ({ chunk_index, header, content: chunk, embedded: `${header}\n${chunk}` })); }
 export function faqChunks(question:string, answer:string) { const header=`H\u1ecfi \u0111\u00e1p \u00b7 ${cleanKnowledgeText(question)}`; return splitKnowledgeText(answer).map((content,chunk_index)=>({chunk_index,header,content,embedded:`${header}\n${content}`})); }
 export function contentHash(value:unknown){return createHash('sha256').update(JSON.stringify(value)).digest('hex');}
