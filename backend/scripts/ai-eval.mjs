@@ -2,6 +2,7 @@ import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import { hcmWards, districtAliases } from '../dist/modules/ai/hcm-wards.js';
 
 const args = new Set(process.argv.slice(2));
 const fake = args.has('--fake');
@@ -23,10 +24,41 @@ const cases = real ? realCases : standardCases;
 
 function validateRealCases() {
   const catalogue = readJson(snapshotPath), codes = new Set(catalogue.map(item => item.code)), locations = new Set(catalogue.map(item => item.location)), errors = [];
+  const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('vi');
+  const canonicalDistrict = value => districtAliases[String(value)] || value;
+  const districtMatches = (location, district) => {
+    if (!district || (Array.isArray(district) && !district.length)) return true;
+    if (Array.isArray(district)) return district.some(value => districtMatches(location, value));
+    const wanted = normalize(canonicalDistrict(district));
+    const text = normalize(location);
+    if (text.includes(wanted)) return true;
+    return hcmWards.some(ward => ward.formerDistricts.some(former => normalize(former) === wanted) && [ward.ward, ...ward.formerWards].some(alias => text.includes(normalize(alias))));
+  };
+  const matches = (item, constraints) => {
+    if (!constraints) return false;
+    if (constraints.transaction_type && item.transaction_type !== constraints.transaction_type) return false;
+    if (constraints.property_type && item.property_type !== constraints.property_type) return false;
+    if (!districtMatches(item.location, constraints.district)) return false;
+    const price = item.price === null || item.price === undefined ? null : Number(item.price);
+    if (constraints.price_min !== null && constraints.price_min !== undefined && (price === null || price < constraints.price_min)) return false;
+    if (constraints.price_max !== null && constraints.price_max !== undefined && (price === null || price > constraints.price_max)) return false;
+    if (constraints.bedrooms !== null && constraints.bedrooms !== undefined && item.bedrooms !== constraints.bedrooms) return false;
+    return true;
+  };
   for (const item of realCases) {
     for (const code of item.expected.cards_codes_any || []) if (!codes.has(code)) errors.push(`${item.id}: unknown code ${code}`);
     for (const code of `${item.question} ${JSON.stringify(item.history || [])}`.match(/C(?:FL|FR)-[A-Z0-9]+/g) || []) if (!codes.has(code)) errors.push(`${item.id}: unknown code ${code}`);
     for (const location of item.catalogue_locations || []) if (!locations.has(location)) errors.push(`${item.id}: unknown location ${location}`);
+    const isSearchCase = ['search_by_need', 'template_buy', 'template_rent'].includes(item.group) && !item.history && (item.expected.cards_codes_any || item.expected.cards_min !== undefined);
+    if (isSearchCase && !item.constraints) errors.push(`${item.id}: missing constraints`);
+    if (item.constraints) {
+      const satisfying = catalogue.filter(row => matches(row, item.constraints));
+      const expectedCodes = item.expected.cards_codes_any || [];
+      for (const code of expectedCodes) if (!satisfying.some(row => row.code === code)) errors.push(`${item.id}: expected code ${code} is outside constraints`);
+      if (!satisfying.length && (expectedCodes.length || (item.expected.cards_min || 0) > 0)) errors.push(`${item.id}: no satisfying listings but case expects cards`);
+      if (!satisfying.length && (!item.expected.must_say_no_data || !item.expected.should_offer_handoff)) errors.push(`${item.id}: empty constraints require must_say_no_data and should_offer_handoff`);
+      console.log(`COUNT ${item.id} ${satisfying.length}`);
+    } else console.log(`COUNT ${item.id} n/a`);
   }
   if (errors.length) { console.error(errors.join('\n')); process.exitCode = 1; return; }
   const counts = Object.fromEntries([...new Set(realCases.map(item => item.group))].map(group => [group, realCases.filter(item => item.group === group).length]));
