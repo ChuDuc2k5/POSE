@@ -61,5 +61,5 @@ try{
  const knowledge=await db.exec(await readFile(new URL('../../supabase/test-ai-knowledge.sql',import.meta.url),'utf8'));
  console.log(knowledge.at(-1).rows[0].result);
  const tools=await db.exec(await readFile(new URL('../../supabase/test-ai-agent-tools.sql',import.meta.url),'utf8'));
- console.log(tools.flatMap(statement=>statement.rows||[]).find(row=>row.result)?.result || 'PASS: M06 pending-action SQL checks.');
+ const pendingResult=tools.flatMap(statement=>statement.rows||[]).find(row=>row.result)?.result;if(!pendingResult)throw new Error('MISSING_PENDING_ACTION_SQL_RESULT');console.log(pendingResult);
 }catch(error){console.error(`FAIL: M06 SQL: ${error.message}`);if(error.where)console.error(error.where);if(process.env.DEBUG_SQL)console.error(error);process.exitCode=1;}finally{await db.close();}

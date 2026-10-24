@@ -152,6 +152,7 @@ const provider=createServer(async(req,res)=>{
   if(input.tools){
    if(!prompt)prompt=input;
    check(input.tools.length===6 && input.tools.every(t=>['search_properties','get_property_detail','list_my_appointments','save_favorite','request_handoff','propose_appointment'].includes(t.function.name)),'Native six-tool schema');
+   check(input.max_tokens===600 && input.messages[0].content.length<800,'Bounded generation and compact prompt/schema');
    const hasToolResult=input.messages.some(m=>m.role==='tool');
    const redacted=input.messages.some(m=>typeof m.content==='string'&&m.content.includes('contact_redacted":true'));
     const dataText=input.messages.map(m=>typeof m.content==='string'?m.content:'').join('\n');
