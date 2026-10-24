@@ -35,7 +35,10 @@ try{
  window.SpeechSynthesisUtterance=class{constructor(text){this.text=text;}};
  Object.defineProperty(window,'speechSynthesis',{value:{getVoices:()=>[{lang:'vi-VN'}],cancel(){window.cancelCount++;},speak(u){window.spoken.push(u);}}});
  const originalFetch=window.fetch.bind(window);window.fetch=async(url,options)=>{
- if(url==='/api/ai/chat'){const body=JSON.parse(options.body);window.chatRequests.push(body);await new Promise(r=>setTimeout(r,500));return new Response(JSON.stringify({session:{id:'f6300000-0000-4000-8000-000000000009'},reply:'Tôi là trợ lý AI của TERAVA. Q7-R01 giá thuê 25.000.000 VND/tháng, còn cho thuê.',sources:[{id:'f6300000-0000-4000-8000-000000000003',code:'Q7-R01',name:'Căn hộ 2 phòng ngủ Quận 7',number:1,cover_id:null,area:80,bedrooms:2,location:'Quận 7',reason:'Gần chợ và trường học.',price:25000000,transaction_type:'Rent',price_period:'Month',availability:'Available',updated_at:'2026-10-15T00:00:00Z'}]}),{status:200});}
+ if(url==='/api/ai/chat'){const body=JSON.parse(options.body);window.chatRequests.push(body);await new Promise(r=>setTimeout(r,500));const result={session:{id:'f6300000-0000-4000-8000-000000000009'},reply:'Tôi là trợ lý AI của TERAVA. Q7-R01 giá thuê 25.000.000 VND/tháng, còn cho thuê.',sources:[{id:'f6300000-0000-4000-8000-000000000003',code:'Q7-R01',name:'Căn hộ 2 phòng ngủ Quận 7',number:1,cover_id:null,area:80,bedrooms:2,location:'Quận 7',reason:'Gần chợ và trường học.',price:25000000,transaction_type:'Rent',price_period:'Month',availability:'Available',updated_at:'2026-10-15T00:00:00Z'}]};
+ // Same SSE wire format as the backend (event name on its own line, no type in data): the widget always asks for text/event-stream.
+ const sse=[['meta',{session_id:result.session.id,scope:'in_scope',sources:result.sources,related:[]}],...result.reply.match(/.{1,48}/gs).map(text=>['delta',{text}]),['done',{message:result.reply,scope:'in_scope',blocked:false,guard:null}]].map(([event,data])=>'event: '+event+'\\ndata: '+JSON.stringify(data)+'\\n\\n').join('');
+ return new Response(sse,{status:200,headers:{'Content-Type':'text/event-stream; charset=utf-8'}});}
  return originalFetch(url,options);};`});
  for(const width of [1280,380]){
   await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===380});
