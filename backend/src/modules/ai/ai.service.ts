@@ -100,7 +100,7 @@ export class AiService {
       if(!this.guard.toolAllowed(t))continue;
       if(t.name==='search_properties'){
         if(searched){violation='TOOL_LIMIT';log(t.name,t.arguments,violation);break;}
-        log(t.name,t.arguments,null);items=safeEvidence(await search({...t.arguments,...inferred?.transaction_type ? {transaction_type:inferred.transaction_type}:{}},null));searchPerformed=true;searched=true;
+        log(t.name,t.arguments,null);const toolItems=safeEvidence(await search({...t.arguments,...inferred?.transaction_type ? {transaction_type:inferred.transaction_type}:{}},null));const ta=t.arguments as Record<string,unknown>;items=toolItems.filter(item=>(typeof ta.maxPrice!=='number'||item.price!==null&&item.price<=ta.maxPrice)&&(typeof ta.minPrice!=='number'||item.price!==null&&item.price>=ta.minPrice)&&(typeof ta.location!=='string'||item.location.toLocaleLowerCase('vi').includes(ta.location.toLocaleLowerCase('vi')))&&(typeof ta.type!=='string'||item.property_type===ta.type));searchPerformed=true;searched=true;
       }else if(guest){violation='SIGN_IN_REQUIRED';log(t.name,t.arguments,violation);}
       else{log(t.name,t.arguments,null);proposals.push(t);}
     }
@@ -121,6 +121,14 @@ export class AiService {
       if(failed){log('final_output',result.tool_calls?.length ? result.tool_calls:result.reply,failed);blocked=true;}
       else log('regeneration',{},null);
     }
+    const pendingActions:unknown[]=[];
+    if(!blocked && who.client && proposals.length) for(const proposal of proposals){
+      if(!object(proposal) || typeof proposal.name!=='string' || !object(proposal.arguments))continue;
+      const args=proposal.arguments as Record<string,unknown>, value=(key:string)=>typeof args[key]==='string' ? args[key] as string:'';
+      const summary=proposal.name==='request_handoff' ? value('summary')||'Khách đề nghị chuyên viên liên hệ' : proposal.name==='propose_appointment' ? `Đề nghị lịch xem${value('code') ? ` ${value('code')}`:''} lúc ${value('preferred_start')}` : `Lưu ${value('code')} vào yêu thích`;
+      const pending=await who.client.rpc('pose_ai_create_pending',{p_session:id,p_tool:proposal.name,p_args:args,p_summary:summary,p_key:`${id}:${hash(JSON.stringify(proposal))}`});
+      if(!pending.error)pendingActions.push(pending.data);
+    }
     const fields=blocked ? {}:this.extraction.extractNeeds(extracted,source,(key,field)=>log('invalid_need',{field:key,value:field},'invalid_need','flagged'));
     const reply=(count===0 ? `${disclosure}\n`:'')+(blocked ? safeReply:result.reply);
     const acceptedFields=guest || !input.store_transcript ? {}:fields;
@@ -138,13 +146,18 @@ export class AiService {
     const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:reply,p_sources:items,p_actions:actions,p_fields:acceptedFields,p_score:score});
     if(committed.error)return catalogDatabaseError(committed.error);
     if(guest)(await cookies()).set('pose-ai-session',who.token,{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',path:'/',maxAge:86400*7});
-    return catalogJson({session:committed.data,reply,sources:items,blocked,proposals,inquiry_url:'/customer/inquiries/new'});
+    const payload={session:committed.data,reply,sources:items,blocked,proposals,pending_actions:pendingActions,inquiry_url:'/customer/inquiries/new'};
+    if(request.headers.get('accept')?.includes('text/event-stream')){
+      const events=[{type:'meta',session_id:committed.data.id,sources:items},{type:'delta',text:reply},...pendingActions.map(action=>({type:'action',action})),{type:'done',message:reply,blocked}];
+      return new Response(events.map(event=>`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''),{headers:{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','Connection':'keep-alive'}});
+    }
+    return catalogJson(payload);
   }catch{return unavailable();}
 }
 async getChat(request:NextRequest,id:string) {
   try {if(!uuidPattern.test(id))return catalogError('NOT_FOUND','Không tìm thấy hội thoại.',404);const who=await identity();if(who.error)return who.error;const result=await readSession(id,who);return result.error ? catalogDatabaseError(result.error):catalogJson({session:result.data});}catch{return unavailable();}
 }
-async handoff(request:NextRequest) {
+  async handoff(request:NextRequest) {
   try {
     if(!validOrigin(request))return catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403);
     const who=await identity();if(who.error)return who.error;if(!who.session)return catalogJson({code:'SIGN_IN_REQUIRED',message:'Vui lòng đăng nhập hoặc gửi biểu mẫu tư vấn.',inquiry_url:'/customer/inquiries/new'},401);
@@ -156,6 +169,22 @@ async handoff(request:NextRequest) {
     if(result.error?.message?.includes('APPOINTMENT_OVERLAP'))return catalogError('APPOINTMENT_OVERLAP','Khung giờ đã có đề nghị khác. Vui lòng chọn giờ khác.',409);
     return result.error ? catalogDatabaseError(result.error):catalogJson({item:result.data,message:'Chuyên viên sẽ liên hệ để tư vấn. Thời gian bạn chọn chỉ là đề nghị, lịch chưa được xác nhận.'});
   }catch{return unavailable();}
-}
+  }
+
+  async decideAction(request:NextRequest, actionId:string, confirm:boolean) {
+    try {
+      if(!validOrigin(request))return catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403);
+      if(!uuidPattern.test(actionId))return catalogError('NOT_FOUND','Không tìm thấy yêu cầu.',404);
+      const who=await identity();if(who.error)return who.error;if(!who.session)return catalogError('NOT_FOUND','Không tìm thấy yêu cầu.',404);
+      const parsed=await catalogInput(request);if(parsed.error)return parsed.error;
+      const body=parsed.input as Record<string,unknown>;
+      const consents=body.consents && object(body.consents) ? Object.fromEntries(Object.entries(body.consents).filter(([k,v])=>(k==='Call'||k==='AIVoice')&&typeof v==='boolean')) : {};
+      const result=await who.client!.rpc('pose_ai_decide_pending',{p_action:actionId,p_confirm:confirm,p_consents:consents});
+      if(result.error?.message?.includes('ACTION_EXPIRED'))return catalogJson({code:'ACTION_EXPIRED',message:'Yêu cầu đã hết hạn. Vui lòng tạo lại yêu cầu.'},410);
+      if(result.error?.code==='P0002')return catalogError('NOT_FOUND','Không tìm thấy yêu cầu.',404);
+      if(result.error)return catalogDatabaseError(result.error);
+      return catalogJson({action:result.data,message:confirm?'Đã xử lý yêu cầu của bạn.':'Đã huỷ yêu cầu.'});
+    }catch{return unavailable();}
+  }
 
 }

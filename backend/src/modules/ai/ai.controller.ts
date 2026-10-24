@@ -25,6 +25,12 @@ export class AiController {
   @Public()
   @Post('workspace')
   override(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, workspace.POST); }
+  @Public()
+  @Post('actions/:id/confirm')
+  confirm(@Req() req: Request, @Res() res: Response) { return dispatch<{id:string}>(req, res, async (request, context) => this.ai.decideAction(request, (await context.params).id, true)); }
+  @Public()
+  @Post('actions/:id/cancel')
+  cancel(@Req() req: Request, @Res() res: Response) { return dispatch<{id:string}>(req, res, async (request, context) => this.ai.decideAction(request, (await context.params).id, false)); }
   @Roles('Admin')
   @Post('admin/reindex')
   reindex(@Req() req: Request,@Res() res:Response){return dispatch(req,res,async request=>{

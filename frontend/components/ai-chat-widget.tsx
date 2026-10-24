@@ -6,8 +6,9 @@ import { TeravaMark } from './brand';
 import { availabilityLabels } from '@/lib/catalog';
 import { chatStorageKey } from '@/lib/chat-storage';
 
-type Source={id:string;code:string;name:string;updated_at:string;price:number|null;availability:keyof typeof availabilityLabels;transaction_type:'Sale'|'Rent';price_period:'Total'|'Month'};
-type Message={role:'user'|'assistant';content:string;sources?:Source[]};
+type Source={id:string;code:string;name:string;updated_at:string;price:number|null;availability:keyof typeof availabilityLabels;transaction_type:'Sale'|'Rent';price_period:'Total'|'Month';number?:number};
+type PendingAction={id:string;tool:string;summary_vi:string;status?:string};
+type Message={role:'user'|'assistant';content:string;sources?:Source[];action?:PendingAction};
 function validMessage(message:Message){
   return message && (message.role==='user'||message.role==='assistant') && typeof message.content==='string' &&
     (!message.sources || Array.isArray(message.sources) && message.sources.every(source=>source && typeof source.id==='string' && typeof source.name==='string' && typeof source.code==='string' && typeof source.updated_at==='string' && (source.price===null || typeof source.price==='number') && Object.hasOwn(availabilityLabels,source.availability)));
@@ -83,11 +84,13 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
     pending.current=true;setBusy(true);setError('');
     setMessages(list=>[...list,{role:'user',content}]);
     try{
-      const response=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:sessionRef.current,message:content,history:history.current.slice(-10).map(({role,content})=>({role,content})),store_transcript:store,property_id:propertyId || null})});
-      const result=await response.json();if(!response.ok)throw new Error(result.message);
-      sessionRef.current=result.session.id;setSession(result.session.id);
-      setMessages(list=>[...list,{role:'assistant',content:result.reply,sources:result.sources}]);
-      return result.reply as string;
+      const response=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',Accept:'text/event-stream'},body:JSON.stringify({session_id:sessionRef.current,message:content,history:history.current.slice(-10).map(({role,content})=>({role,content})),store_transcript:store,property_id:propertyId || null})});
+      if(!response.ok)throw new Error((await response.json()).message);
+      if(!response.headers.get('content-type')?.includes('text/event-stream')){const result=await response.json();sessionRef.current=result.session.id;setSession(result.session.id);setMessages(list=>[...list,{role:'assistant',content:result.reply,sources:result.sources,action:result.action}]);return result.reply as string;}
+      const reader=response.body?.getReader();if(!reader)throw new Error('Không nhận được nội dung trả lời.');let buffer='',reply='',sources:Source[]=[],action:PendingAction|undefined;setMessages(list=>[...list,{role:'assistant',content:''}]);
+      const update=()=>setMessages(list=>{const copy=[...list];copy[copy.length-1]={role:'assistant',content:reply,sources,action};return copy;});
+      while(true){const chunk=await reader.read();buffer+=new TextDecoder().decode(chunk.value||new Uint8Array(),{stream:!chunk.done});let end;while((end=buffer.indexOf('\n\n'))>=0){const block=buffer.slice(0,end);buffer=buffer.slice(end+2);const line=block.split('\n').find(value=>value.startsWith('data:'));if(!line)continue;const event=JSON.parse(line.slice(5));if(event.type==='meta'){sessionRef.current=event.session_id;setSession(event.session_id);sources=event.sources||[];}else if(event.type==='delta')reply+=event.text||'';else if(event.type==='action')action=event.action;else if(event.type==='done')reply=event.message||reply;update();}if(chunk.done)break;}
+      return reply;
     }catch(e){
       setMessages(list=>list.slice(0,-1));setText(content);
       setError(e instanceof Error ? e.message:'Chưa thể gửi tin nhắn.');return null;
@@ -159,6 +162,10 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   function stopVoice(){voiceOn.current=false;voiceEpoch.current++;abortRecognition();cancelSpeech();setDictating(false);setVoice(null);setHeard('');}
   function close(){stopVoice();setOpen(false);requestAnimationFrame(()=>launcher.current?.focus());}
 
+  async function decide(id:string,confirm:boolean){
+    try{const response=await fetch(`/api/ai/actions/${id}/${confirm?'confirm':'cancel'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});const result=await response.json();if(!response.ok)throw new Error(result.message);setNotice(result.message||'Đã cập nhật yêu cầu.');setMessages(list=>list.map(m=>m.action?.id===id?{...m,action:{...m.action,status:result.action?.status|| (confirm?'Confirmed':'Cancelled')}}:m));}catch(e){setError(e instanceof Error?e.message:'Không thể cập nhật yêu cầu.');}
+  }
+
   async function handoff(){
     if(!session || pending.current)return;pending.current=true;setBusy(true);setError('');const key=handoffKey || crypto.randomUUID();setHandoffKey(key);
     try{
@@ -188,7 +195,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
         </div>}
         {messages.map((m,i)=>m.role==='user'
           ? <div className="ai-row ai-row-user" key={i}><p className="ai-bubble">{m.content}</p></div>
-          : <div className="ai-row ai-row-assistant" key={i}><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><div className="ai-answer"><p>{m.content}</p>
+          : <div className="ai-row ai-row-assistant" key={i}><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><div className="ai-answer"><p>{m.content}</p>{m.action && <div className="ai-action-card"><strong>{m.action.summary_vi}</strong><div><button type="button" disabled={busy} onClick={()=>void decide(m.action!.id,true)}>Xác nhận</button><button type="button" disabled={busy} onClick={()=>void decide(m.action!.id,false)}>Huỷ</button></div></div>}
               {!!m.sources?.length && <div className="ai-sources">{m.sources.map(s=><Link className="ai-source" href={`/properties/${s.id}`} key={s.id}><strong>{s.name}</strong><span>{s.code} · {s.price===null ? 'Giá chưa công bố':`${new Intl.NumberFormat('vi-VN').format(s.price)} VND${s.price_period==='Month' ? '/tháng':''}`}</span><em className={`ai-status ai-status-${s.availability}`}>{s.transaction_type==='Rent'&&s.availability==='Available' ? 'Còn cho thuê':availabilityLabels[s.availability]}</em><small>Cập nhật {new Date(s.updated_at).toLocaleString('vi-VN')}</small></Link>)}</div>}
             </div></div>)}
         {busy && voice!=='thinking' && <div className="ai-row ai-row-assistant"><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><span className="ai-typing" role="status" aria-label="Trợ lý đang soạn câu trả lời…"><i/><i/><i/></span></div>}
