@@ -47,7 +47,8 @@ async function retrieveIds(ids:string[]):Promise<Evidence[]> {
   if(!ids.length)return [];
   const result=await authClient().from('property_public_catalog').select('id,code,name,cover_id,area,bedrooms,price,availability,updated_at,location,property_type,transaction_type,price_period').in('id',[...new Set(ids)].slice(0,100)).limit(100);
   if(result.error)throw new Error('RETRIEVAL_UNAVAILABLE');
-  return (result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[];
+  const order=new Map(ids.map((id,index)=>[id,index]));
+  return (result.data || []).sort((a,b)=>(order.get(a.id)??Number.MAX_SAFE_INTEGER)-(order.get(b.id)??Number.MAX_SAFE_INTEGER)).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[];
 }
 function relaxedLocation(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return undefined;

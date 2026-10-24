@@ -25,10 +25,6 @@ const fakeEmbedding=(value)=>{const text=String(value).normalize('NFD').replace(
 const {validateModel,providerConfig,TURN_SCHEMA,SYSTEM_PROMPT}=await import(pathToFileURL(join(temp,'llm.mjs')));
 let checks=0;const check=(value,label)=>{assert.ok(value,label);checks++;};
 const field=(value,evidence)=>({value,confidence:.9,evidence});
-// The integration provider below uses this deterministic fixture order when the
-// backend's rag_rerank structured call is exercised.
-const rerankedFixture=(rows,scores)=>rows.map((row,index)=>({row,score:scores[index]})).filter(item=>item.score>=2).sort((a,b)=>b.score-a.score).map(item=>item.row);
-check(rerankedFixture(['P-1','P-2','P-3'],[2,3,1]).join(',')==='P-2,P-1','Fake LLM rerank order is used for chat cards');
 const all={intent:true,budget:{value:'match',evidence:'3 tỷ'},area_type:{value:'both',evidence:'Hồ Chí Minh, căn hộ'},timeline:{value:'lt3m',evidence:'tháng tới'},contact:{value:'ready',evidence:'đã xác minh, sẵn sàng'},next_step:{value:'appointment',evidence:'đề nghị hẹn'}};
 check(JSON.stringify(scoreLead(all))===JSON.stringify(scoreLead(all)),'Scoring deterministic');
 check(scoreLead(all).score===100 && scoreLead(all).classification==='Hot','All dimensions');
@@ -122,7 +118,7 @@ for(const [k,v] of Object.entries(savedEnv))if(v===undefined)delete process.env[
 const userId='f6000000-0000-4000-8000-000000000001',otherId='f6000000-0000-4000-8000-000000000002';
 const users={User:userId,Other:otherId,Sales:'f6000000-0000-4000-8000-000000000003',Admin:'f6000000-0000-4000-8000-000000000004'};
 const directory={Sales:'f6500000-0000-4000-8000-000000000003',Admin:'f6500000-0000-4000-8000-000000000004'};
-let mode='ok',modelCalls=0,prompt,providerOffline=false,verifiedPhone=false,searchReads=0;
+let mode='ok',modelCalls=0,prompt,providerOffline=false,verifiedPhone=false,searchReads=0,rerankNoAnswer=false;
 const modelData=[],modelOutputs=[];
 const sessions=new Map(),messages=[],logs=[],tasks=new Map(),appointments=new Map(),leads=new Map(),customers=new Map(),preferences=new Map(),assignments=[];
 const customerFor=uid=>uid ? [...customers.values()].find(c=>c.auth_user_id===uid):undefined;
@@ -145,7 +141,7 @@ const provider=createServer(async(req,res)=>{
  if(previewOnly && url.pathname.endsWith('/pose_search_properties')){const items=properties.filter(p=>p.publication==='Published' && !p.archived);return reply(200,{items,total:items.length,page:1,pageSize:12,snapshot:randomUUID(),expiresAt:'2027-01-01T00:00:00Z'});}
  if(previewOnly && url.pathname.endsWith('/property_projects'))return reply(200,[]);
  if(url.pathname==='/v1/chat/completions'){
-  if(input.response_format?.json_schema?.name==='rag_rerank')return reply(200,{choices:[{message:{content:JSON.stringify({has_answer:true,ranked:[{n:2,relevance:3},{n:1,relevance:2},{n:3,relevance:1}]})}}]});
+  if(input.response_format?.json_schema?.name==='rag_rerank')return reply(200,{choices:[{message:{content:JSON.stringify(rerankNoAnswer?{has_answer:false,ranked:[{n:1,relevance:3}]}:{has_answer:true,ranked:[{n:2,relevance:3},{n:1,relevance:2},{n:3,relevance:2},{n:4,relevance:2}]})}}]});
   if(live){
    const response=await fetch('http://localhost:1234/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.timeout(60000)});
    const body=await response.json();modelOutputs.push(body.choices?.[0]?.message?.content);return reply(response.status,body);
@@ -272,10 +268,14 @@ const provider=createServer(async(req,res)=>{
   if(role!=='Admin' && !(role==='Sales' && assigned(input.p_lead,directory.Sales)))return error('42501','FORBIDDEN',403);
   const lead=leads.get(input.p_lead);if(lead.version!==input.p_version)return error('40001','VERSION_CONFLICT',409);lead.temperature=input.p_classification==='Unrated' ? null:input.p_classification.toUpperCase();lead.version++;return reply(200,{classification:input.p_classification,version:lead.version});
  }
+ if(url.pathname.endsWith('/pose_system_search_knowledge')){
+  const rows=properties.filter(p=>p.publication==='Published'&&!p.archived).map((p,i)=>({chunk_id:`chunk-${i}`,document_id:`doc-${i}`,source_id:p.id,source_type:'Property',header:`${p.code} ${p.name}`,content:`${p.name} ${p.location} published listing.`,vector_rank:i+1,text_rank:i+1,similarity:.9,embed_model:'fixture',code:p.code,name:p.name,location:p.location,property_type:p.property_type,transaction_type:p.transaction_type,price:p.price,price_period:p.price_period,availability:p.availability,updated_at:p.updated_at}));
+  return reply(200,{data:rows});
+ }
  if(url.pathname.endsWith('/property_public_catalog')){
   searchReads++;
   check(token==='fixture-public','Retrieval uses anon publishable key');
-   let rows=properties.filter(p=>p.publication==='Published' && !p.archived);if(mode==='search')rows=rows.filter(p=>p.price!==null&&p.price<=3e9);
+  let rows=properties.filter(p=>p.publication==='Published' && !p.archived);if(mode==='search')rows=rows.filter(p=>p.price!==null&&p.price<=3e9);
   for(const [k,v] of url.searchParams){if(v.startsWith('ilike.'))rows=rows.filter(p=>String(p[k]).toLocaleLowerCase('vi').includes(v.slice(7,-1).toLocaleLowerCase('vi')));if(v.startsWith('eq.'))rows=rows.filter(p=>String(p[k])===v.slice(3));if(v.startsWith('in.'))rows=rows.filter(p=>v.slice(4,-1).split(',').includes(String(p[k])));if(v.startsWith('gte.'))rows=rows.filter(p=>p[k]!==null && p[k]>=Number(v.slice(4)));if(v.startsWith('lte.'))rows=rows.filter(p=>p[k]!==null && p[k]<=Number(v.slice(4)));}
   return reply(200,req.headers.accept?.includes('application/vnd.pgrst.object+json') ? rows[0] || null:rows.slice(0,5));
  }
@@ -330,6 +330,11 @@ try{
  check((await call(`/api/ai/sessions/${chat.session.id}`,null,cookie)).status===200,'Own guest reads session');
  check(messages.length===0,'Default no transcript');
  check(chat.sources.length===4 && chat.sources.every(p=>p.updated_at),'Published-only timestamp evidence');
+ const rerankHttp=await (await fetch('http://127.0.0.1:3301/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({response_format:{json_schema:{name:'rag_rerank'}},messages:[]})})).json();
+ const rerankOrder=JSON.parse(rerankHttp.choices[0].message.content).ranked.map(item=>item.n);
+ check(rerankOrder[0]===2 && chat.sources.some(p=>p.code==='P-1') && chat.sources.some(p=>p.code==='P-2'),'Real HTTP fake provider rerank reply reaches chat cards');
+ rerankNoAnswer=true;const noAnswerChat=await (await call('/api/ai/chat',{...base,message:'Có biệt thự ở Đà Lạt không?'})).json();rerankNoAnswer=false;
+ check(noAnswerChat.sources.length===0&&!/P-\d|\d+\s*(?:tỷ|VND)|còn bán|Available/i.test(noAnswerChat.reply),'Real HTTP has_answer=false is honest and has no cards');
  check(chat.sources.every(p=>Number.isInteger(p.number) && Object.hasOwn(p,'cover_id') && Object.hasOwn(p,'area') && Object.hasOwn(p,'bedrooms') && Object.hasOwn(p,'location')),'Cards expose numbered source fields');
  check(chat.sources.some(p=>p.price===null) && chat.sources.some(p=>p.price_period==='Month' || p.price_period==='Total'),'Cards preserve null and period-aware prices');
  check(chat.sources.every(p=>!String(p.reason||'').match(/\d{7,}|@|\+\d/)),'Card reasons contain no PII or price');

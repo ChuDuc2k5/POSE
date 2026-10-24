@@ -6,7 +6,7 @@ import { RetrievalService, applyThresholds } from '../dist/modules/ai/retrieval.
 import { rerank } from '../dist/modules/ai/rerank.js';
 import { EmbeddingService } from '../dist/modules/ai/embeddings.js';
 import { inferSearch } from '../dist/modules/ai/infer-search.js';
-import { querySearch } from '../dist/modules/ai/llm.js';
+import { querySearch, getAiUsage, resetAiUsage } from '../dist/modules/ai/llm.js';
 
 const fixture = JSON.parse(await readFile(new URL('../test/fixtures/rag-eval-real.json', import.meta.url)));
 const snapshot = JSON.parse(await readFile(process.env.RAG_SNAPSHOT || 'C:/Users/Admin/POSE-tasks/rag-real-snapshot.json', 'utf8'));
@@ -43,6 +43,8 @@ const cache = new Map();
 const retrievalCache = new Map();
 const rerankCache = new Map();
 const latencies = [];
+const rerankLatencies = [];
+let rerankFallbacks = 0;
 
 async function prepare(item) {
   const previous = item.context?.previous_expected_codes || [];
@@ -71,7 +73,18 @@ async function evaluate(prepared, min, no, textRank, modelRerank = useRerank) {
       retrievalCache.set(cacheKey, ranked);
       fileCache[`retrieval:${cacheKey}`] = ranked;
     }
-    const reranked = !pureReference && modelRerank ? (rerankCache.get(cacheKey) || fileCache[`rerank:${cacheKey}`] || await rerank(plan.query.standalone_question, ranked, {}).then(value => { rerankCache.set(cacheKey, value); fileCache[`rerank:${cacheKey}`] = value; return value; })) : null;
+    let reranked = null;
+    if (!pureReference && modelRerank) {
+      const cached = rerankCache.get(cacheKey) || fileCache[`rerank:${cacheKey}`];
+      if (cached && !cached.fallback) reranked = cached;
+      if (!reranked) {
+        const started = Date.now();
+        reranked = await rerank(plan.query.standalone_question, ranked, {});
+        rerankLatencies.push(Date.now() - started);
+        if (reranked.fallback) rerankFallbacks++; else { rerankCache.set(cacheKey, reranked); fileCache[`rerank:${cacheKey}`] = reranked; }
+      }
+      console.log(`[${i + 1}/${fixture.length}] ${item.id} rerank ${reranked.latencyMs}ms returned ${reranked.chunks.length}`);
+    }
     const result = pureReference
       ? { found: true, chunks: plan.refs.map(code => snapshot.find(row => row.code === code)).filter(Boolean) }
       : reranked ? { found: reranked.found, chunks: reranked.chunks } : (() => { const chunks = applyThresholds(ranked, thresholdOptions); return { found: chunks.length > 0, chunks }; })();
@@ -121,10 +134,12 @@ for (const min of [0.30,0.35,0.40,0.45,0.50,0.55,0.60,0.65,0.70]) for (const no 
 }
 console.log(`BEST ${best.min.toFixed(2)} ${best.no.toFixed(2)} ${best.textRank} ${best.recall.toFixed(3)} ${best.mrr.toFixed(3)} ${best.noansP.toFixed(3)} ${best.noansR.toFixed(3)} ${best.f1.toFixed(3)}`);
 if (useRerank) {
+  resetAiUsage();
   const rerankResult = await evaluate(prepared, defaultOptions.minScore, defaultOptions.noAnswerScore, defaultOptions.minTextRank, true);
-  console.log('variant recall@5 MRR noans_P noans_R F1 latency_p50 latency_p95');
-  const sorted = [...latencies].sort((a, b) => a - b), pct = p => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] || 0;
-  console.log(`baseline ${best.recall.toFixed(3)} ${best.mrr.toFixed(3)} ${best.noansP.toFixed(3)} ${best.noansR.toFixed(3)} ${best.f1.toFixed(3)} ${pct(.5)} ${pct(.95)}`);
-  console.log(`rerank(pool=${process.env.AI_RAG_RERANK_POOL || 20},min=${process.env.AI_RAG_RERANK_MIN || 2}) ${rerankResult.recall.toFixed(3)} ${rerankResult.mrr.toFixed(3)} ${rerankResult.noansP.toFixed(3)} ${rerankResult.noansR.toFixed(3)} ${rerankResult.f1.toFixed(3)} ${pct(.5)} ${pct(.95)}`);
+  const percentile = (values, p) => { const sorted = [...values].sort((a, b) => a - b); return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] || 0; };
+  console.log('variant recall@5 MRR noans_P noans_R F1 fallback_count latency_p50 latency_p95 prompt_tokens completion_tokens total_tokens');
+  console.log(`baseline ${best.recall.toFixed(3)} ${best.mrr.toFixed(3)} ${best.noansP.toFixed(3)} ${best.noansR.toFixed(3)} ${best.f1.toFixed(3)} 0 ${percentile(latencies,.5)} ${percentile(latencies,.95)} 0 0 0`);
+  const usage = getAiUsage();
+  console.log(`rerank(pool=${process.env.AI_RAG_RERANK_POOL || 20},min=${process.env.AI_RAG_RERANK_MIN || 2},batch=${process.env.AI_RAG_RERANK_BATCH || 10}) ${rerankResult.recall.toFixed(3)} ${rerankResult.mrr.toFixed(3)} ${rerankResult.noansP.toFixed(3)} ${rerankResult.noansR.toFixed(3)} ${rerankResult.f1.toFixed(3)} ${rerankFallbacks} ${percentile(rerankLatencies,.5)} ${percentile(rerankLatencies,.95)} ${usage.prompt_tokens} ${usage.completion_tokens} ${usage.total_tokens}`);
 }
 await writeFile(cacheFile, JSON.stringify(fileCache));
