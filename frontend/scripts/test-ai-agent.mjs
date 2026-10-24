@@ -15,7 +15,7 @@ await mkdir(join(temp,'node_modules'));
 for(const dep of ['openai','zod'])await symlink(join(repoRoot,'backend','node_modules',dep),join(temp,'node_modules',dep),'junction');
 await mkdir(join(temp,'prompts'));
 await cp(join(repoRoot,'backend','src','modules','ai','prompts'),join(temp,'prompts'),{recursive:true});
-for(const name of ['privacy','money','extraction','lead-scoring','guard','schemas','request-log','llm']){
+for(const name of ['privacy','money','extraction','lead-scoring','hcm-wards','ward-label','guard','schemas','request-log','llm']){
  const source=await readFile(new URL(`../../backend/src/modules/ai/${name}.ts`,import.meta.url),'utf8');
  await writeFile(join(temp,`${name}.mjs`),ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText.replace(/from '\.\/([\w-]+)(?:\.(?:js|ts))?'/g,"from './$1.mjs'"));
 }
