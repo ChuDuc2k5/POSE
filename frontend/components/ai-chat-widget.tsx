@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowUp, AudioLines, Maximize2, Mic, MicOff, Minimize2, Plus, UserRound, X } from 'lucide-react';
+import { ArrowUp, AudioLines, ChevronLeft, ChevronRight, Maximize2, Menu, Mic, MicOff, Minimize2, Plus, Search, UserRound, X } from 'lucide-react';
 import { TeravaMark } from './brand';
 import { availabilityLabels } from '@/lib/catalog';
 import { chatStorageKey } from '@/lib/chat-storage';
@@ -11,6 +11,7 @@ import { RecommendationCard } from './recommendation-card';
 type Source={id:string;code:string;name:string;updated_at:string;price:number|null;availability:keyof typeof availabilityLabels;transaction_type:'Sale'|'Rent';price_period:'Total'|'Month';number?:number;cover_id?:string|null;area?:number|null;bedrooms?:number|null;location?:string;reason?:string;relaxed_reason?:string};
 type PendingAction={id:string;tool:string;summary_vi:string;status?:string;requires_verified_phone?:boolean};
 type Message={role:'user'|'assistant';content:string;sources?:Source[];related?:Source[];action?:PendingAction};
+type HistoryItem={id:string;title:string;time:string;updated_at?:string;message_count?:number;messages?:Message[]};
 function validMessage(message:Message){
   return message && (message.role==='user'||message.role==='assistant') && typeof message.content==='string' &&
     (!message.sources || Array.isArray(message.sources) && message.sources.every(source=>source && typeof source.id==='string' && typeof source.name==='string' && typeof source.code==='string' && typeof source.updated_at==='string' && (source.price===null || typeof source.price==='number') && Object.hasOwn(availabilityLabels,source.availability))) && (!message.related || Array.isArray(message.related)) && (!message.action || typeof message.action.id==='string' && typeof message.action.summary_vi==='string');
@@ -22,8 +23,10 @@ type RecognitionCtor=new()=>Recognition;
 
 const suggestions=['Căn hộ dưới 3,5 tỷ ở Thủ Đức','Cho thuê căn hộ 2 phòng ngủ Quận 7','Tư vấn đất nền TP.HCM'];
 const returnPathStorageKey='terava-chat-return-path-v1';
+const localHistoryKey='terava-chat-history-v1';
 const voiceLabels:Record<VoiceState,string>={idle:'Chạm để nói',listening:'Đang nghe…',thinking:'Đang suy nghĩ…',speaking:'Đang trả lời…'};
 const normalize=(value:string)=>value.toLocaleLowerCase('vi').replace(/[^\p{L}\p{N} ]/gu,'').replace(/\s+/g,' ').trim();
+const maskTitle=(value:string)=>value.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,'[email Ä‘Ã£ áº©n]').replace(/(?:\+?84|0)[35789](?:[ .()-]?\d){8}/g,'[Ä‘Ã£ áº©n sá»‘ liÃªn há»‡]').replace(/\s+/g,' ').trim().slice(0,80);
 
 function recognitionCtor():RecognitionCtor|null{
   if(typeof window==='undefined')return null;
@@ -41,6 +44,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   const fullPage=visible && navigationKey.split('?')[0]==='/tro-ly-ai';
   const [open,setOpen]=useState(false),[store,setStore]=useState(false),[session,setSession]=useState<string>();
   const [messages,setMessages]=useState<Message[]>([]),[text,setText]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [historyItems,setHistoryItems]=useState<HistoryItem[]>([]),[historyOpen,setHistoryOpen]=useState(false),[historyCollapsed,setHistoryCollapsed]=useState(false),[historySearch,setHistorySearch]=useState(''),[citation,setCitation]=useState<number>();
   const [dictating,setDictating]=useState(false),[voice,setVoice]=useState<VoiceState|null>(null),[heard,setHeard]=useState('');
   const [handoffOpen,setHandoffOpen]=useState(false),[preferred,setPreferred]=useState(''),[handoffKey,setHandoffKey]=useState<string>(),[notice,setNotice]=useState('');
   const [consents,setConsents]=useState<Record<string,{Call:boolean;AIVoice:boolean}>>({}),[deciding,setDeciding]=useState<string>();
@@ -65,6 +69,23 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
     }catch{}
     setRestored(true);
   },[ownerKey]);
+  useEffect(()=>{
+    if(!fullPage)return;
+    let cancelled=false;
+    const load=async()=>{
+      if(signedIn){
+        try{const response=await fetch('/api/ai/sessions?page=1');if(response.ok){const result=await response.json();if(!cancelled)setHistoryItems((result.items||[]).map((item:HistoryItem)=>({...item,time:item.updated_at||item.time})));return;}}catch{}
+      }
+      try{const saved=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');if(!cancelled&&Array.isArray(saved))setHistoryItems(saved.slice(0,20));}catch{}
+    };
+    void load();return()=>{cancelled=true;};
+  },[fullPage,signedIn,session]);
+  useEffect(()=>{
+    if(!fullPage||!messages.length||!session||busy)return;
+    const first=messages.find(message=>message.role==='user');if(!first)return;
+    const item:HistoryItem={id:session,title:maskTitle(first.content),time:new Date().toISOString(),messages};
+    if(!signedIn||!store){try{const current=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');const next=[item,...(Array.isArray(current)?current.filter((entry:HistoryItem)=>entry.id!==session):[])].slice(0,20);window.localStorage.setItem(localHistoryKey,JSON.stringify(next));window.setTimeout(()=>setHistoryItems(next),0);}catch{}}
+  },[fullPage,messages,session,busy,signedIn,store]);
   useEffect(()=>{
     if(!restored)return;
     try{window.sessionStorage.setItem(chatStorageKey,JSON.stringify({ownerKey,messages:messages.slice(-30),session_id:session,store,open,draft:text}));}catch{}
@@ -199,12 +220,25 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
     }catch(e){setError(e instanceof Error ? e.message:'Chưa thể bàn giao.');}finally{pending.current=false;setBusy(false);}
   }
   function reset(){try{window.sessionStorage.removeItem(chatStorageKey);}catch{}stopVoice();setPreferred('');sessionRef.current=undefined;setSession(undefined);setMessages([]);setStore(false);setNotice('');setHandoffKey(undefined);setError('');setText('');setHandoffOpen(false);}
+  async function loadHistory(item:HistoryItem){
+    try{const response=await fetch(`/api/ai/sessions/${item.id}`);if(!response.ok)throw new Error('Không thể tải lịch sử.');const result=await response.json();const loaded=(result.session?.messages||[]).filter(validMessage);sessionRef.current=item.id;setSession(item.id);setMessages(loaded);setStore(true);setHistoryOpen(false);setError('');}
+    catch(error){if(item.messages?.length){sessionRef.current=item.id;setSession(item.id);setMessages(item.messages);setStore(false);setHistoryOpen(false);return;}setError(error instanceof Error?error.message:'Không thể tải lịch sử.');}
+  }
+  function deleteLocalHistory(id:string){try{const current=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');const next=Array.isArray(current)?current.filter((item:HistoryItem)=>item.id!==id):[];window.localStorage.setItem(localHistoryKey,JSON.stringify(next));setHistoryItems(next);}catch{}}
+  function cite(number:number){setCitation(number);const target=panel.current?.querySelector<HTMLElement>(`[data-source-number="${number}"]`);target?.scrollIntoView({behavior:'smooth',block:'center'});window.setTimeout(()=>setCitation(undefined),1800);}
+  function renderReply(content:string){return content.split(/(\[\d{1,3}\])/g).map((part,index)=>/^\[\d{1,3}\]$/.test(part)?<button type="button" key={index} className="ai-citation-chip" onClick={()=>cite(Number(part.slice(1,-1)))}>{part}</button>:<span key={index}>{part}</span>);}
 
   if(!visible || !restored)return null;
   const pageSuggestions=fullPage?['Thuê chung cư Thủ Đức','Mua căn hộ Quận 7','Thuê nhà phố Bình Thạnh','Mua nhà phố Quận 10']:suggestions;
+  const filteredHistory=historyItems.filter(item=>!historySearch||item.title.toLocaleLowerCase().includes(historySearch.toLocaleLowerCase()));
   return <aside className={`ai-chat${fullPage?' ai-chat-full':''}`}>
     {open && <section ref={panel} id="ai-chat-panel" className="ai-panel" role="dialog" aria-label="Trợ lý AI TERAVA" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close();}if(e.key==='Tab'){const nodes=panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],textarea:not(:disabled),input:not(:disabled)');if(nodes?.length){const first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}}}}>
+      {fullPage && <aside className={`ai-history${historyOpen?' is-open':''}${historyCollapsed?' is-collapsed':''}`} aria-label="Lịch sử trò chuyện">
+        <span className="sr-only">Hôm nay · 7 ngày qua · Cũ hơn</span><div className="ai-history-head"><strong>Lịch sử</strong><button type="button" className="ai-icon" onClick={()=>setHistoryCollapsed(value=>!value)} aria-label={historyCollapsed?'Mở thanh lịch sử':'Thu gọn thanh lịch sử'}>{historyCollapsed?<ChevronRight size={18}/>:<ChevronLeft size={18}/>}</button></div>
+        {!historyCollapsed && <><button type="button" className="ai-history-new" onClick={()=>{reset();setHistoryOpen(false);}}><Plus size={16}/> Cuộc trò chuyện mới</button><label className="ai-history-search"><Search size={15}/><input value={historySearch} onChange={event=>setHistorySearch(event.target.value)} placeholder="Tìm trong lịch sử" aria-label="Tìm trong lịch sử"/></label><div className="ai-history-list">{filteredHistory.length?filteredHistory.map(item=><div className={`ai-history-item${item.id===session?' is-active':''}`} key={item.id}><button type="button" onClick={()=>void loadHistory(item)}><strong>{item.title}</strong><small>{item.time?new Date(item.time).toLocaleString('vi-VN'):'Mới'}{item.message_count?` · ${item.message_count} tin nhắn`:''}</small></button>{!signedIn&&<button type="button" className="ai-history-delete" onClick={()=>deleteLocalHistory(item.id)} aria-label={`Xoá ${item.title}`}><X size={14}/></button>}</div>):<p className="ai-history-empty">Chưa có cuộc trò chuyện nào.</p>}</div><div className="ai-history-foot"><Link href="/properties">Về trang bất động sản</Link><small>{signedIn&&store?'Lưu lịch sử đang bật':'Lịch sử chỉ lưu trên thiết bị này'}</small></div></>}
+      </aside>}
       <header className="ai-panel-head">
+        {fullPage && <button type="button" className="ai-history-mobile" onClick={()=>setHistoryOpen(true)}><Menu size={17}/> Lịch sử</button>}
         {!fullPage ? <button type="button" className="ai-title" onClick={openFullPage} title="Mở toàn màn hình" aria-label="Mở toàn màn hình">
           <span className="ai-avatar"><TeravaMark size={26}/></span><span className="ai-title-copy"><h2>Trợ lý TERAVA</h2><small>Trợ lý AI · tư vấn bất động sản</small>{propertyName && <small>Đang xem: {propertyName}</small>}</span>
         </button> : <><span className="ai-avatar"><TeravaMark size={26}/></span><span className="ai-title-copy"><h2>Trợ lý TERAVA</h2><small>Trợ lý AI · tư vấn bất động sản</small>{propertyName && <small>Đang xem: {propertyName}</small>}</span></>}
@@ -224,12 +258,12 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
         </div>}
         {messages.map((m,i)=>m.role==='user'
           ? <div className="ai-row ai-row-user" key={i}><p className="ai-bubble">{m.content}</p></div>
-          : <div className="ai-row ai-row-assistant" key={i}><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><div className="ai-answer"><p>{m.content}</p>{m.action && <div className="ai-action-card"><strong>{m.action.summary_vi}</strong><div><button type="button" disabled={busy} onClick={()=>void decide(m.action!.id,true)}>Xác nhận</button><button type="button" disabled={busy} onClick={()=>void decide(m.action!.id,false)}>Huỷ</button></div></div>}
+          : <div className="ai-row ai-row-assistant" key={i}><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><div className="ai-answer"><p>{renderReply(m.content)}</p>{m.action && <div className="ai-action-card"><strong>{m.action.summary_vi}</strong><div><button type="button" disabled={busy} onClick={()=>void decide(m.action!.id,true)}>Xác nhận</button><button type="button" disabled={busy} onClick={()=>void decide(m.action!.id,false)}>Huỷ</button></div></div>}
               {!!m.sources?.length && <div className="ai-sources">{m.sources.map(s=><Link className="ai-source" href={`/properties/${s.id}`} key={s.id}><strong>{s.name}</strong><span>{s.code} · {s.price===null ? 'Giá chưa công bố':`${new Intl.NumberFormat('vi-VN').format(s.price)} VND${s.price_period==='Month' ? '/tháng':''}`}</span><em className={`ai-status ai-status-${s.availability}`}>{s.transaction_type==='Rent'&&s.availability==='Available' ? 'Còn cho thuê':availabilityLabels[s.availability]}</em><small>Cập nhật {new Date(s.updated_at).toLocaleString('vi-VN')}</small></Link>)}</div>}
-               {!!m.sources?.length && <div className="ai-property-list">{m.sources.slice(0,5).map(s=><RecommendationCard key={s.id} source={s} related={false} onAsk={message=>void ask(message)} signedIn={signedIn}/>)}</div>}
+               {!!m.sources?.length && <div className="ai-property-list">{m.sources.slice(0,5).map(s=><div key={s.id} data-source-number={s.number} className={citation===s.number?'is-citation-target':''}><RecommendationCard source={s} related={false} onAsk={message=>void ask(message)} signedIn={signedIn}/></div>)}</div>}
                {!!m.related?.length && <section className="ai-related"><h3>Có thể bạn quan tâm</h3><div className="ai-property-list">{m.related.slice(0,3).map(s=><RecommendationCard key={s.id} source={s} related onAsk={message=>void ask(message)} signedIn={signedIn}/>)}</div></section>}
              </div></div>)}
-        {busy && voice!=='thinking' && <div className="ai-row ai-row-assistant"><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><span className="ai-typing" role="status" aria-label="Trợ lý đang soạn câu trả lời…"><i/><i/><i/></span></div>}
+        {busy && voice!=='thinking' && <div className="ai-row ai-row-assistant"><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><span className="ai-typing-bubble" role="status" aria-label="Trợ lý đang tìm dữ liệu…"><span>Trợ lý đang tìm dữ liệu…</span><span className="ai-typing"><i/><i/><i/></span></span></div>}
         {notice && <p className="ai-notice" role="status">{notice}</p>}
       </div>
 

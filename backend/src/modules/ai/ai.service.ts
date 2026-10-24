@@ -250,8 +250,16 @@ export class AiService {
     return catalogJson(payload);
   }catch{return unavailable();}
 }
-  async getChat(request:NextRequest,id:string) {
+async getChat(request:NextRequest,id:string) {
   try {if(!uuidPattern.test(id))return catalogError('NOT_FOUND','Không tìm thấy hội thoại.',404);const who=await identity();if(who.error)return who.error;const result=await readSession(id,who);return result.error ? catalogDatabaseError(result.error):catalogJson({session:result.data});}catch{return unavailable();}
+}
+async getSessions(request:NextRequest) {
+  const session=await authenticatedSession();
+  if(!session || session.role!=='User')return catalogError('UNAUTHORIZED','Vui lòng đăng nhập.',401);
+  const pageValue=Number(new URL(request.url).searchParams.get('page')||1);
+  if(!Number.isInteger(pageValue)||pageValue<1||pageValue>100)return catalogError('INVALID_INPUT','Trang không hợp lệ.',400);
+  const result=await authClient(session.access).rpc('pose_ai_list_sessions',{p_page:pageValue});
+  return result.error ? catalogDatabaseError(result.error):catalogJson({items:result.data||[]});
 }
 async getUsage(request:NextRequest) {
   // Read-only GET: browsers send no Origin on same-origin GETs; CSRF checks guard state changes only.
