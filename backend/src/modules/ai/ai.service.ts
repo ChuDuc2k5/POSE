@@ -11,7 +11,7 @@ import { object } from './extraction.js';
 import { inferSearch } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
 import { correctionData, disclosure, GUARD_VERSION, safeReply, type Evidence } from './guard.js';
-import { RetrievalService, renderRetrievedContext, type RetrievalResult } from './retrieval.js';
+import { RetrievalService, renderRetrievedContext, deterministicReason, type RetrievalResult } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
 
@@ -32,7 +32,7 @@ async function retrieve(filters:Record<string,unknown>,context:string|null):Prom
   const scalar=(value:unknown)=>typeof value==='string'||typeof value==='number' ? value:'';
   const params=new URLSearchParams();if(typeof filters.location==='string')params.set('location',`ilike.%${filters.location}%`);if(filters.transaction_type)params.set('transaction_type',`eq.${scalar(filters.transaction_type)}`);if(filters.type)params.set('property_type',`eq.${scalar(filters.type)}`);if(filters.minPrice!==undefined)params.set('price',`gte.${scalar(filters.minPrice)}`);if(filters.maxPrice!==undefined)params.set('price',`lte.${scalar(filters.maxPrice)}`);
   const allowed=new Set(['location','transaction_type','type','minPrice','maxPrice']);if(Object.keys(filters).some(k=>!allowed.has(k)))throw new Error('INVALID_FILTER');
-  let query=authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type,transaction_type,price_period');
+  let query=authClient().from('property_public_catalog').select('id,code,name,cover_id,area,bedrooms,price,availability,updated_at,location,property_type,transaction_type,price_period');
   if(context)query=query.eq('id',context);
   if(typeof filters.location==='string')query=query.ilike('location',`%${filters.location.replace(/[%_\\]/g,'\\$&')}%`);
   if(filters.transaction_type)query=query.eq('transaction_type',filters.transaction_type);
@@ -45,9 +45,14 @@ async function retrieve(filters:Record<string,unknown>,context:string|null):Prom
 }
 async function retrieveIds(ids:string[]):Promise<Evidence[]> {
   if(!ids.length)return [];
-  const result=await authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type,transaction_type,price_period').in('id',[...new Set(ids)].slice(0,100)).limit(100);
+  const result=await authClient().from('property_public_catalog').select('id,code,name,cover_id,area,bedrooms,price,availability,updated_at,location,property_type,transaction_type,price_period').in('id',[...new Set(ids)].slice(0,100)).limit(100);
   if(result.error)throw new Error('RETRIEVAL_UNAVAILABLE');
   return (result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[];
+}
+function relaxedLocation(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const match=value.match(/(?:quận|huyện|thành phố|tp\.?|q\.?)[\s\d-]+/i);
+  return match?.[0]?.trim() || value.split(',').at(-1)?.trim();
 }
 @Injectable()
 export class AiService {
@@ -71,13 +76,20 @@ export class AiService {
     const guest=!who.session, source=guest ? this.privacy.stripPhones(input.message):input.message;
     const sanitizedHistory=history.map(turn=>({role:turn.role,content:guest ? this.privacy.stripPhones(turn.content):turn.content}));
     let searchPerformed=input.filters!==undefined || !!input.property_id,rag:RetrievalResult|null=null;
-    let items:Evidence[]=[];
+    let items:Evidence[]=[],related:Record<string,unknown>[]=[];
     const search=async(searchFilters:Record<string,unknown>,propertyId:string|null=null)=>{
       const aliases:Record<string,string>={min_price_vnd:'minPrice',max_price_vnd:'maxPrice',property_type:'type'};searchFilters=Object.fromEntries(Object.entries(searchFilters).map(([key,value])=>[aliases[key]||key,value]));
-      try{rag=await this.retrieval.search(source,searchFilters,{propertyId,propertyIds:interestIds.slice(-20)});return (rag.sources.filter(item=>item.id).map(item=>({...item,id:item.id as string,name:item.title as string})) as unknown) as Evidence[];}
+      try{rag=await this.retrieval.search(source,searchFilters,{propertyId,propertyIds:interestIds.slice(-20)});const mapped=rag.sources.filter(item=>item.id).map(item=>({...item,id:item.id as string,name:item.title as string,reason:item.reason as string}));const live=await retrieveIds(mapped.map(item=>item.id));return live.map(item=>({...item,...mapped.find(candidate=>candidate.id===item.id)})) as Evidence[];}
       catch{return retrieve(searchFilters,propertyId);}
     };
     if(searchPerformed)items=await search(filters,input.property_id as string|null || null);
+    const initialRag=rag as RetrievalResult|null;
+    if(searchPerformed && initialRag && !initialRag.found && Object.keys(filters).length && !input.property_id){
+      const relaxed={transaction_type:filters.transaction_type,location:relaxedLocation(filters.location)};
+      const relaxedItems=await search(Object.fromEntries(Object.entries(relaxed).filter(([,value])=>value!==undefined)),null);
+      related=relaxedItems.slice(0,3).map(item=>({...item,number:undefined,relaxed_reason:filters.maxPrice!==undefined||filters.minPrice!==undefined?'Ngoài ngân sách đã nêu':filters.location?'Khác khu vực: '+String(filters.location):'Gợi ý gần với tiêu chí đã nêu',reason:deterministicReason(String(item.reason||'')),related:true}));
+      rag=null;
+    }
     // Small models rarely ask for a search on their own; search the catalogue from the
     // question itself, and if nothing matches widen once so the answer can compare.
     const inferred=searchPerformed ? null:inferSearch(source);
@@ -144,7 +156,7 @@ export class AiService {
       if(retryViolation){log('regeneration',result.reply,retryViolation);blocked=true;}
       else { violation=null; log('regeneration',{},null); }
     }
-    const reply=(count===0 ? `${disclosure}\n`:'')+(blocked ? safeReply:result.reply);
+    const reply=(count===0 ? `${disclosure}\n`:'')+(related.length && !items.length ? 'Không có bất động sản nào khớp các tiêu chí bạn nêu.\n' : '')+(blocked ? safeReply:result.reply);
     if(!blocked){
       try {
         const modelNeeds=await extractNeedsAfterReply(source,reply);
@@ -169,12 +181,12 @@ export class AiService {
     if(committed.error)return catalogDatabaseError(committed.error);
     if(guest)(await cookies()).set('pose-ai-session',who.token,{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',path:'/',maxAge:86400*7});
     const action=pendingActions[0];
-    const payload={session:committed.data,reply,sources:items,blocked,proposals,pending_actions:pendingActions,action,inquiry_url:'/customer/inquiries/new'};
+    const payload={session:committed.data,reply,sources:items,related,blocked,proposals,pending_actions:pendingActions,action,inquiry_url:'/customer/inquiries/new'};
     if(request.headers.get('accept')?.includes('text/event-stream')){
       const encoder=new TextEncoder();
       const stream=new ReadableStream<Uint8Array>({start(controller){
         const send=(type:string,value:unknown)=>controller.enqueue(encoder.encode(`event: ${type}\ndata: ${JSON.stringify(value)}\n\n`));
-        send('meta',{session_id:committed.data.id,sources:items});
+        send('meta',{session_id:committed.data.id,sources:items,related});
         const deltas=streamedDeltas.length ? streamedDeltas : Array.from({length:Math.ceil(reply.length/48)},(_,i)=>reply.slice(i*48,i*48+48));
         for(const text of deltas)send('delta',{text});
         for(const pending of pendingActions)send('action',{action:pending});

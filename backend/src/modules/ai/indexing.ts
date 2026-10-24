@@ -31,7 +31,7 @@ export class KnowledgeIndexer implements OnModuleInit,OnApplicationShutdown{
   async reindexAll(){return this.sweep(true);}
   async indexDocument(documentId:string){
     const response=await systemClient().rpc('pose_system_kb_source',{p_document:documentId});if(response.error)throw new Error(response.error.message);const source=response.data as Source|null;if(!source)return {status:'missing'};
-    if(!source.published){const removed=await systemClient().rpc('pose_system_kb_remove_chunks',{p_document:documentId});if(removed.error)throw new Error(removed.error.message);return {status:'removed'};}
+    if(!source.published){const removed=await systemClient().rpc('pose_system_kb_remove_chunks',{p_document:documentId});if(removed.error)throw new Error(removed.error.message);if(source.source_id)await systemClient().rpc('pose_system_remove_similar',{p_property:source.source_id});return {status:'removed'};}
     const raw=source.source_type==='Property'?{description:source.description,project_name:source.project_name,amenities:source.amenities}:{question:source.question,answer:source.answer};
     const hash=contentHash(raw),config=this.embeddings.config(),model=config?.model||null;
     if(!indexNeedsEmbedding(source,hash,model))return {status:'unchanged'};
@@ -39,6 +39,7 @@ export class KnowledgeIndexer implements OnModuleInit,OnApplicationShutdown{
     const embedded=config&&chunks.length?await this.embeddings.embed(chunks.map(chunk=>chunk.embedded)):null;
     const payload=chunks.map((chunk,index)=>({chunk_index:chunk.chunk_index,header:chunk.header,content:chunk.content,embedding:embedded?.vectors[index]||null}));
     const stored=await systemClient().rpc('pose_system_kb_store_chunks',{p_document:documentId,p_hash:hash,p_source_updated_at:source.source_updated_at,p_embed_model:embedded?.model||null,p_chunks:payload});if(stored.error)throw new Error(stored.error.message);
+    if(source.source_id) { const similar=await systemClient().rpc('pose_system_recompute_similar',{p_property:source.source_id,p_embed_model:embedded?.model||null});if(similar.error)throw new Error(similar.error.message); }
     return {status:'indexed',chunks:chunks.length,model:embedded?.model||null};
   }
   async onApplicationShutdown(){if(this.timer)clearInterval(this.timer);await this.worker?.close();await this.queue?.close();}
