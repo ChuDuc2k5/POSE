@@ -8,14 +8,18 @@ export const CHUNK_SIZE = 800;
 export const CHUNK_OVERLAP = 150;
 
 const contact = /(?:[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.[\p{L}]{2,}|(?:https?:\/\/|www\.)\S+|(?<![\d+])(?:\+84[ .()-]?[35789](?:[ .()-]?\d){8}|0[35789](?:[ .()-]?\d){8}|\+[1-9](?:[ .()-]?\d){7,14})(?!\d))/giu;
-const broker = /\b(?:li[eê]n\s*h[eệ]|hotline|zalo|m[oô]i\s*gi[oớ]i|g[oọ]i|inbox|nh[aắ]n\s*tin|t[uư]\s*v[aấ]n|anh|ch[iị]|mr\.?|ms\.?)\b/iu;
-const price = /(?:gi[aá]|m[uứ]c\s*gi[aá]|ch[iỉ]\s*(?:c[oò]n)?|ng[aâ]n\s*s[aá]ch)[^.!?\n]*(?:\d[\d., ]*\s*(?:t[yỷỉ]|tri[eệ]u|vnd|đ[oồ]ng|đ)|th[oỏ]a\s*thu[aậ]n)[^.!?\n]*[.!?]?/giu;
+const broker = /\b(?:lien\s*he|li\u00ean\s*h\u1ec7|li\u00e3\u00aa\u00a1n|hotline|zalo|moi\s*gioi|m\u00f4i\s*gi\u1edbi|goi|inbox|nhan\s*tin|tu\s*van|anh|chi|mr\.?|ms\.?)\b/iu;
+// Bare m/m2, room counts and years are intentionally not money units.
+const moneyAmount = /(?:\d[\d., ]*\s*(?:ty|t\u1ef7|t\u00e1\u00bb\u00b7|t\u00e1\u00bb\u0089|trieu|tri\u1ec7u|tri\u00e1\u00bb\u0087u|tr\.?|nghin|ngh\u00ecn|k\b|vnd\b|dong|\u0111ong|\u0111\u1ed3ng|\u00c4\u0091\u00c3\u00b2ng|\u0111|\u00c4\u0091|\u20ab)(?:\s*\/\s*(?:thang|th\u00e1ng|nam|n\u0103m))?)/iu;
+const negotiation = /(?:gia|gi\u00e1|gi\u00c3\u00a1|muc\s*gia|m\u1ee9c\s*gi\u00e1|thuong\s*luong|th\u01b0\u01a1ng\s*l\u01b0\u1ee3ng|th\u00c6\u00b0\u00c6\u00a1ng\s*l\u00c6\u00b0\u1ee3ng)/iu;
+const price = new RegExp('(?:' + moneyAmount.source + '|' + negotiation.source + ')', 'iu');
 const boundary = /[^.!?;\n]+(?:[.!?;]+|\n+|$)/gu;
 
 export function cleanKnowledgeText(value: string) {
   const text = String(value || '').normalize('NFC').replace(/<[^>]*>/gu, ' ').replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D]/gu, ' ')
-    .replace(/^[\s•●▪▫◆◇►▶➤→✓✔★☆|=*_–—-]+/gmu, '').replace(price, ' ');
-  return text.split(/\n|(?<=[.!?;])\s+/u).filter(part => !broker.test(part) && !contact.test(part)).join(' ')
+    .replace(/^[\s\u2022\u25cf\u25aa\u25ab\u25c6\u25c7\u25ba\u25b6\u27a4\u2192\u2713\u2714\u2605\u2606|=*_\u2013\u2014-]+/gmu, ' ');
+  // Prices are often comma-separated from factual clauses; discard that clause.
+  return text.split(/(?<=[.!?;])\s+|\n|,/u).filter(part => !broker.test(part) && !contact.test(part) && !price.test(part)).join(' ')
     .replace(contact, ' ').replace(/\s+/gu, ' ').trim();
 }
 
@@ -54,16 +58,15 @@ export function splitKnowledgeText(text: string) {
 }
 
 export type PropertyChunkSource = { code:string; name:string; location:string; property_type:string; transaction_type:'Sale'|'Rent'; description:string; project_name?:string|null; amenities?:string|null };
-export function propertyHeader(source: PropertyChunkSource) {
-  return `Mã ${source.code} · ${source.name} · ${source.location} · ${source.property_type} · ${source.transaction_type === 'Rent' ? 'Cho thuê' : 'Bán'}`;
+export function districtAliases(source: PropertyChunkSource) {
+  const text = [source.name, source.description, source.location, source.project_name, source.amenities].filter(Boolean).join(' ');
+  const aliases = new Set<string>();
+  for (const match of text.matchAll(/\bQ\.?\s*(\d{1,2})\b/giu)) aliases.add(`Qu\u1eadn ${match[1]}`);
+  for (const match of text.matchAll(/\bQu\u1eadn\s+(\d{1,2})\b/giu)) aliases.add(`Qu\u1eadn ${match[1]}`);
+  if (/\b(?:TP\.?|Th\u00e0nh\s*ph\u1ed1)\s+Th\u1ee7\s*\u0110\u1ee9c\b/iu.test(text)) aliases.add('Th\u00e0nh ph\u1ed1 Th\u1ee7 \u0110\u1ee9c');
+  return [...aliases];
 }
-export function propertyChunks(source: PropertyChunkSource) {
-  const content = [source.description, source.project_name, source.amenities].filter(Boolean).join('. ');
-  const header = propertyHeader(source);
-  return splitKnowledgeText(content).map((chunk, chunk_index) => ({ chunk_index, header, content: chunk, embedded: `${header}\n${chunk}` }));
-}
-export function faqChunks(question:string, answer:string) {
-  const header=`Hỏi đáp · ${cleanKnowledgeText(question)}`;
-  return splitKnowledgeText(answer).map((content,chunk_index)=>({chunk_index,header,content,embedded:`${header}\n${content}`}));
-}
+export function propertyHeader(source: PropertyChunkSource) { const aliases=districtAliases(source); return `M\u00e3 ${source.code} \u00b7 ${source.name} \u00b7 ${source.location}${aliases.length ? ` \u00b7 ${aliases.join(' \u00b7 ')}` : ''} \u00b7 ${source.property_type} \u00b7 ${source.transaction_type === 'Rent' ? 'Cho thu\u00ea' : 'B\u00e1n'}`; }
+export function propertyChunks(source: PropertyChunkSource) { const content = [source.description, source.project_name, source.amenities].filter(Boolean).join('. '); const header = propertyHeader(source); return splitKnowledgeText(content).map((chunk, chunk_index) => ({ chunk_index, header, content: chunk, embedded: `${header}\n${chunk}` })); }
+export function faqChunks(question:string, answer:string) { const header=`H\u1ecfi \u0111\u00e1p \u00b7 ${cleanKnowledgeText(question)}`; return splitKnowledgeText(answer).map((content,chunk_index)=>({chunk_index,header,content,embedded:`${header}\n${content}`})); }
 export function contentHash(value:unknown){return createHash('sha256').update(JSON.stringify(value)).digest('hex');}

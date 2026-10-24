@@ -70,16 +70,16 @@ export class AiService {
     const who=await identity();if(who.error)return who.error;
     const id=typeof input.session_id==='string' ? input.session_id:randomUUID();
     let count=0,interestIds:string[]=[],scoring:{needs:Record<string,{value:unknown;evidence?:string;confirmed_by?:unknown}>;verified:boolean;version:number;interest_ids?:string[];score_result?:ScoreResult}|null=null;
-    if(input.session_id){const prior=await readSession(id,who);if(prior.error)return catalogDatabaseError(prior.error);count=prior.data.message_count;scoring=prior.data.scoring;interestIds=prior.data.property_ids || [];if(prior.data.store_transcript!==input.store_transcript || prior.data.status==='Closed')return catalogError('SESSION_CONFLICT','Lựa chọn lưu áp dụng cho cả phiên; hãy bắt đầu phiên mới để thay đổi.',409);}
+    if(input.session_id){const prior=await readSession(id,who);if(prior.error)return catalogDatabaseError(prior.error);count=prior.data.message_count;scoring=prior.data.scoring;interestIds=prior.data.suggested_property_ids || [];if(prior.data.store_transcript!==input.store_transcript || prior.data.status==='Closed')return catalogError('SESSION_CONFLICT','Lựa chọn lưu áp dụng cho cả phiên; hãy bắt đầu phiên mới để thay đổi.',409);}
     else if(who.client){const context=await who.client.rpc('pose_ai_score_context');if(context.error)return catalogDatabaseError(context.error);scoring=context.data;}
     if(!consumeAttempt('ai-ip',requestClientIp(),100) || !consumeAttempt('ai-session',id,40))return catalogError('RATE_LIMIT','Bạn đã gửi nhiều tin nhắn. Vui lòng thử lại sau.',429);
     const guest=!who.session, source=guest ? this.privacy.stripPhones(input.message):input.message;
     const sanitizedHistory=history.map(turn=>({role:turn.role,content:guest ? this.privacy.stripPhones(turn.content):turn.content}));
     let searchPerformed=input.filters!==undefined || !!input.property_id,rag:RetrievalResult|null=null;
     let items:Evidence[]=[],related:Record<string,unknown>[]=[];
-    const search=async(searchFilters:Record<string,unknown>,propertyId:string|null=null)=>{
+    const search=async(searchFilters:Record<string,unknown>,propertyId:string|null=null,referenceIds:string[]=[] )=>{
       const aliases:Record<string,string>={min_price_vnd:'minPrice',max_price_vnd:'maxPrice',property_type:'type'};searchFilters=Object.fromEntries(Object.entries(searchFilters).map(([key,value])=>[aliases[key]||key,value]));
-      try{rag=await this.retrieval.search(source,searchFilters,{propertyId,propertyIds:interestIds.slice(-20)});const mapped=rag.sources.filter(item=>item.id).map(item=>({...item,id:item.id as string,name:item.title as string,reason:item.reason as string}));const live=await retrieveIds(mapped.map(item=>item.id));return live.map(item=>({...item,...mapped.find(candidate=>candidate.id===item.id)})) as Evidence[];}
+      try{rag=await this.retrieval.search(source,searchFilters,{propertyId,propertyIds:referenceIds});const mapped=rag.sources.filter(item=>item.id).map(item=>({...item,id:item.id as string,name:item.title as string,reason:item.reason as string}));const live=await retrieveIds(mapped.map(item=>item.id));return live.map(item=>({...item,...mapped.find(candidate=>candidate.id===item.id)})) as Evidence[];}
       catch{return retrieve(searchFilters,propertyId);}
     };
     if(searchPerformed)items=await search(filters,input.property_id as string|null || null);
@@ -104,6 +104,7 @@ export class AiService {
     // inference is deliberately only the fallback (or the no-history fast path).
     let standalone=source, queryFilters:Record<string,unknown>=inferred || {};
     const realEstateIntent=Object.keys(queryFilters).length>0 || /căn|nhà|đất|phòng|giá|thuê|mua|bất động sản|Q\d|RV-/i.test(source);
+    let referenceIds:string[]=[];
     if(realEstateIntent && !(history.length===0 && Object.keys(queryFilters).length)) {
       try {
         const query=await querySearch(source, sanitizedHistory as never[]);
@@ -111,9 +112,12 @@ export class AiService {
         const qf=Object.fromEntries(Object.entries(query.filters).filter(([,v])=>v!==null));
         queryFilters={location:qf.location,type:qf.property_type,minPrice:qf.min_price_vnd,maxPrice:qf.max_price_vnd,transaction_type:qf.transaction_type,bedrooms:qf.bedrooms};
         queryFilters=Object.fromEntries(Object.entries(queryFilters).filter(([,v])=>v!==null&&v!==undefined));
+        referenceIds=query.refers_to_previous.map(index=>interestIds[index-1]).filter((value):value is string=>typeof value==='string');
       } catch { log('query_step',source,'invalid_query','flagged'); }
     }
-    if(realEstateIntent && !searchPerformed) { items=await search(queryFilters,null); searchPerformed=true; }
+    const pureReference=referenceIds.length>0 && Object.keys(queryFilters).length===0 && /\b(?:căn|can|nhà|nha|lô|lo|khu|kết quả|ket qua|đó|do|vừa|vua|thứ|thu|nào|nao|tiếp|tiep|trước|truoc|nêu|neu)\b/i.test(source);
+    if(pureReference) { items=await retrieveIds(referenceIds); searchPerformed=false; }
+    else if(realEstateIntent && !searchPerformed) { items=await search(queryFilters,null,referenceIds); searchPerformed=true; }
     const extracted:Record<string,unknown>={};
     const contextBlocks=items.map((item,index)=>`[${item.number || index+1}] ${item.code || ''} ${item.name || ''} ${item.location || ''} price=${item.price ?? 'unknown'} availability=${item.availability || 'unknown'}`).join('\n');
     const agentMessages=[{role:'system' as const,content:SYSTEM_PROMPT},{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({question:standalone,history:sanitizedHistory,properties:contextBlocks,customer_text:source,contact_redacted:guest && source!==input.message,injection_suspected:suspected,search_performed:searchPerformed})}\nEND_UNTRUSTED_DATA`}];

@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CHUNK_OVERLAP, CHUNK_SINGLE_MAX, CHUNK_SIZE, cleanKnowledgeText, propertyChunks, splitKnowledgeText } from '../src/modules/ai/chunking.js';
 import { embeddingConfig, EmbeddingService, EMBEDDING_BATCH_MAX } from '../src/modules/ai/embeddings.js';
-import { applyThresholds, currentModelRows, deterministicReason, reciprocalRankFusion, renderRetrievedContext, type RankedChunk } from '../src/modules/ai/retrieval.js';
+import { applyThresholds, currentModelRows, deterministicReason, reciprocalRankFusion, renderRetrievedContext, RetrievalService, type RankedChunk } from '../src/modules/ai/retrieval.js';
 import { indexNeedsEmbedding } from '../src/modules/ai/indexing.js';
 import { cosineSimilarity, meanVector, ruleSimilarProperties } from '../src/modules/ai/similar.js';
 
@@ -26,6 +26,21 @@ describe('knowledge chunking',()=>{
   const clean=cleanKnowledgeText('<p>🏠 Nhà có hẻm xe hơi.</p> Giá 3,5 tỷ. Liên hệ anh Tuấn 090-123-4567. email broker@example.vn. https://example.vn');
   expect(clean).toContain('hẻm xe hơi');expect(clean).not.toMatch(/3,5|090|broker|example|Liên hệ/i);
  });
+ it('removes real-catalogue money clauses but keeps factual measurements',()=>{
+  const examples=[
+   ['Nhà có hẻm xe hơi 6m, giá 3.2 tỷ, gần chợ.','6m'],
+   ['Căn hộ có 2 phòng ngủ, 25 triệu/tháng, nội thất đầy đủ.','2 phòng'],
+   ['Đất rộng 110m2, mặt tiền đường 20m, 10.000.000.000 VND.','110m2'],
+   ['Giá thương lượng, pháp lý sẵn sổ và xây 2 tầng.','2 tầng']
+  ];
+  for(const [example,kept] of examples){const clean=cleanKnowledgeText(example);expect(clean).not.toMatch(/3\.2|25\s*tri|10\.000|VND|thương\s*lượng/i);expect(clean).toContain(kept);}
+ });
+ it('adds only district aliases present in the listing text',()=>{
+  const source={code:'R1',name:'Căn hộ Q12',location:'Phường Tân Thới Hiệp, Thành phố Hồ Chí Minh',property_type:'Apartment',transaction_type:'Sale' as const,description:'Gần Quận 7 nhưng không thuộc khu vực khác.',project_name:null,amenities:null};
+  expect(propertyChunks(source)[0].header).toContain('Quận 12');
+  expect(propertyChunks(source)[0].header).toContain('Quận 7');
+  expect(propertyChunks(source)[0].header).not.toMatch(/Quận 1(?:\s|·|$)/u);
+ });
 });
 
 describe('embeddings',()=>{
@@ -38,6 +53,12 @@ describe('embeddings',()=>{
 });
 
 describe('hybrid ranking',()=>{
+ it('uses previous-result ids as a ranking hint instead of an eligibility filter',async()=>{
+  const rows=[row('a','p1',{text_rank:1}),row('b','p2',{text_rank:2})];
+  const service=new RetrievalService({embed:async()=>({model:'test',vectors:[[1]]})} as never,async args=>{expect(args.p_context).toEqual(['p1']);return {data:rows};});
+  const result=await service.search('câu hỏi',{}, {propertyIds:['p1']});
+  expect(result.chunks.map(item=>item.source_id)).toEqual(['p1','p2']);
+ });
  it('merges vector and text ranks with reciprocal rank fusion',()=>{const merged=reciprocalRankFusion([row('a','p1',{vector_rank:1,similarity:.8}),row('b','p2',{vector_rank:2,similarity:.7}),row('b','p2',{text_rank:1}),row('c','p3',{text_rank:2})]);expect(merged[0].chunk_id).toBe('b');expect(merged[0].rrf).toBeCloseTo(1/62+1/61);});
  it('applies minimum and relative thresholds and limits two chunks per property',()=>{const rows=[row('a','p1',{vector_rank:1,similarity:.8}),row('b','p1',{vector_rank:2,similarity:.75}),row('c','p1',{vector_rank:3,similarity:.74}),row('d','p2',{vector_rank:4,similarity:.55}),row('e','p3',{text_rank:1,similarity:null})];expect(applyThresholds(rows,{minScore:.35,relativeGap:.15,noAnswerScore:.3,topK:5}).map(x=>x.chunk_id)).toEqual(['a','b','e']);});
  it('returns no answer below the threshold when full text found nothing',()=>{expect(applyThresholds([row('a','p1',{vector_rank:1,similarity:.25})],{minScore:.2,relativeGap:.15,noAnswerScore:.3,topK:5})).toEqual([]);});
