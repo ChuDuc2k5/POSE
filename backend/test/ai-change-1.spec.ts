@@ -11,6 +11,11 @@ describe('M06 change 1', () => {
     const history = [{ role: 'assistant', content: 'Mã: CFR-ONE1234, CFR-TWO1234' }];
     expect(referencedListingCodes('Giá căn này thế nào?', history)).toEqual({ codes: ['CFR-ONE1234', 'CFR-TWO1234'], ambiguous: true });
     expect(referencedListingCodes('Tìm căn hộ Quận 2 dưới 5 tỷ', history)).toEqual({ codes: [], ambiguous: false });
+    const one = [{ role: 'user', content: 'Chi tiết căn CFR-0FC7C10BB520419B' }];
+    expect(referencedListingCodes('Từ căn hộ này đi đến trung tâm Quận 1 mất khoảng bao lâu?', one).codes).toEqual(['CFR-0FC7C10BB520419B']);
+    expect(referencedListingCodes('Dự án này do chủ đầu tư nào phát triển?', one).codes).toEqual(['CFR-0FC7C10BB520419B']);
+    expect(referencedListingCodes('Bên em còn căn nào khác ở Quận 7 không?', one).codes).toEqual([]);
+    expect(referencedListingCodes('Ban công nhà này hướng nào?', one).codes).toEqual(['CFR-0FC7C10BB520419B']);
   });
 
   it('uses word edges for transaction inference', () => {

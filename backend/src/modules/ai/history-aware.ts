@@ -4,8 +4,10 @@ export type Clarification = { needed: boolean; question: string | null; options:
 const listingCodePattern = /(?<![\p{L}\d])[A-Z][A-Z\d]{0,7}-[A-Z\d]{4,40}(?![\p{L}\d])/gu;
 const searchIntent = /(?:căn|nhà|đất|phòng|mua|thuê|tìm|bất động sản|giá|chung cư|villa|shop|office)/iu;
 const locationPattern = /(?:quận|q\.?\s*\d{1,2}|huyện|thủ\s*đức|phường|xã|thành phố|tp\.?\s*hồ\s*chí\s*minh|hcm|sài\s*gòn)/iu;
-const backReference = /(?<![\p{L}])(?:căn|nhà|đất|dự án)\s+(?:này|nay|đó|vừa rồi|trên)|(?<![\p{L}])(?:đất|dự án)\s+này/iu;
-const newCriteria = /(?:quận|q\.?\s*\d|huyện|thủ\s*đức|phường|xã|dưới|trên|từ|tối đa|ngân sách|triệu|tỷ|tỉ|mua|thuê|bán|phòng ngủ|diện tích)/iu;
+// "căn hộ này", "nhà đó", "dự án này"… point back at the listing discussed in the previous turn.
+const backReference = /(?<![\p{L}])(?:căn(?:\s+hộ)?|can(?:\s+ho)?|nhà|nha|đất|dat|lô\s+đất|dự\s+án|du\s+an)\s+(?:này|nay|đó|vừa\s+rồi|trên|kia)(?![\p{L}])/iu;
+// A message that starts a new search is not a follow-up even without new location or price words.
+const newSearch = /(?<![\p{L}])(?:tìm|kiếm|có\s+căn\s+nào|còn\s+căn|gợi\s+ý|(?:muốn|cần)\s+(?:mua|thuê))(?![\p{L}])/iu;
 const district = (value: string) => {
   const match = value.normalize('NFC').match(/(?:quận|q\.?|district)\s*(\d{1,2})/iu);
   return match ? `Quận ${match[1]}` : /thủ\s*đức/iu.test(value) ? 'Thủ Đức' : null;
@@ -23,7 +25,7 @@ export function listingCodes(text: string) { return [...new Set(text.match(listi
 export function referencedListingCodes(message: string, history: { role: string; content: string }[]) {
   const direct = listingCodes(message);
   if (direct.length) return { codes: direct, ambiguous: false };
-  if (!backReference.test(message) || newCriteria.test(message)) return { codes: [] as string[], ambiguous: false };
+  if (!backReference.test(message) || newSearch.test(message)) return { codes: [] as string[], ambiguous: false };
   for (let i = history.length - 1; i >= 0; i--) {
     const codes = listingCodes(history[i]?.content || '');
     if (codes.length) return { codes, ambiguous: codes.length > 1 };
