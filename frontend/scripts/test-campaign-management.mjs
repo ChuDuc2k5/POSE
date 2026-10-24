@@ -16,6 +16,8 @@ await db.exec(fixture.split('-- Fixtures begin (also used by the isolated HTTP t
 await db.exec("update public.customers set auth_user_id='f7100000-0000-4000-8000-000000000003' where id='f7300000-0000-4000-8000-000000000003'; update public.customers set auth_user_id='f7100000-0000-4000-8000-000000000002' where id='f7300000-0000-4000-8000-000000000002';");
 await db.exec("insert into public.account_profiles(user_id,display_name) values ('f7100000-0000-4000-8000-000000000002','Fixture unverified'),('f7100000-0000-4000-8000-000000000003','Fixture user') on conflict (user_id) do nothing;");
 await db.exec(await readFile(new URL('../../supabase/campaign-audience.sql',import.meta.url),'utf8'));
+await db.exec(await readFile(new URL('../../supabase/automated-calling.sql',import.meta.url),'utf8'));
+await db.exec(await readFile(new URL('../../supabase/campaign-finish.sql',import.meta.url),'utf8'));
 const id=(prefix,n=1)=>`f7${prefix}0000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const adminId=id('10'),publishedId=id('80'),productId=id('60');
 const origin='http://localhost:3400',base='/api/admin/campaigns',cron='m07-cron-secret-with-at-least-32-characters';
