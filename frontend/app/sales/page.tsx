@@ -9,5 +9,5 @@ import { AiWorkspace } from '@/components/ai-workspace';
 export default async function SalesPage() {
   await requirePageSession('/sales', ['Sales', 'Admin']);
   const profile=await readProfile();
-  return <main className="calls-sales-workspace"><header className="calls-sales-header"><Brand href="/sales"/><div><Link href="/account">{profile.name} · Hồ sơ cá nhân</Link><LogoutButton/></div></header><div className="calls-sales-intro"><span className="eyebrow">KHÔNG GIAN TƯ VẤN</span><h1>Trang chủ tư vấn</h1><p>Xin chào, {profile.name}. Theo dõi khách hàng được giao và các đề nghị tư vấn.</p></div><CallsWorkspace sales/><AiWorkspace/></main>;
+  return <main className="calls-sales-workspace"><header className="calls-sales-header"><Brand light={false} href="/sales"/><div><Link href="/account">{profile.name} · Hồ sơ cá nhân</Link><LogoutButton/></div></header><div className="calls-sales-intro"><span className="eyebrow">KHÔNG GIAN TƯ VẤN</span><h1>Trang chủ tư vấn</h1><p>Xin chào, {profile.name}. Theo dõi khách hàng được giao và các đề nghị tư vấn.</p></div><CallsWorkspace sales/><AiWorkspace/></main>;
 }

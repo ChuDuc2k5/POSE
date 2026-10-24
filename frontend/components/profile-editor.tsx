@@ -71,7 +71,7 @@ export function ProfileEditor() {
   }
   const hasChanges = !!profile && (name !== profile.name || phone !== profile.phone || notificationsEnabled !== profile.notificationsEnabled);
   return <main className="profile-page">
-    <header className="profile-header"><div className="profile-container"><Brand iconVariant="lavender" href={user ? roleHome(user.role) : '/'}/><Link href={user ? roleHome(user.role) : '/'} className="profile-home-link"><ArrowLeft size={16}/> Về trang chủ</Link></div></header>
+    <header className="profile-header"><div className="profile-container"><Brand light={false} href={user ? roleHome(user.role) : '/'}/><Link href={user ? roleHome(user.role) : '/'} className="profile-home-link"><ArrowLeft size={16}/> Về trang chủ</Link></div></header>
     <div className="profile-container profile-body">
       <div className="profile-page-title"><div><span className="eyebrow">KHÔNG GIAN CÁ NHÂN</span><h1>Hồ sơ của bạn</h1><p>Quản lý thông tin và tùy chỉnh tài khoản theo cách của bạn.</p></div><span className="profile-title-tag"><Settings2 size={16}/> Cài đặt tài khoản</span></div>
       <div className="profile-feedback" aria-live="polite">{error && <div className="form-alert error" role="alert">{error}</div>}{notice && <div className="form-alert success" role="status"><Check size={18}/>{notice}</div>}</div>

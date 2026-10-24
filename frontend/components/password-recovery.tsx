@@ -37,7 +37,7 @@ export function PasswordRecovery({ reset = false, verificationFailed = false }: 
     } catch { setError('Không thể kết nối. Vui lòng thử lại.'); }
     finally { setBusy(false); }
   }
-  return <main className="account-page"><header className="account-header container"><Brand/><Link href="/sign-in" className="text-link">Về đăng nhập</Link></header><section className="account-card recovery-card">
+  return <main className="account-page"><header className="account-header container"><Brand light={false}/><Link href="/sign-in" className="text-link">Về đăng nhập</Link></header><section className="account-card recovery-card">
     <span className="eyebrow">BẢO VỆ TÀI KHOẢN</span><h1>{reset ? 'Đặt lại mật khẩu' : 'Quên mật khẩu'}</h1>
     <p>{reset ? 'Chọn mật khẩu mới từ 12 đến 128 ký tự. Bạn sẽ cần đăng nhập lại sau khi lưu.' : 'Nhập email đã đăng ký để nhận hướng dẫn khôi phục tài khoản.'}</p>
     {error && <div className="form-alert error" role="alert">{error}</div>}{notice && <div className="form-alert success" role="status">{notice}</div>}

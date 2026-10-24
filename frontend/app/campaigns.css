@@ -1,5 +1,5 @@
-.campaigns-workspace .catalog-sidebar nav a { padding:14px 12px; border:1px solid var(--nx-line); border-radius:9px; color:var(--nx-on-dark-muted); font-size:12px; text-decoration:none; }
-.campaigns-workspace .catalog-sidebar nav a[aria-current] { color:var(--nx-on-primary); background:var(--nx-gold-gradient); }
+.campaigns-workspace .catalog-sidebar nav a { padding:14px 12px; border:1px solid var(--nx-line); border-radius:9px; color:var(--nx-muted); font-size:12px; text-decoration:none; }
+.campaigns-workspace .catalog-sidebar nav a[aria-current] { color:var(--nx-on-primary); background:var(--nx-primary-gradient); }
 .campaigns-panel { padding:25px; font-size:13px; line-height:1.7; }
 .campaigns-panel h2 { font-size:20px; margin:0 0 12px; }
 .campaigns-panel h3 { margin:24px 0 12px; font-size:15px; }
