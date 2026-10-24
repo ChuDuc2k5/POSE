@@ -46,10 +46,10 @@ const provider=createServer(async(req,res)=>{
   }
   if(url.pathname.startsWith('/rest/v1/')){
    const table=url.pathname.split('/').at(-1);
-   if(!['campaigns','call_scripts','call_script_versions','property_products','property_projects','property_subdivisions','account_history'].includes(table))return reply(404,{});
+   if(!['campaigns','call_scripts','call_script_versions','property_products','property_projects','property_subdivisions','account_history','users','campaign_config_versions','campaign_events'].includes(table))return reply(404,{});
    const values=[],where=[];
-   for(const [key,value] of url.searchParams){if(['select','order','offset','limit'].includes(key))continue;const p=value.indexOf('.'),op=value.slice(0,p),v=value.slice(p+1);if(!['eq','ilike'].includes(op))throw Error('Unsupported fake filter');values.push(v);where.push(`${quote(key)} ${op==='eq' ? '=':'ilike'} $${values.length}`);}
-   const result=await transaction(role,()=>db.query(`select * from public.${quote(table)}${where.length ? ' where '+where.join(' and '):''}${url.searchParams.get('order') ? ' order by '+url.searchParams.get('order').split(',').map(x=>{const [key,dir]=x.split('.');return `${quote(key)} ${dir==='desc' ? 'desc':'asc'}`;}).join(','):''}`,values),token);
+   for(const [key,value] of url.searchParams){if(['select','order','offset','limit'].includes(key))continue;const p=value.indexOf('.'),op=value.slice(0,p),v=value.slice(p+1);if(!['eq','ilike','in'].includes(op))throw Error('Unsupported fake filter');if(op==='in'){const items=v.replace(/^\(|\)$/g,'').split(',').filter(Boolean);where.push(`${quote(key)} = any($${values.length+1}::text[])`);values.push(items);}else{values.push(v);where.push(`${quote(key)} ${op==='eq' ? '=':'ilike'} $${values.length}`);}}
+   const result=await transaction(table==='users' ? 'System':role,()=>db.query(`select * from public.${quote(table)}${where.length ? ' where '+where.join(' and '):''}${url.searchParams.get('order') ? ' order by '+url.searchParams.get('order').split(',').map(x=>{const [key,dir]=x.split('.');return `${quote(key)} ${dir==='desc' ? 'desc':'asc'}`;}).join(','):''}`,values),table==='users' ? 'fixture-service':token);
    const offset=Number(url.searchParams.get('offset') || req.headers['range']?.split('-')[0] || 0),limit=Number(url.searchParams.get('limit') || (req.headers.range ? Number(req.headers.range.split('-')[1])-offset+1:10000));
    res.setHeader('content-range',`${offset}-${Math.max(offset,offset+limit-1)}/${result.rows.length}`);
    const rows=result.rows.slice(offset,offset+limit);
@@ -199,6 +199,51 @@ try {
  let noProvider=await item(await call('','POST',{...config,name:'Thiếu nhà cung cấp'}),201);noProvider=await audience(noProvider,{lead_ids:[id('40',10)]});
  const pf=await call(`/${noProvider.id}/action`,'POST',{version:noProvider.version,action:'start'});check(pf.status===400 && (await pf.json()).missing.includes('TELEPHONY_NOT_CONFIGURED'),'missing provider passed to SQL');check((await tick()).status===503,'tick missing provider');
  const page=await call('', 'GET');check(page.ok,'admin list');
+ await start();
+ // K1: pausing is an admission barrier, not a destructive cancellation. The
+ // pending job survives a system claim while paused and is claimable after resume.
+ await db.query("update calls set status='COMPLETED',created_at=now()-interval '40 days' where phone_e164='+84901230010'");await db.query("update call_jobs set status='Cancelled' where membership_id in (select id from campaign_customers where phone_e164='+84901230010') and status in ('Pending','Claimed','Dispatched')");
+ let gate=await item(await call('','POST',{...config,name:'K1 Admission Gate',daily_call_limit:10,weekdays:[0,1,2,3,4,5,6],window_start:'00:00',window_end:'23:59'}),201);
+ gate=await audience(gate,{lead_ids:[id('40',10)]});gate=await action(gate,'start');
+ const gateMember=(await db.query("select * from campaign_customers where campaign_id=$1 and status='PENDING' limit 1",[gate.id])).rows[0];
+ await db.query("insert into call_jobs(campaign_id,membership_id,attempt_no,scheduled_at,idempotency_key) values($1,$2::uuid,1,now(),'k1:'||$2)",[gate.id,gateMember.id]);
+ await db.query("update call_jobs set scheduled_at=now()+interval '30 days' where campaign_id=$1",[gate.id]);
+ gate=await action(gate,'pause');
+ await transaction('System',()=>db.query("select pose_private.claim_call_job('m07-k1',60,now()+interval '30 days',2)"),'fixture-service');
+ check(await scalar('select status from call_jobs where campaign_id=$1',[gate.id])==='Pending','K1 paused claim keeps job pending');
+ check(await scalar('select status from campaign_customers where id=$1',[gateMember.id])!=='SKIPPED','K1 paused claim does not skip member');
+ gate=await action(gate,'resume');
+ await transaction('System',()=>db.query("select pose_private.claim_call_job('m07-k1',60,now()+interval '30 days',2)"),'fixture-service');
+ check(await scalar("select count(*)::integer from calls where campaign_id=$1 and membership_id=$2",[gate.id,gateMember.id])===1,`K1 resumed claim creates call job=${await scalar('select status from call_jobs where campaign_id=$1',[gate.id])} member=${await scalar('select status from campaign_customers where id=$1',[gateMember.id])} campaign=${await scalar('select status from campaigns where id=$1',[gate.id])}`);
+
+ // K3-K6: exercise the new read/report/member/owner/history HTTP contracts.
+ await db.exec("insert into public.account_profiles(user_id,display_name) values ('f7100000-0000-4000-8000-000000000001','Fixture Admin') on conflict (user_id) do nothing; insert into public.users(id,full_name,email,auth_user_id,role,account_status,email_verified) values ('f7100000-0000-4000-8000-000000000001','Fixture Admin','m07-1@example.test','f7100000-0000-4000-8000-000000000001','Admin','active',true),('f7100000-0000-4000-8000-000000000002','Fixture Sales','m07-2@example.test','f7100000-0000-4000-8000-000000000002','Sales','active',true),('f7100000-0000-4000-8000-000000000003','Fixture User','m07-3@example.test','f7100000-0000-4000-8000-000000000003','User','active',true) on conflict (id) do update set role=excluded.role,account_status=excluded.account_status");
+ let finish=await item(await call('','POST',{...config,name:'K3-K6 Reporting',owner_id:adminId}),201);
+ finish=await audience(finish,{lead_ids:[id('40'),id('40',6)]});
+ await db.query("update campaign_customers set status='PENDING',skip_reason=null where campaign_id=$1",[finish.id]);await db.query("insert into campaign_customers(campaign_id,customer_id,lead_id,phone_e164,status,skip_reason) values($1,$2,$3,'+84901230006','SKIPPED','FIXTURE_SKIP') on conflict(campaign_id,customer_id) do update set status='SKIPPED',skip_reason='FIXTURE_SKIP'",[finish.id,id('30',6),id('40',6)]);
+ const finishMembers=(await db.query('select * from campaign_customers where campaign_id=$1 order by id',[finish.id])).rows;
+ const removed=finishMembers.find(m=>m.status==='PENDING');
+ const skipMember=finishMembers.find(m=>m.status==='SKIPPED');
+ check(removed && skipMember,'K5 fixture has removable and skipped members');
+ const finishProgress=await item(await call(`/${finish.id}/progress`));
+ check(finishProgress.buckets && finishProgress.buckets.waiting+finishProgress.buckets.calling+finishProgress.buckets.finished===finishProgress.total,'K3 progress buckets invariant');
+ const skippedMembers=await item(await call(`/${finish.id}/members?status=SKIPPED&page=1`));
+ check(skippedMembers.items.length>0 && skippedMembers.items.every(m=>m.status==='SKIPPED'&&m.phone.startsWith('+84')&&!m.phone.includes('901230006')&&m.phone.endsWith('0006')),'K3 status filter and phone mask');
+ check((await call(`/${finish.id}/members?page=0`)).status===400,'K3 invalid page');
+ const csvResponse=await call(`/${finish.id}/report?format=csv`);const csvBytes=Buffer.from(await csvResponse.arrayBuffer());const csv=new TextDecoder().decode(csvBytes);
+ check(csvResponse.status===200&&csvResponse.headers.get('content-type')?.startsWith('text/csv')&&csvBytes[0]===0xef&&csvBytes[1]===0xbb&&csvBytes[2]===0xbf,'K4 CSV response and BOM');
+ check(csv.includes('Tổng')&&csv.split(/\r?\n/).filter(Boolean).length>=3&&!csv.includes('+84901230001'),`K4 CSV summary, rows and privacy ${JSON.stringify(csv.slice(0,300))}`);
+ const jsonReport=await item(await call(`/${finish.id}/report?format=json`));
+ check(jsonReport.summary&&Array.isArray(jsonReport.rows)&&jsonReport.rows.length===finishMembers.length,'K4 JSON report shape');
+ check((await call(`/${finish.id}/report?format=xml`)).status===400&& (await call(`/${finish.id}/report?format=json`,'GET',undefined,'pose-access=fixture-sales')).status===403,'K4 format and role restrictions');
+ const removedResponse=await call(`/${finish.id}/members/remove`,'POST',{membership_id:removed.id});
+ check(removedResponse.status===200 && (await removedResponse.clone().json()).item.status==='SKIPPED','K5 member remove');
+ check((await call(`/${finish.id}/members/remove`,'POST',{membership_id:removed.id})).status===400,'K5 second remove rejected');
+ check((await call(`/${finish.id}/members/remove`,'POST',{membership_id:skipMember.id})).status===400,'K5 non-pending remove rejected');
+ check((await call(`/${finish.id}/history`)).ok,'K6 history endpoint');
+ const owners=(await (await call('/owners')).json()).items;check(owners.some(o=>o.id===adminId&&o.role==='Admin')&&owners.every(o=>o.role==='Admin'||o.role==='Sales'),'K6 active owner list');
+ const badOwner=await call(`/${finish.id}`,'PATCH',{version:finish.version,owner_id:id('10',3),reason:'Owner test'});check(badOwner.status===400&&(await badOwner.json()).code==='INVALID_OWNER','K6 user owner rejected');
+ finish=await save(finish,{owner_id:id('10',2)},'Owner test');check(finish.owner_id===id('10',2),'K6 sales owner saved');
  await start();
  await db.exec("update customers set phone_verified_at=now() where id='f7300000-0000-4000-8000-000000000002'");
  const transitions={DRAFT:{schedule:'SCHEDULED',start:'RUNNING',cancel:'CANCELLED'},SCHEDULED:{start:'RUNNING',cancel:'CANCELLED'},RUNNING:{pause:'PAUSED',cancel:'CANCELLED'},PAUSED:{resume:'RUNNING',cancel:'CANCELLED'},COMPLETED:{},CANCELLED:{},FAILED:{},STOPPED:{}};
