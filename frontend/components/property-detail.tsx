@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowLeft, Building2, MapPin, Ruler, BedDouble, FileText, CalendarClock } from 'lucide-react';
 import { SiteHeader } from './site-header';
 import type { Role } from '@/lib/roles';
@@ -14,6 +14,7 @@ import type { PublicProperty } from '@/lib/discovery';
 
 export type PublicMedia={id:string;name:string;media_type:'Image'|'Document';sort_order:number};
 export function PropertyDetail({item,media,role}:{item:PublicProperty;media:PublicMedia[];role:Role|null}){
+  useEffect(()=>{if(role!=='User')return;void fetch(`/api/catalog/properties/${item.id}/view`,{method:'POST',headers:{Origin:window.location.origin}}).catch(()=>{});},[item.id,role]);
   const favorites=useFavoriteStatus([item.id]);
   const images=media.filter(file=>file.media_type==='Image'),documents=media.filter(file=>file.media_type==='Document');
   const [selected,setSelected]=useState<string|null>(images[0]?.id || null),[failed,setFailed]=useState<string[]>([]);

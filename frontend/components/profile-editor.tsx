@@ -9,6 +9,7 @@ import { LogoutButton } from './logout-button';
 import { roleHome, roleLabels, type Role } from '@/lib/roles';
 import { validateProfile } from '@/lib/profile-validation';
 import type { Profile } from '@/lib/profile';
+import { ContactSettings } from './contact-settings';
 
 type User = { name: string; email: string; role: Role };
 type History = { id: string; action: string; changed_fields: string[]; created_at: string };
@@ -108,6 +109,7 @@ export function ProfileEditor() {
             {profile.phone && !profile.phoneVerified && <p className="profile-security-hint">{phone !== profile.phone ? 'Bạn cần lưu số liên hệ mới trước khi yêu cầu mã xác minh.' : 'Mã xác minh sẽ được gửi đến số liên hệ đang lưu.'}</p>}
             {otpSent && <form className="auth-form profile-otp-form" onSubmit={event => { event.preventDefault(); void verifyPhone('verify'); }}><label>Mã xác minh<input value={otp} onChange={event => setOtp(event.target.value)} inputMode="numeric" autoComplete="one-time-code" placeholder="Nhập mã 6 chữ số" pattern="[0-9]{6}" minLength={6} maxLength={6} required disabled={busy}/></label><button className="button primary" disabled={busy}>Xác minh số điện thoại</button></form>}
           </section>
+          <a className="profile-contact-anchor" href="#lien-he">Cài đặt liên hệ</a><ContactSettings />
           <section className="profile-panel" id="activity">
             <div className="profile-panel-heading"><span className="profile-panel-icon"><HistoryIcon size={20}/></span><div><h2>Lịch sử cập nhật</h2><p>Các thay đổi gần đây trên tài khoản của bạn.</p></div><span className="profile-history-label">HOẠT ĐỘNG</span></div>
             {history.length ? <ul className="profile-timeline">{history.map(entry => <li key={entry.id}><span className="profile-timeline-dot"><Check size={12}/></span><div><p>{entry.action === 'password_recovered' ? 'Đặt lại mật khẩu' : entry.action === 'phone_verified' ? 'Xác minh số điện thoại' : `Cập nhật ${entry.changed_fields.map(field => fieldLabels[field] || field).join(', ')}`}</p><time dateTime={entry.created_at}>{new Date(entry.created_at).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}</time></div></li>)}</ul> : <div className="profile-history-empty"><HistoryIcon size={24}/><p>Chưa có cập nhật hồ sơ.<small>Các thay đổi của bạn sẽ xuất hiện tại đây.</small></p></div>}

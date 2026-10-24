@@ -11,6 +11,7 @@ import type { Evidence } from '../ai/guard.js';
 import { complete } from '../ai/llm.js';
 import { extractNeeds } from '../ai/extraction.js';
 import { scoreNeeds } from '../ai/lead-scoring.js';
+function frozenLeadContext(value: unknown) { if (!value || typeof value !== 'object' || Array.isArray(value)) return value; const lead = value as Record<string, unknown>; const snapshot = lead.campaign_snapshot; return { ...lead, campaign_snapshot: snapshot, products_of_interest: lead.products_of_interest ?? (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) ? (snapshot as Record<string, unknown>).reasons : []), needs: lead.needs ?? {} }; }
 const unavailable=()=>catalogError('CALLS_UNAVAILABLE','Không thể xử lý cuộc gọi. Vui lòng thử lại.',503);
 export async function callAccess(request?:NextRequest,admin=false){
  if(request&&!validOrigin(request))return {error:catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403)} as const;
@@ -83,7 +84,7 @@ async function apply(event:CallEvent,notify:Notify=quiet){
   for(let attempt=0;attempt<3;attempt++){
    const context=await rpc('pose_system_call_context',{p_call:applied.call_id});
    if(context.status!=='ANSWERED')break;
-   const result=await converse(context.conversation as Conversation,context.script,event.utterance||{text:''},await properties(context.script),context.lead);
+   const result=await converse(context.conversation as Conversation,context.script,event.utterance||{text:''},await properties(context.script),frozenLeadContext(context.lead));
    try{response=await rpc('pose_system_call_conversation',{p_call:applied.call_id,p_event:event.event_id,p_version:context.conversation_version,p_input:event.utterance?.text||'',p_result:result});
     if(result.state.end_reason){await rpc('pose_system_stop_call',{p_call:applied.call_id,p_reason:result.state.end_reason});await notify(applied.call_id);
      if(result.optOut||result.state.end_reason==='NO_AI_VOICE_CONSENT'){const live=await systemClient().from('calls').select('id').eq('phone_e164',context.phone_e164).eq('status','ENDING');for(const call of live.data||[])await notify(call.id);}

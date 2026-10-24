@@ -129,6 +129,17 @@
 .profile-section-nav a:first-child { background: var(--nx-primary-soft); color: var(--account-green); font-weight: 600; }
 .profile-section-nav a:hover { background: var(--nx-primary-soft); color: var(--account-green); }
 .profile-section-nav a > svg:last-child { margin-left: auto; }
+.contact-settings-list { display:grid; gap:10px; margin-top:20px; }
+.contact-setting { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:15px 0; border-bottom:1px solid var(--nx-line); }
+.contact-setting strong,.contact-setting small,.contact-setting em { display:block; }
+.contact-setting small,.contact-setting em { color:var(--nx-muted); font-size:12px; margin-top:4px; font-style:normal; }
+.contact-setting em { color:var(--nx-warning); }
+.contact-switch { width:46px; height:26px; padding:3px; border:1px solid var(--nx-line); border-radius:20px; background:var(--nx-surface-soft); cursor:pointer; flex:0 0 auto; }
+.contact-switch span { display:grid; place-items:center; width:18px; height:18px; border-radius:50%; background:var(--nx-muted); color:var(--nx-on-primary); transition:transform .2s; }
+.contact-switch.is-on { background:var(--nx-primary); border-color:var(--nx-primary); }
+.contact-switch.is-on span { background:var(--nx-on-primary); color:var(--nx-primary); transform:translateX(18px); }
+.contact-settings-help { display:flex; align-items:center; gap:8px; padding:13px; background:var(--nx-warning-soft); color:var(--nx-warning); border:1px solid var(--nx-warning-line); border-radius:9px; }
+.contact-settings-history { display:grid; gap:5px; margin-top:20px; color:var(--nx-muted); font-size:12px; }
 .profile-sidebar-footer { display: flex; flex-direction: column; gap: 16px; padding: 16px 25px 23px; border-top: 1px solid var(--nx-line); }
 .profile-sidebar-footer .button { background:var(--nx-surface); border: 1px solid var(--nx-line); font-size: 11px; min-height: 40px; padding: 10px; border-radius: 9px; color: var(--nx-muted); }
 .profile-sidebar-footer .button:hover { background: var(--nx-primary-soft); color: var(--nx-ink); }

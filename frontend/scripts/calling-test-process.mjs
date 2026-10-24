@@ -9,11 +9,13 @@ import { createHmac,createHash } from 'node:crypto';
 // The fake Supabase transport executes the real RPCs and RLS in isolated PostgreSQL.
 const db=await createCampaignDatabase();
 await db.exec(await readFile(new URL('../../supabase/automated-calling.sql',import.meta.url),'utf8'));
+await db.exec(await readFile(new URL('../../supabase/campaign-audience.sql',import.meta.url),'utf8'));
 await db.exec(await readFile(new URL('../../supabase/browser-voice.sql',import.meta.url),'utf8'));
 const fixture=await readFile(new URL('../../supabase/test-automated-calling.sql',import.meta.url),'utf8');
 const id=(prefix,n=1)=>`f7${prefix}0000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const publishedId=id('80'),productId=id('60');
 await db.exec(fixture.split('-- Calling fixtures begin.')[1].split('-- Calling fixtures end.')[0].replace('"property_ids":[]',`"property_ids":["${productId}"]`));
+await db.exec("update campaign_customers set snapshot='{\"rule_version\":\"MATCH.v1\",\"reasons\":[\"DIRECT_INTEREST\"],\"match\":{\"rule_version\":\"MATCH.v1\",\"score\":80}}' where campaign_id='f8900000-0000-4000-8000-000000000001'");
 await db.exec("update call_jobs j set scheduled_at=now()-interval '1 hour'+right(m.phone_e164,4)::integer*interval '1 second' from campaign_customers m where m.id=j.membership_id");
 const origin='http://localhost:3500',cron='m08-cron-secret-with-at-least-32-characters';
 let chain=Promise.resolve();

@@ -8,7 +8,8 @@ export async function createCampaignDatabase() {
  const db=new PGlite();
  await db.exec(`
  create role anon; create role authenticated; create role service_role bypassrls;
- create schema auth; create schema storage;
+ create schema auth; create schema storage; create schema extensions;
+ create function extensions.gen_random_uuid() returns uuid language sql as $$select gen_random_uuid()$$;
  grant usage on schema auth,storage,public to anon,authenticated,service_role;
  alter default privileges in schema public grant all on tables to service_role;
  create table auth.users(id uuid primary key,aud text,role text,email text,email_confirmed_at timestamptz,raw_app_meta_data jsonb default '{}',raw_user_meta_data jsonb default '{}',created_at timestamptz,updated_at timestamptz,banned_until timestamptz,is_anonymous boolean default false,phone text,phone_confirmed_at timestamptz);
