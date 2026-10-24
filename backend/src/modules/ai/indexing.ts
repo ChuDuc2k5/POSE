@@ -2,7 +2,7 @@ import { Injectable, Logger, type OnApplicationShutdown, type OnModuleInit } fro
 import { Queue, Worker } from 'bullmq';
 import { QueueStatus, queueConnection } from '../queue/queue.module.js';
 import { systemClient } from '../supabase/supabase.service.js';
-import { contentHash, faqChunks, propertyChunks, type PropertyChunkSource } from './chunking.js';
+import { contentHash, faqChunks, propertyChunks, type PropertyChunkSource, CHUNKER_VERSION } from './chunking.js';
 import { EmbeddingService } from './embeddings.js';
 
 type Source={document_id:string;source_type:'Property'|'Faq';source_id:string|null;published:boolean;source_updated_at:string;content_hash:string|null;embed_model:string|null;code?:string;name?:string;location?:string;property_type?:string;transaction_type?:'Sale'|'Rent';description?:string;project_name?:string;amenities?:string;question?:string;answer?:string};
@@ -33,7 +33,7 @@ export class KnowledgeIndexer implements OnModuleInit,OnApplicationShutdown{
     const response=await systemClient().rpc('pose_system_kb_source',{p_document:documentId});if(response.error)throw new Error(response.error.message);const source=response.data as Source|null;if(!source)return {status:'missing'};
     if(!source.published){const removed=await systemClient().rpc('pose_system_kb_remove_chunks',{p_document:documentId});if(removed.error)throw new Error(removed.error.message);if(source.source_id)await systemClient().rpc('pose_system_remove_similar',{p_property:source.source_id});return {status:'removed'};}
     const raw=source.source_type==='Property'?{description:source.description,project_name:source.project_name,amenities:source.amenities}:{question:source.question,answer:source.answer};
-    const hash=contentHash(raw),config=this.embeddings.config(),model=config?.model||null;
+    const hash=contentHash({raw,chunker:CHUNKER_VERSION}),config=this.embeddings.config(),model=config?.model||null;
     if(!indexNeedsEmbedding(source,hash,model))return {status:'unchanged'};
     const chunks=source.source_type==='Property'?propertyChunks(source as Source&PropertyChunkSource):faqChunks(source.question||'',source.answer||'');
     const embedded=config&&chunks.length?await this.embeddings.embed(chunks.map(chunk=>chunk.embedded)):null;
