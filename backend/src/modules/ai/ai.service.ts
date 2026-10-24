@@ -184,7 +184,13 @@ export class AiService {
     let result={reply:agent.text || 'Hiện tôi chưa đủ dữ liệu để trả lời chính xác.',tool_calls:[] as unknown[],needs:{},flags:[] as never[]};
     result.reply=agent.text || result.reply;
     let violation:string|null=agent.blocked.length ? 'AGENT_BLOCKED':null;
-    if(!violation) { try { const meta=await checkAnswer(result.reply,{sources:items,question:source}); const cited=new Set(items.map(x=>x.number)); if(meta.grounding==='none' && ( /\b\d{3,}\b/.test(result.reply) || /RV-\w+/i.test(result.reply))) violation='C3_META_UNGROUNDED'; if(meta.cited.some(n=>!cited.has(n))) violation='C3_CITATION_NOT_IN_CONTEXT'; } catch { /* C3 failure never fails the turn; guard remains authoritative. */ } }
+    // C3: citations are read from the reply itself (deterministic); a small model's self-reported
+    // `cited` list is unreliable. The model's grounding verdict only matters for uncited claims.
+    if(!violation) {
+      const numbers=new Set(items.map((x,index)=>x.number ?? index+1)), citedInReply=[...result.reply.matchAll(/\[(\d{1,3})\]/g)].map(m=>Number(m[1]));
+      if(citedInReply.some(n=>!numbers.has(n))) violation='C3_CITATION_NOT_IN_CONTEXT';
+      else if(!citedInReply.length) { try { const meta=await checkAnswer(result.reply,{sources:items,question:source}); if(meta.grounding==='none' && ( /\b\d{3,}\b/.test(result.reply) || /RV-\w+/i.test(result.reply))) violation='C3_META_UNGROUNDED'; } catch { /* C3 failure never fails the turn; guard remains authoritative. */ } }
+    }
     items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5);
     const finalRag=rag as RetrievalResult|null;if(finalRag){const rendered=renderRetrievedContextWithCards(finalRag.chunks,new Set(items.map(x=>x.id)));rag={...finalRag,...rendered};items=items.map(item=>({...item,number:((rendered.sources.find(s=>(s as {id?:string}).id===item.id) as {number?:number}|undefined)?.number),source_type:'Property'}));}else items=items.map((item,index)=>({...item,number:index+1,source_type:'Property'}));
     if(!violation){violation=this.guard.outputReason(result.reply,items,source,{retrievalFound:rag?.found??items.length>0,faqOnly:items.length>0&&items.every(x=>x.source_type==='Faq')});if(violation)log('output',result.reply,violation);}
@@ -230,7 +236,9 @@ export class AiService {
       const stream=new ReadableStream<Uint8Array>({start(controller){
         const send=(type:string,value:unknown)=>controller.enqueue(encoder.encode(`event: ${type}\ndata: ${JSON.stringify(value)}\n\n`));
         send('meta',{session_id:committed.data.id,scope,sources:items,related});
-        const deltas=streamedDeltas.length ? streamedDeltas : Array.from({length:Math.ceil(reply.length/48)},(_,i)=>reply.slice(i*48,i*48+48));
+        // The stream is sent after the guarded answer is final, so only the final reply is streamed
+        // (never a draft that a guard later replaced).
+        const deltas=Array.from({length:Math.ceil(reply.length/48)},(_,i)=>reply.slice(i*48,i*48+48));
         for(const text of deltas)send('delta',{text});
         for(const pending of pendingActions)send('action',{action:pending});
         send('done',{message:reply,scope,blocked,guard:violation}); controller.close();
