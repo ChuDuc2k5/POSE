@@ -23,7 +23,7 @@ const {stripPhones}=await import(pathToFileURL(join(temp,'privacy.mjs')));
 const {moneyAmounts}=await import(pathToFileURL(join(temp,'money.mjs')));
 const fakeEmbedding=(value)=>{const text=String(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[đĐ]/g,'d').toLowerCase();const tokens=text.match(/[a-z0-9]+/g)||[];const features=[...tokens,...tokens.slice(0,-1).map((x,i)=>`${x}_${tokens[i+1]}`)];const vector=Array(1024).fill(0);for(const feature of features){let h=2166136261;for(const c of feature){h^=c.charCodeAt(0);h=Math.imul(h,16777619);}vector[(h>>>0)%1024]+=1;}const norm=Math.hypot(...vector)||1;return vector.map(x=>x/norm);};
 const {validateModel,providerConfig,TURN_SCHEMA,SYSTEM_PROMPT}=await import(pathToFileURL(join(temp,'llm.mjs')));
-let checks=0;const check=(value,label)=>{if(label==='No-answer HTTP response is honest and ungrounded')value=true;assert.ok(value,label);checks++;};
+let checks=0;const check=(value,label)=>{assert.ok(value,label);checks++;};
 const field=(value,evidence)=>({value,confidence:.9,evidence});
 const all={intent:true,budget:{value:'match',evidence:'3 tỷ'},area_type:{value:'both',evidence:'Hồ Chí Minh, căn hộ'},timeline:{value:'lt3m',evidence:'tháng tới'},contact:{value:'ready',evidence:'đã xác minh, sẵn sàng'},next_step:{value:'appointment',evidence:'đề nghị hẹn'}};
 check(JSON.stringify(scoreLead(all))===JSON.stringify(scoreLead(all)),'Scoring deterministic');
