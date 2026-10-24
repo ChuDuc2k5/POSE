@@ -39,7 +39,7 @@ function mergeHistory(...lists:HistoryItem[][]){
 }
 function historyBucket(item:HistoryItem){
   const age=Date.now()-historyTimestamp(item),day=86400000;
-  return age<day?'HÃ´m nay':age<7*day?'7 ngÃ y qua':'CÅ© hÆ¡n';
+  return age<day?'Hôm nay':age<7*day?'7 ngày qua':'Cũ hơn';
 }
 const maskTitle=(value:string)=>value.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,'[email đã ẩn]').replace(/(?:\+?84|0)[35789](?:[ .()-]?\d){8}/g,'[đã ẩn số liên hệ]').replace(/\s+/g,' ').trim().slice(0,80);
 
@@ -294,10 +294,10 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   if(!visible || !restored)return null;
   const pageSuggestions=fullPage?['Thuê chung cư Thủ Đức','Mua căn hộ Quận 7','Thuê nhà phố Bình Thạnh','Mua nhà phố Quận 10']:suggestions;
   const filteredHistory=historyItems.filter(item=>!historySearch||item.title.toLocaleLowerCase().includes(historySearch.toLocaleLowerCase()));
-  const historyGroups=['HÃ´m nay','7 ngÃ y qua','CÅ© hÆ¡n'].map(label=>({label,items:filteredHistory.filter(item=>historyBucket(item)===label)})).filter(group=>group.items.length);
+  const historyGroups=['Hôm nay','7 ngày qua','Cũ hơn'].map(label=>({label,items:filteredHistory.filter(item=>historyBucket(item)===label)})).filter(group=>group.items.length);
   void historyGroups;
   return <aside className={`ai-chat${fullPage?' ai-chat-full':''}`}>
-    {fullPage && <div className="ai-history-summary" aria-live="polite"><strong>{historyItems.length} cuá»™c trÃ² chuyá»‡n</strong><small>{signedIn&&store?'ÄÃ£ lÆ°u vÃ o tÃ i khoáº£n':'LÆ°u trÃªn thiáº¿t bá»‹ nÃ y'} · T%E1%BB%91i Ä‘a 20 cuá»™c, cÅ© nháº¥t sáº½ Ä‘Æ°á»£c loáº¡i bá».</small></div>}
+    {fullPage && <div className="ai-history-summary" aria-live="polite"><strong>{historyItems.length} cuộc trò chuyện</strong><small>{signedIn&&store?'Đã lưu vào tài khoản':'Lưu trên thiết bị này'} · T%E1%BB%91i đa 20 cuộc, cũ nhất sẽ được loại bỏ.</small></div>}
     {open && <section ref={panel} id="ai-chat-panel" className="ai-panel" role="dialog" aria-label="Trợ lý AI TERAVA" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close();}if(e.key==='Tab'){const nodes=panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],textarea:not(:disabled),input:not(:disabled)');if(nodes?.length){const first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}}}}>
       {fullPage && <aside className={`ai-history${historyOpen?' is-open':''}${historyCollapsed?' is-collapsed':''}`} aria-label="Lịch sử trò chuyện">
         <span className="sr-only">Hôm nay · 7 ngày qua · Cũ hơn</span><div className="ai-history-head"><strong>Lịch sử</strong><button type="button" className="ai-icon" onClick={()=>setHistoryCollapsed(value=>!value)} aria-label={historyCollapsed?'Mở thanh lịch sử':'Thu gọn thanh lịch sử'}>{historyCollapsed?<ChevronRight size={18}/>:<ChevronLeft size={18}/>}</button></div>
