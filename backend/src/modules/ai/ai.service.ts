@@ -10,13 +10,15 @@ import { uuidPattern } from '../../common/catalog.js';
 import { object } from './extraction.js';
 import { inferSearch } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
-import { correctionData, disclosure, GUARD_VERSION, safeReply, type Evidence } from './guard.js';
+import { correctionData, disclosure, GUARD_VERSION, safeReply, isOutOfScope, scopeFromTopic, outOfScopeReply, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
+import { setAiRequestSession } from './request-log.js';
 
-export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI hiện chưa khả dụng. Vui lòng thử lại hoặc gửi yêu cầu tư vấn.',retry:true,inquiry_url:'/customer/inquiries/new'},503);
+export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI tạm thời không khả dụng. Bạn có thể thử lại, xem danh sách bất động sản hoặc gửi yêu cầu tư vấn.',retry:true,search_url:'/properties',inquiry_url:'/customer/inquiries/new'},503);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
+const realEstateWordsForHistory=(text:string)=>/căn|nhà|đất|phòng|giá|thuê|mua|bất động sản|dự án|khu vực|diện tích|chuyên viên|lịch xem|yêu thích|Q\d|RV-/i.test(text);
 async function identity() {
   const session=await authenticatedSession();
   if(session && session.role!=='User')return {error:catalogError('FORBIDDEN','Hội thoại dành cho khách hàng.',403)} as const;
@@ -47,8 +49,15 @@ async function retrieveIds(ids:string[]):Promise<Evidence[]> {
   if(!ids.length)return [];
   const result=await authClient().from('property_public_catalog').select('id,code,name,cover_id,area,bedrooms,price,availability,updated_at,location,property_type,transaction_type,price_period').in('id',[...new Set(ids)].slice(0,100)).limit(100);
   if(result.error)throw new Error('RETRIEVAL_UNAVAILABLE');
-  return (result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[];
+  const order=new Map(ids.map((id,index)=>[id,index]));
+  return (result.data || []).sort((a,b)=>(order.get(a.id)??Number.MAX_SAFE_INTEGER)-(order.get(b.id)??Number.MAX_SAFE_INTEGER)).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[];
 }
+// The whole catalogue is in Ho Chi Minh City, whose name is written many ways ("TP.HCM",
+// "Thành phố Hồ Chí Minh"…); a city-level location is not a filter and would only miss rows.
+const cityOnly=/^(?:tp\.?\s*|thành phố\s*)?(?:hcm|hồ chí minh|ho chi minh|sài gòn|saigon)$/i;
+// "khoảng 25 triệu" is extracted as min = max; an approximate figure becomes a ±20% range.
+export function approximatePriceRange(filters: Record<string, unknown>) { if (typeof filters.minPrice==='number' && filters.minPrice===filters.maxPrice) { filters.minPrice=Math.round(filters.minPrice*0.8); filters.maxPrice=Math.round((filters.maxPrice as number)*1.2); } return filters; }
+export function locationFilter(value: unknown) { return typeof value==='string' && value.trim() && !cityOnly.test(value.trim().replace(/[.,]$/,'')) ? value.trim() : undefined; }
 function relaxedLocation(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return undefined;
   const match=value.match(/(?:quận|huyện|thành phố|tp\.?|q\.?)[\s\d-]+/i);
@@ -69,6 +78,7 @@ export class AiService {
     if(!object(filters) || !this.guard.toolAllowed({name:'search_properties',arguments:filters}))return catalogError('INVALID_FILTER','Bộ lọc không hợp lệ.',400);
     const who=await identity();if(who.error)return who.error;
     const id=typeof input.session_id==='string' ? input.session_id:randomUUID();
+    setAiRequestSession(id);
     let count=0,interestIds:string[]=[],scoring:{needs:Record<string,{value:unknown;evidence?:string;confirmed_by?:unknown}>;verified:boolean;version:number;interest_ids?:string[];score_result?:ScoreResult}|null=null;
     if(input.session_id){const prior=await readSession(id,who);if(prior.error)return catalogDatabaseError(prior.error);count=prior.data.message_count;scoring=prior.data.scoring;interestIds=prior.data.suggested_property_ids || [];if(prior.data.store_transcript!==input.store_transcript || prior.data.status==='Closed')return catalogError('SESSION_CONFLICT','Lựa chọn lưu áp dụng cho cả phiên; hãy bắt đầu phiên mới để thay đổi.',409);}
     else if(who.client){const context=await who.client.rpc('pose_ai_score_context');if(context.error)return catalogDatabaseError(context.error);scoring=context.data;}
@@ -77,10 +87,13 @@ export class AiService {
     const sanitizedHistory=history.map(turn=>({role:turn.role,content:guest ? this.privacy.stripPhones(turn.content):turn.content}));
     let searchPerformed=input.filters!==undefined || !!input.property_id,rag:RetrievalResult|null=null;
     let items:Evidence[]=[],related:Record<string,unknown>[]=[];
-    const search=async(searchFilters:Record<string,unknown>,propertyId:string|null=null,referenceIds:string[]=[] )=>{
+    const search=async(searchFilters:Record<string,unknown>,propertyId:string|null=null,referenceIds:string[]=[],searchQuery=source)=>{
       const aliases:Record<string,string>={min_price_vnd:'minPrice',max_price_vnd:'maxPrice',property_type:'type'};searchFilters=Object.fromEntries(Object.entries(searchFilters).map(([key,value])=>[aliases[key]||key,value]));
-      try{rag=await this.retrieval.search(source,searchFilters,{propertyId,propertyIds:referenceIds});const mapped=rag.sources.filter(item=>item.id).map(item=>({...item,id:item.id as string,name:item.title as string,reason:item.reason as string}));const live=await retrieveIds(mapped.map(item=>item.id));return live.map(item=>({...item,...mapped.find(candidate=>candidate.id===item.id)})) as Evidence[];}
-      catch{return retrieve(searchFilters,propertyId);}
+      try{rag=await this.retrieval.search(searchQuery,searchFilters,{propertyId,propertyIds:referenceIds});const mapped=rag.sources.filter(item=>item.id).map(item=>({...item,id:item.id as string,name:item.title as string,reason:item.reason as string}));const live=await retrieveIds(mapped.map(item=>item.id));return live.map(item=>({...item,...mapped.find(candidate=>candidate.id===item.id)})) as Evidence[];}
+      catch(error){
+        console.warn(JSON.stringify({event:'retrieval_fallback',error:error instanceof Error ? error.message:'RETRIEVAL_UNAVAILABLE'}));
+        return retrieve(searchFilters,propertyId);
+      }
     };
     if(searchPerformed)items=await search(filters,input.property_id as string|null || null);
     const initialRag=rag as RetrievalResult|null;
@@ -102,22 +115,40 @@ export class AiService {
     if(suspected)log('input',source,'PROMPT_INJECTION','flagged');
     // Query understanding is a separate, validated step. The deterministic
     // inference is deliberately only the fallback (or the no-history fast path).
-    let standalone=source, queryFilters:Record<string,unknown>=inferred || {};
+    let standalone=source, queryKeywords:string[]=[], queryFilters:Record<string,unknown>=inferred || {};
     const realEstateIntent=Object.keys(queryFilters).length>0 || /căn|nhà|đất|phòng|giá|thuê|mua|bất động sản|Q\d|RV-/i.test(source);
+    const propertyHistory=history.some(turn=>realEstateWordsForHistory(turn.content)) || interestIds.length>0;
     let referenceIds:string[]=[];
-    if(realEstateIntent && !(history.length===0 && Object.keys(queryFilters).length)) {
+    // Scope: the validated query step's `topic` decides; the keyword guard is only the
+    // fallback when that step is skipped (explicit property request) or fails.
+    let outOfScope=isOutOfScope(source, realEstateIntent || input.property_id ? 'real_estate' : 'unknown', propertyHistory);
+    let modelTopic:'real_estate'|'smalltalk'|'out_of_scope'|null=null;
+    if(!input.property_id && !(history.length===0 && Object.keys(queryFilters).length)) {
       try {
         const query=await querySearch(source, sanitizedHistory as never[]);
+        modelTopic=query.topic;
+        outOfScope=scopeFromTopic(query.topic, source, propertyHistory);
+        if(query.topic!=='real_estate')throw new Error('NOT_A_PROPERTY_QUERY');
         standalone=query.standalone_question;
+        queryKeywords=query.keywords;
         const qf=Object.fromEntries(Object.entries(query.filters).filter(([,v])=>v!==null));
         queryFilters={location:qf.location,type:qf.property_type,minPrice:qf.min_price_vnd,maxPrice:qf.max_price_vnd,transaction_type:qf.transaction_type,bedrooms:qf.bedrooms};
+        queryFilters.location=locationFilter(queryFilters.location);
+        approximatePriceRange(queryFilters);
         queryFilters=Object.fromEntries(Object.entries(queryFilters).filter(([,v])=>v!==null&&v!==undefined));
         referenceIds=query.refers_to_previous.map(index=>interestIds[index-1]).filter((value):value is string=>typeof value==='string');
-      } catch { log('query_step',source,'invalid_query','flagged'); }
+      } catch(error) { if(!(error instanceof Error && error.message==='NOT_A_PROPERTY_QUERY'))log('query_step',source,'invalid_query','flagged'); }
+    }
+    // Refuse before retrieval and before constructing an agent with tools.
+    if(outOfScope) {
+      log('scope',source,'OUT_OF_SCOPE','flagged');
+      const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:false,p_message:source,p_reply:outOfScopeReply,p_sources:[],p_actions:actions,p_fields:{},p_score:null});
+      if(committed.error)return catalogDatabaseError(committed.error);
+      return catalogJson({session:committed.data,reply:outOfScopeReply,scope:'out_of_scope',sources:[],related:[],blocked:false,proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
     }
     const pureReference=referenceIds.length>0 && Object.keys(queryFilters).length===0 && /\b(?:căn|can|nhà|nha|lô|lo|khu|kết quả|ket qua|đó|do|vừa|vua|thứ|thu|nào|nao|tiếp|tiep|trước|truoc|nêu|neu)\b/i.test(source);
     if(pureReference) { items=await retrieveIds(referenceIds); searchPerformed=false; }
-    else if(realEstateIntent && !searchPerformed) { items=await search(queryFilters,null,referenceIds); searchPerformed=true; }
+    else if((realEstateIntent || modelTopic==='real_estate') && !searchPerformed) { items=await search(queryFilters,null,referenceIds,[standalone,...queryKeywords].join(' ')); searchPerformed=true; }
     const extracted:Record<string,unknown>={};
     const contextBlocks=items.map((item,index)=>`[${item.number || index+1}] ${item.code || ''} ${item.name || ''} ${item.location || ''} price=${item.price ?? 'unknown'} availability=${item.availability || 'unknown'}`).join('\n');
     const agentMessages=[{role:'system' as const,content:SYSTEM_PROMPT},{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({question:standalone,history:sanitizedHistory,properties:contextBlocks,customer_text:source,contact_redacted:guest && source!==input.message,injection_suspected:suspected,search_performed:searchPerformed})}\nEND_UNTRUSTED_DATA`}];
@@ -142,6 +173,11 @@ export class AiService {
     const step=streamRequested ? ((messages:Parameters<typeof streamAgentStep>[0])=>streamAgentStep(messages,text=>streamedDeltas.push(text))) as never : undefined;
     const run=async(messages:typeof agentMessages)=>runAgent(messages as never,execute,createPending,undefined,step);
     let agent=await run(agentMessages);
+    // An empty model answer is a provider failure: retry once, then fail the turn with AI_UNAVAILABLE.
+    if(!agent.text.trim() && !agent.pending.length && !agent.blocked.length){
+      agent=await run(agentMessages);
+      if(!agent.text.trim() && !agent.pending.length && !agent.blocked.length)throw new Error('AI_EMPTY_RESPONSE');
+    }
     for(const blockedReason of agent.blocked) log('agent',blockedReason,blockedReason,'flagged');
     let result={reply:agent.text || 'Hiện tôi chưa đủ dữ liệu để trả lời chính xác.',tool_calls:[] as unknown[],needs:{},flags:[] as never[]};
     result.reply=agent.text || result.reply;
@@ -185,24 +221,34 @@ export class AiService {
     if(committed.error)return catalogDatabaseError(committed.error);
     if(guest)(await cookies()).set('pose-ai-session',who.token,{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',path:'/',maxAge:86400*7});
     const action=pendingActions[0];
-    const payload={session:committed.data,reply,sources:items,related,blocked,proposals,pending_actions:pendingActions,action,inquiry_url:'/customer/inquiries/new'};
+    const scope: 'in_scope' | 'out_of_scope' = 'in_scope';
+    const payload={session:committed.data,reply,scope,sources:items,related,blocked,proposals,pending_actions:pendingActions,action,inquiry_url:'/customer/inquiries/new'};
     if(request.headers.get('accept')?.includes('text/event-stream')){
       const encoder=new TextEncoder();
       const stream=new ReadableStream<Uint8Array>({start(controller){
         const send=(type:string,value:unknown)=>controller.enqueue(encoder.encode(`event: ${type}\ndata: ${JSON.stringify(value)}\n\n`));
-        send('meta',{session_id:committed.data.id,sources:items,related});
+        send('meta',{session_id:committed.data.id,scope,sources:items,related});
         const deltas=streamedDeltas.length ? streamedDeltas : Array.from({length:Math.ceil(reply.length/48)},(_,i)=>reply.slice(i*48,i*48+48));
         for(const text of deltas)send('delta',{text});
         for(const pending of pendingActions)send('action',{action:pending});
-        send('done',{message:reply,blocked,guard:violation}); controller.close();
+        send('done',{message:reply,scope,blocked,guard:violation}); controller.close();
       }});
       return new Response(stream,{headers:{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','Connection':'keep-alive','X-Accel-Buffering':'no'}});
     }
     return catalogJson(payload);
   }catch{return unavailable();}
 }
-async getChat(request:NextRequest,id:string) {
+  async getChat(request:NextRequest,id:string) {
   try {if(!uuidPattern.test(id))return catalogError('NOT_FOUND','Không tìm thấy hội thoại.',404);const who=await identity();if(who.error)return who.error;const result=await readSession(id,who);return result.error ? catalogDatabaseError(result.error):catalogJson({session:result.data});}catch{return unavailable();}
+}
+async getUsage(request:NextRequest) {
+  if(!validOrigin(request))return catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403);
+  const session=await authenticatedSession();
+  if(!session)return catalogError('UNAUTHORIZED','Vui lòng đăng nhập.',401);
+  if(session.role!=='Admin')return catalogError('FORBIDDEN','Bạn không có quyền xem sử dụng AI.',403);
+  const url=new URL(request.url), from=url.searchParams.get('from'), to=url.searchParams.get('to');
+  const result=await authClient(session.access).rpc('pose_system_admin_ai_usage',{p_from:from||null,p_to:to||null});
+  return result.error ? catalogDatabaseError(result.error) : catalogJson({items:result.data||[]});
 }
   async handoff(request:NextRequest) {
   try {

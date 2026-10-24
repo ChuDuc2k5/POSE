@@ -46,8 +46,9 @@ try{
  create table public.ai_extracted_preferences(id uuid primary key default gen_random_uuid(),lead_id uuid not null references public.leads(id),field_name varchar not null,field_value text,confidence numeric,source_call_id uuid references public.calls(id),created_at timestamptz not null default now());
  create table public.ai_analyses(id uuid primary key default gen_random_uuid(),call_id uuid not null references public.calls(id),lead_id uuid references public.leads(id),needs text,budget numeric,interested_property text,preferred_location text,expected_timeline varchar,interest_level varchar,purchase_intent varchar,rejection_reason text,lead_score integer,temperature public.lead_temperature,summary text,raw_analysis jsonb,created_at timestamptz not null default now());
  `);
- for(const file of ['auth-access.sql','account-profile.sql','property-management.sql','property-discovery.sql','property-listing-source.sql','lead-contact-foundation.sql','calling-contract.sql','ai-agent.sql','ai-agent-tools.sql','ai-knowledge.sql','ai-rag-real-change-1.sql','property-similar.sql']){
+ for(const file of ['auth-access.sql','account-profile.sql','property-management.sql','property-discovery.sql','property-listing-source.sql','lead-contact-foundation.sql','calling-contract.sql','ai-agent.sql','ai-agent-tools.sql','ai-knowledge.sql','ai-rag-real-change-1.sql','property-similar.sql','ai-request-log.sql','ai-request-log-cost.sql','ai-request-log-session.sql']){
   let sql=await readFile(new URL(`../../supabase/${file}`,import.meta.url),'utf8');
+  if(file==='ai-request-log.sql')await db.exec("create or replace function pose_private.directory_admin() returns boolean language sql stable as $$ select coalesce((pose_private.pose_access_context()->>'role')='Admin',false) $$;");
   // The external PGlite pgvector build currently provides the vector type but
   // cannot create the cosine HNSW operator class; production PostgreSQL runs
   // the unmodified SQL. Keep the functional RPC/query assertions below.
@@ -55,6 +56,16 @@ try{
   if(file==='property-similar.sql')sql=sql.replace(/extensions\.vector/g,'vector').replace(/v\.vector operator\(extensions\.<=>\) s\.vector/g,'0').replace(/order by v\.vector operator\(extensions\.<=>\) s\.vector, v\.id/g,'order by v.id').replace(/order by 0, v\.id/g,'order by v.id').replace(/extensions\.avg\(c\.embedding\)/g,'(array_agg(c.embedding))[1]');
   await db.exec(sql);
  }
+ // M06 governance: per-request log with the cost fixed at log time; API roles cannot read or write it directly.
+ await db.exec('set role service_role');
+ const loggedId=(await db.query("select public.pose_system_log_ai_request(null,'chat','gpt-4.1-mini','assistant','assistant@4','{search_properties}',1000,200,1200,850,'ok',null,0.00072) id")).rows[0].id;
+ await db.exec('reset role');
+ const loggedRow=(await db.query('select estimated_cost_usd::text cost,tools_called,prompt_version from public.ai_request_log where id=$1',[loggedId])).rows[0];
+ if(loggedRow.cost!=='0.00072000'||loggedRow.tools_called[0]!=='search_properties'||loggedRow.prompt_version!=='assistant@4')throw new Error('AI request log row/cost mismatch');
+ for(const role of ['anon','authenticated']){let denied=false;await db.exec(`set role ${role}`);try{await db.query('select count(*) from public.ai_request_log');}catch{denied=true;}await db.exec('reset role');if(!denied)throw new Error(`${role} can read ai_request_log`);}
+ {let denied=false;await db.exec('set role anon');try{await db.query("select public.pose_system_log_ai_request(null,'chat','x',null,null,'{}',0,0,0,0,'ok',null,0)");}catch{denied=true;}await db.exec('reset role');if(!denied)throw new Error('anon can log AI requests');}
+ await db.exec('delete from public.ai_request_log');
+ console.log('PASS: M06 AI request log stores tokens, prompt version, tools and per-request cost; anon/authenticated denied.');
  const rental=await db.exec(await readFile(new URL('../../supabase/test-ai-rental.sql',import.meta.url),'utf8'));
  console.log(rental.at(-1).rows[0].result);
  const result=await db.exec(await readFile(new URL('../../supabase/test-ai-agent.sql',import.meta.url),'utf8'));

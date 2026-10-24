@@ -6,6 +6,7 @@ import { embeddingConfig, EmbeddingService, EMBEDDING_BATCH_MAX } from '../src/m
 import { applyThresholds, currentModelRows, deterministicReason, reciprocalRankFusion, renderRetrievedContext, RetrievalService, type RankedChunk } from '../src/modules/ai/retrieval.js';
 import { indexNeedsEmbedding } from '../src/modules/ai/indexing.js';
 import { cosineSimilarity, meanVector, ruleSimilarProperties } from '../src/modules/ai/similar.js';
+import { rerank } from '../src/modules/ai/rerank.js';
 
 const env={...process.env};
 afterEach(()=>{process.env={...env};});
@@ -54,6 +55,7 @@ describe('embeddings',()=>{
 
 describe('hybrid ranking',()=>{
  it('uses previous-result ids as a ranking hint instead of an eligibility filter',async()=>{
+  process.env.AI_RAG_RERANK='off';
   const rows=[row('a','p1',{text_rank:1}),row('b','p2',{text_rank:2})];
   const service=new RetrievalService({embed:async()=>({model:'test',vectors:[[1]]})} as never,async args=>{expect(args.p_context).toEqual(['p1']);return {data:rows};});
   const result=await service.search('câu hỏi',{}, {propertyIds:['p1']});
@@ -65,6 +67,35 @@ describe('hybrid ranking',()=>{
  it('keeps full-text fallback and isolates vectors by model through ranked input',()=>{expect(applyThresholds([row('text','faq',{text_rank:1})],{minScore:.5,relativeGap:.1,noAnswerScore:.5,topK:5})).toHaveLength(1);const current=[row('current','p1',{vector_rank:1,similarity:.7})];expect(reciprocalRankFusion(current).map(x=>x.chunk_id)).not.toContain('old-model');});
  it('filters vector candidates to the current model while retaining text candidates',()=>{const rows=[row('new','p1',{embed_model:'bge-m3',vector_rank:1}),row('old','p2',{embed_model:'old',vector_rank:1}),row('text','faq',{text_rank:1})];expect(currentModelRows(rows,'bge-m3').map(x=>x.chunk_id)).toEqual(['new','text']);});
  it('keeps citation numbers stable per property after a sold result is removed',()=>{const first=row('a','p1',{content:'first'}),second=row('b','p1',{content:'second'}),sold=row('c','p2',{availability:'Sold'});const rendered=renderRetrievedContext([first,second,sold],new Set(['p1']));expect(rendered.sources.map(x=>x.number)).toEqual([1]);expect(rendered.chunks.map(x=>x.citation_number)).toEqual([1,1]);expect(rendered.context.match(/\[1\]/g)).toHaveLength(2);});
+});
+
+describe('model reranking',()=>{
+ it('orders by relevance and keeps the answer flag',async()=>{
+  const rows=[row('a','p1',{rrf:.9}),row('b','p2',{rrf:.8}),row('c','p3',{rrf:.7})];
+  const result=await rerank('câu hỏi',rows,{model:async()=>({has_answer:true,ranked:[{n:3,relevance:2},{n:1,relevance:3},{n:2,relevance:1}]})});
+  expect(result.found).toBe(true);expect(result.chunks.map(x=>x.chunk_id)).toEqual(['a','c']);
+ });
+ it('returns no answer when the model says no answer',async()=>{
+  const result=await rerank('không có', [row('a','p1',{similarity:.9})], {model:async()=>({has_answer:false,ranked:[{n:1,relevance:3}]})});
+  expect(result.found).toBe(false);expect(result.chunks).toEqual([]);
+ });
+ it('ignores duplicate and out-of-range entries without discarding valid results',async()=>{
+  const result=await rerank('q',[row('a','p1'),row('b','p2')],{model:async()=>({has_answer:true,ranked:[{n:99,relevance:3},{n:1,relevance:2},{n:1,relevance:3},{n:2,relevance:2}]})});
+  expect(result.chunks.map(x=>x.chunk_id)).toEqual(['a','b']);
+ });
+ it('falls back to thresholds for invalid output and timeout',async()=>{
+  const rows=[row('a','p1',{similarity:.8})];
+  const invalid=await rerank('q',rows,{model:async()=>({bad:true})});
+  expect(invalid.fallback).toBe(true);expect(invalid.chunks.map(x=>x.chunk_id)).toEqual(['a']);
+  const timeout=await rerank('q',rows,{timeoutMs:10,model:async()=>new Promise(()=>{})});
+  expect(timeout.fallback).toBe(true);expect(timeout.reason).toBe('timeout');
+ });
+ it('does not remove low-similarity candidates before reranking and caps listings at two chunks',async()=>{
+  const rows=[row('a','p1',{similarity:.01}),row('b','p2',{similarity:.02}),row('c','p3',{similarity:.03})];
+  const seen:number[]=[];
+  const result=await rerank('q',rows,{pool:3,model:async(_schema,_name,messages)=>{seen.push((messages[1].content as string).split('[').length-1);return {has_answer:true,ranked:[{n:1,relevance:2},{n:2,relevance:2},{n:3,relevance:2}]};}});
+  expect(seen[0]).toBe(3);expect(result.chunks).toHaveLength(3);expect(result.chunks.filter(x=>x.source_id==='p1')).toHaveLength(1);
+ });
 });
 
 describe('index idempotency',()=>{it('skips only when both hash and model match',()=>{expect(indexNeedsEmbedding({content_hash:'h',embed_model:'m'},'h','m')).toBe(false);expect(indexNeedsEmbedding({content_hash:'h',embed_model:'m'},'h','other')).toBe(true);expect(indexNeedsEmbedding({content_hash:'h',embed_model:null},'h',null)).toBe(false);});});

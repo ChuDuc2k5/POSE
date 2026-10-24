@@ -117,6 +117,7 @@ try{
  await send('Page.navigate',{url:'http://localhost:3300/properties'});await delay(500);await wait("document.readyState==='complete' && !!document.querySelector('.ai-launcher')");await delay(500);await click('Trò chuyện với trợ lý AI');await delay(100);
  check(await evaluate("!document.querySelector('[aria-label=\"Nói thay vì gõ\"]')"),'Firefox-like mic hidden');await click('Trò chuyện bằng giọng nói');await wait("!!document.querySelector('.ai-error')");check(await evaluate("document.querySelector('.ai-error').innerText.includes('Chrome hoặc Edge')"),'clear unsupported voice guidance');await screenshot('no-speech-380');
  await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});check(await evaluate("getComputedStyle(document.querySelector('.ai-send')).transitionDuration==='0s'"),'reduced motion');
+ await send('Network.setCookie',{name:'pose-access',value:'fixture-Admin',url:'http://localhost:3300'});await send('Page.navigate',{url:'http://localhost:3300/admin'});await delay(500);await wait("!!document.querySelector('.ai-usage-panel')");await screenshot('admin-usage-1280');
  console.log(`PASS: ${checks} M06 chat UI checks at 1280px and 380px; dictation, voice, barge-in, fallback, keyboard and consent.`);
  console.log(`Screenshots: ${root}`);
 }finally{

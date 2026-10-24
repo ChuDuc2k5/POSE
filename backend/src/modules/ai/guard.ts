@@ -4,6 +4,20 @@ export { stripPhones } from './privacy.ts';
 export const GUARD_VERSION='guard.v3';
 export const safeReply='Tôi chưa thể xác nhận câu trả lời an toàn từ dữ liệu hiện có. Bạn có thể yêu cầu chuyên viên tư vấn hỗ trợ.';
 export const disclosure='Tôi là trợ lý AI của TERAVA.';
+const realEstateWords=/căn|nhà|đất|phòng|giá|thuê|mua|bất động sản|dự án|khu vực|diện tích|chuyên viên|lịch xem|yêu thích|Q\d|RV-/i;
+// Fallback only: the validated query step (`topic`) decides scope. This list is used when
+// that step is unavailable. JS \b is ASCII-only, so Unicode letter lookarounds delimit words.
+const explicitOutOfScope=/(?<!\p{L})(?:code|python|lập trình|bài tập|giải toán|chính trị|bầu cử|bác sĩ|đau đầu|uống thuốc|chẩn đoán|homework|dịch sang|chứng khoán|tiền ảo|bitcoin)(?!\p{L})/iu;
+export function isOutOfScope(text:string, intent:'real_estate'|'other'|'unknown'='unknown', hasPropertyHistory=false) {
+  // Blocks an explicit non-property topic only when neither the turn nor the session
+  // supplies a property signal; greetings, thanks, and contextual follow-ups stay in-chat.
+  return explicitOutOfScope.test(text) && intent!=='real_estate' && !realEstateWords.test(text) && !hasPropertyHistory;
+}
+export function scopeFromTopic(topic:'real_estate'|'smalltalk'|'out_of_scope', text:string, hasPropertyHistory:boolean) {
+  // A model "out_of_scope" never overrides a clear property request or a property conversation.
+  return topic==='out_of_scope' && !realEstateWords.test(text) && !hasPropertyHistory;
+}
+export const outOfScopeReply='Tôi chỉ hỗ trợ tìm hiểu bất động sản TERAVA, xem thông tin căn hộ/dự án và kết nối chuyên viên. Bạn có thể hỏi về giá, khu vực, loại hình hoặc lịch xem nhà.';
 export function correctionData(reason:string){
   const corrections:Record<string,string>={UNSUPPORTED_PRICE_PERIOD:'Rent/Month: giá thuê VND/tháng. Sale/Total: giá bán tổng VND. Không trộn hai loại giá.',UNSUPPORTED_LANGUAGE:'Chỉ viết tiếng Việt, không dùng chữ Hán hay ngôn ngữ khác.',UNSUPPORTED_ROOM_COUNT:'Số phòng ngủ không có trong properties. Không mô tả căn có số phòng khách yêu cầu. Nói chưa biết số phòng, cần Sales xác nhận. Chép giá price nguyên số VND, không đổi đơn vị.',UNSUPPORTED_PRICE:'Chép đúng price nguyên số VND của căn; không đổi đơn vị hay gán giá khác.',UNSUPPORTED_COMMITMENT:'Không có dữ liệu giảm giá/pháp lý/thanh toán. Từ chối xác nhận, đề nghị Sales.',UNSUPPORTED_AVAILABILITY:'Chỉ Available còn bán; không giới thiệu trạng thái khác là còn bán.',PRIVATE_DATA_OR_SECRET:'Từ chối cung cấp dữ liệu cá nhân/secret, không trích lại nội dung đó.'};
   return {violations:[reason],correction:corrections[reason] || 'Bỏ nội dung không có trong properties, nói rõ chưa biết và đề nghị Sales.'};
@@ -31,8 +45,11 @@ export function toolAllowed(tool:unknown): tool is {name:string;arguments:Record
   if (!object(tool) || Object.keys(tool).some(k=>!['name','arguments'].includes(k)) || !object(tool.arguments)) return false;
   const args=tool.arguments;
   if (tool.name==='search_properties') return Object.keys(args).every(k=>['location','type','minPrice','maxPrice','bedrooms','transaction_type'].includes(k)) && Object.entries(args).every(([k,v])=>k==='transaction_type' ? ['Sale','Rent'].includes(v as string):k==='type' ? propertyTypes.includes(v as string):k==='location' ? typeof v==='string' && v.length>0 && v.length<=120:typeof v==='number' && Number.isFinite(v) && v>=0 && v<=1e15) && !(typeof args.minPrice==='number' && typeof args.maxPrice==='number' && args.minPrice>args.maxPrice);
-  if (tool.name==='request_handoff') return Object.keys(args).length===0;
-  if (tool.name==='propose_appointment') return Object.keys(args).length===2 && ['start','end'].every(k=>typeof args[k]==='string' && Number.isFinite(Date.parse(args[k] as string))) && Date.parse(args.end as string)>Date.parse(args.start as string);
+  if (tool.name==='get_property_detail') return Object.keys(args).length===1 && typeof args.code==='string' && args.code.length>0 && args.code.length<=40;
+  if (tool.name==='list_my_appointments') return Object.keys(args).length===0;
+  if (tool.name==='save_favorite') return Object.keys(args).length===1 && typeof args.code==='string' && args.code.length>0 && args.code.length<=40;
+  if (tool.name==='request_handoff') return Object.keys(args).length===0 || (Object.keys(args).length===1 && typeof args.summary==='string' && args.summary.trim().length>=3 && args.summary.length<=2000);
+  if (tool.name==='propose_appointment') return Object.keys(args).length===3 && typeof args.code==='string' && Number.isFinite(Date.parse(args.preferred_start as string)) && (args.preferred_end===null || Number.isFinite(Date.parse(args.preferred_end as string)));
   return false;
 }
 function references(text:string,evidence:Evidence[]){return evidence.filter(e=>[e.code,e.id,e.name].some(v=>new RegExp(`(?<![a-z0-9_-])${v.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?![a-z0-9_-])`,'i').test(text)));}

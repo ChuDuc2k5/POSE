@@ -4,8 +4,10 @@ import { parseToolCall } from '../src/modules/ai/llm.js';
 
 describe('M06 native agent contract', () => {
   it('accepts and rejects every structured schema', () => {
-    expect(SearchQuerySchema.safeParse({standalone_question:'căn hộ Q7',filters:{},refers_to_previous:[]}).success).toBe(true);
-    expect(SearchQuerySchema.safeParse({standalone_question:'',filters:{},refers_to_previous:[]}).success).toBe(false);
+    expect(SearchQuerySchema.safeParse({topic:'real_estate',standalone_question:'căn hộ Q7',filters:{},refers_to_previous:[]}).success).toBe(true);
+    expect(SearchQuerySchema.safeParse({topic:'real_estate',standalone_question:'',filters:{},refers_to_previous:[]}).success).toBe(false);
+    expect(SearchQuerySchema.safeParse({standalone_question:'căn hộ Q7',filters:{},refers_to_previous:[]}).success).toBe(false);
+    expect(SearchQuerySchema.safeParse({topic:'weather',standalone_question:'x',filters:{},refers_to_previous:[]}).success).toBe(false);
     expect(AnswerMetaSchema.safeParse({grounding:'grounded',cited:[1],claims:[{type:'price',text:'giá'}]}).success).toBe(true);
     expect(AnswerMetaSchema.safeParse({grounding:'bad',cited:[],claims:[]}).success).toBe(false);
     expect(NeedsV1Schema.safeParse([{field:'locations',value:['Q7'],evidence:'Q7'}]).success).toBe(true);
