@@ -81,7 +81,10 @@ export class AiService {
     const search=async(searchFilters:Record<string,unknown>,propertyId:string|null=null,referenceIds:string[]=[],searchQuery=source)=>{
       const aliases:Record<string,string>={min_price_vnd:'minPrice',max_price_vnd:'maxPrice',property_type:'type'};searchFilters=Object.fromEntries(Object.entries(searchFilters).map(([key,value])=>[aliases[key]||key,value]));
       try{rag=await this.retrieval.search(searchQuery,searchFilters,{propertyId,propertyIds:referenceIds});const mapped=rag.sources.filter(item=>item.id).map(item=>({...item,id:item.id as string,name:item.title as string,reason:item.reason as string}));const live=await retrieveIds(mapped.map(item=>item.id));return live.map(item=>({...item,...mapped.find(candidate=>candidate.id===item.id)})) as Evidence[];}
-      catch{return retrieve(searchFilters,propertyId);}
+      catch(error){
+        console.warn(JSON.stringify({event:'retrieval_fallback',error:error instanceof Error ? error.message:'RETRIEVAL_UNAVAILABLE'}));
+        return retrieve(searchFilters,propertyId);
+      }
     };
     if(searchPerformed)items=await search(filters,input.property_id as string|null || null);
     const initialRag=rag as RetrievalResult|null;
