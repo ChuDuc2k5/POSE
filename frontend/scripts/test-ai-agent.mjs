@@ -252,6 +252,11 @@ const provider=createServer(async(req,res)=>{
  if(url.pathname.endsWith('/account_history'))return reply(200,[]);
  if(url.pathname.endsWith('/pose_read_profile'))return reply(200,{name:'Khách hàng kiểm thử',phone:who==='User' && verifiedPhone ? '+84901234561':'',phoneVerified:who==='User' && verifiedPhone});
  if(url.pathname.endsWith('/pose_ai_score_context'))return reply(200,scoringFor(leadFor(uid)));
+ if(url.pathname.endsWith('/pose_ai_list_sessions')){
+  if(!uid)return error('42501','AUTH_REQUIRED',401);
+  const rows=[...sessions.values()].filter(s=>s.user_id===uid&&s.store_transcript&&s.status!=='Closed').sort((a,b)=>String(b.last_message_at||'').localeCompare(String(a.last_message_at||''))).map(s=>({id:s.id,title:String(messages.find(m=>m.session_id===s.id&&m.role==='user')?.content||'Cuộc trò chuyện mới').replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,'[email đã ẩn]').replace(/(?:\+?84|0)[35789](?:[ .()-]?\d){8}/g,'[đã ẩn số liên hệ]'),updated_at:s.last_message_at||s.created_at,message_count:s.message_count}));
+  return reply(200,rows);
+ }
  if(url.pathname.endsWith('/pose_ai_read_session') || url.pathname.endsWith('/pose_system_ai_read_guest')){
   const s=sessions.get(input.p_session);if(!s || (token==='fixture-secret' ? s.user_id!==null || s.guest_token_hash!==input.p_hash:s.user_id!==uid))return error('P0002','NOT_FOUND',404);
   return reply(200,{id:s.id,message_count:s.message_count,store_transcript:s.store_transcript,status:s.status,property_ids:s.property_ids || [],scoring:scoringFor(leads.get(s.lead_id)),messages:messages.filter(m=>m.session_id===s.id)});
@@ -427,6 +432,7 @@ mode='search';const search=await (await call('/api/ai/chat',base)).json();check(
  mode='handoff';const guestTool=await (await call('/api/ai/chat',base)).json();check(!guestTool.proposals.length && tasks.size===0 && logs.some(l=>l.session_id===guestTool.session.id&&l.reason==='SIGN_IN_REQUIRED') && guestTool.reply.includes('biểu mẫu tư vấn'),'Guest handoff tool denied and model explains why');mode='ok';
  check((await call('/api/ai/handoff',{session_id:chat.session.id,summary:'Xin tư vấn',request_key:randomUUID()})).status===401,'Guest cannot handoff');
  const signed=await (await call('/api/ai/chat',{...base,store_transcript:true},'pose-access=fixture-User')).json();
+ const ownSessions=await call('/api/ai/sessions?page=1',null,'pose-access=fixture-User');const ownSessionBody=await ownSessions.json();check(ownSessions.status===200&&ownSessionBody.items?.every(s=>s.id===signed.session.id),'Signed-in session list is owner-scoped');check(ownSessionBody.items?.every(s=>!String(s.title).match(/0901234567|@/)),'Session-list titles are masked');check((await call('/api/ai/sessions?page=1',null,'pose-access=fixture-Other')).status===200&&!(await (await call('/api/ai/sessions?page=1',null,'pose-access=fixture-Other')).json()).items?.some(s=>s.id===signed.session.id),'Another user session is never listed');check((await call('/api/ai/sessions')).status===401,'Guest session list is rejected');
  check((await call(`/api/ai/sessions/${signed.session.id}`,null,'pose-access=fixture-Other')).status===404,'Another user denied');
  const handoff={session_id:signed.session.id,summary:'Xin chuyên viên tư vấn',request_key:randomUUID(),preferred_start:'2027-01-15T02:00:00Z',preferred_end:'2027-01-15T03:00:00Z'};
  const unverified=await call('/api/ai/handoff',handoff,'pose-access=fixture-User');

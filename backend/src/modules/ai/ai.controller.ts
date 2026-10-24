@@ -17,6 +17,9 @@ export class AiController {
   @Post('chat/stream')
   chatStream(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, request => this.ai.chat(request)); }
   @Public()
+  @Get('sessions')
+  sessions(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, request => this.ai.getSessions(request)); }
+  @Public()
   @Get('sessions/:id')
   session(@Req() req: Request, @Res() res: Response) { return dispatch<{id:string}>(req, res, async (request, context) => this.ai.getChat(request, (await context.params).id)); }
   @Public()

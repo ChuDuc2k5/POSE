@@ -46,7 +46,7 @@ try{
  create table public.ai_extracted_preferences(id uuid primary key default gen_random_uuid(),lead_id uuid not null references public.leads(id),field_name varchar not null,field_value text,confidence numeric,source_call_id uuid references public.calls(id),created_at timestamptz not null default now());
  create table public.ai_analyses(id uuid primary key default gen_random_uuid(),call_id uuid not null references public.calls(id),lead_id uuid references public.leads(id),needs text,budget numeric,interested_property text,preferred_location text,expected_timeline varchar,interest_level varchar,purchase_intent varchar,rejection_reason text,lead_score integer,temperature public.lead_temperature,summary text,raw_analysis jsonb,created_at timestamptz not null default now());
  `);
- for(const file of ['auth-access.sql','account-profile.sql','property-management.sql','property-discovery.sql','property-listing-source.sql','lead-contact-foundation.sql','calling-contract.sql','ai-agent.sql','ai-agent-tools.sql','ai-knowledge.sql','ai-rag-real-change-1.sql','property-similar.sql','ai-request-log.sql','ai-request-log-cost.sql','ai-request-log-session.sql','ai-request-log-turns.sql']){
+ for(const file of ['auth-access.sql','account-profile.sql','property-management.sql','property-discovery.sql','property-listing-source.sql','lead-contact-foundation.sql','calling-contract.sql','ai-agent.sql','ai-chat-history.sql','ai-agent-tools.sql','ai-knowledge.sql','ai-rag-real-change-1.sql','property-similar.sql','ai-request-log.sql','ai-request-log-cost.sql','ai-request-log-session.sql','ai-request-log-turns.sql']){
   let sql=await readFile(new URL(`../../supabase/${file}`,import.meta.url),'utf8');
   if(file==='ai-request-log.sql')await db.exec("create or replace function pose_private.directory_admin() returns boolean language sql stable as $$ select coalesce((pose_private.pose_access_context()->>'role')='Admin',false) $$;");
   // The external PGlite pgvector build currently provides the vector type but
@@ -108,6 +108,8 @@ try{
  console.log(rental.at(-1).rows[0].result);
  const result=await db.exec(await readFile(new URL('../../supabase/test-ai-agent.sql',import.meta.url),'utf8'));
  console.log(result.at(-1).rows[0].result);
+ const history=await db.exec(await readFile(new URL('../../supabase/test-ai-chat-history.sql',import.meta.url),'utf8'));
+ console.log(history.at(-1).rows[0].result);
  const knowledge=await db.exec(await readFile(new URL('../../supabase/test-ai-knowledge.sql',import.meta.url),'utf8'));
  console.log(knowledge.at(-1).rows[0].result);
  const tools=await db.exec(await readFile(new URL('../../supabase/test-ai-agent-tools.sql',import.meta.url),'utf8'));
