@@ -44,6 +44,14 @@ export async function rerank(question: string, rows: RankedChunk[], options: Rer
     const chosen = candidates.map((row, index) => ({ row, relevance: scores.get(index + 1), index })).filter(item => item.relevance !== undefined && item.relevance >= min && hasAnswer && answerable.has(item.index + 1)).sort((a, b) => (b.relevance! - a.relevance!) || ((b.row.rrf || 0) - (a.row.rrf || 0))).map(item => item.row);
     const limited: RankedChunk[] = [], counts = new Map<string, number>();
     for (const row of chosen) { const key = sourceKey(row), count = counts.get(key) || 0; if (count >= 2) continue; counts.set(key, count + 1); limited.push(row); if (limited.length >= Number(process.env.AI_RAG_TOP_K || 5)) break; }
+    // A small model sometimes rejects every candidate even when retrieval is near-certain; above
+    // AI_RAG_RERANK_KEEP_SIM the retrieval thresholds decide instead (off when unset).
+    const keepSim = Number(process.env.AI_RAG_RERANK_KEEP_SIM || 0), best = Math.max(0, ...candidates.map(row => row.similarity ?? 0));
+    if (!limited.length && keepSim > 0 && best >= keepSim) {
+      const kept = applyThresholds(rows);
+      console.info(JSON.stringify({ event: 'rerank_overruled', latency_ms: Date.now() - started, best_similarity: best, returned: kept.length }));
+      return { chunks: kept, found: kept.length > 0, hasAnswer: kept.length > 0, fallback: false, latencyMs: Date.now() - started, reason: 'retrieval_confident' };
+    }
     console.info(JSON.stringify({ event: 'rerank', latency_ms: Date.now() - started, candidates: candidates.length, returned: limited.length }));
     return { chunks: limited, found: hasAnswer && limited.length > 0, hasAnswer, fallback: false, latencyMs: Date.now() - started };
   } catch (error) { return fallback(rows, error instanceof Error ? error.message : 'unknown', started); }
