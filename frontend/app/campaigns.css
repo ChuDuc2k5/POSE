@@ -49,3 +49,4 @@
 .campaigns-reason-chips { display:flex; flex-wrap:wrap; gap:5px; }
 .campaigns-reason-chips span { border-radius:99px; padding:3px 8px; background:var(--nx-primary-soft); color:var(--nx-primary); font-size:11px; }
 @media(max-width:700px) { .campaigns-audience-match-panel { margin:12px 0; padding:18px; } .campaigns-match-heading { flex-direction:column; } .campaigns-audience-match-panel table { font-size:12px; } }
+@media(max-width:700px) { .campaigns-workspace .catalog-sidebar nav { flex-wrap:nowrap; overflow-x:auto; max-width:100%; } .campaigns-workspace .catalog-sidebar nav a { white-space:nowrap; flex-shrink:0; } }

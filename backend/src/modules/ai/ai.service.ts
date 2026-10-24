@@ -244,7 +244,7 @@ export class AiService {
   try {if(!uuidPattern.test(id))return catalogError('NOT_FOUND','Không tìm thấy hội thoại.',404);const who=await identity();if(who.error)return who.error;const result=await readSession(id,who);return result.error ? catalogDatabaseError(result.error):catalogJson({session:result.data});}catch{return unavailable();}
 }
 async getUsage(request:NextRequest) {
-  if(!validOrigin(request))return catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403);
+  // Read-only GET: browsers send no Origin on same-origin GETs; CSRF checks guard state changes only.
   const session=await authenticatedSession();
   if(!session)return catalogError('UNAUTHORIZED','Vui lòng đăng nhập.',401);
   if(session.role!=='Admin')return catalogError('FORBIDDEN','Bạn không có quyền xem sử dụng AI.',403);
@@ -253,7 +253,7 @@ async getUsage(request:NextRequest) {
   return result.error ? catalogDatabaseError(result.error) : catalogJson({items:result.data||[]});
 }
 async getAiDashboard(request:NextRequest, kind:'overview'|'series'|'kinds'|'turns'|'turn', id?:string) {
-  if(!validOrigin(request))return catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403);
+  // Read-only GET (see getUsage): authorization is the Admin session check below.
   const session=await authenticatedSession();
   if(!session)return catalogError('UNAUTHORIZED','Vui lòng đăng nhập.',401);
   if(session.role!=='Admin')return catalogError('FORBIDDEN','Bạn không có quyền xem dashboard AI.',403);
