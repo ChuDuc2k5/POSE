@@ -7,6 +7,8 @@ export const CHUNK_SINGLE_MAX = 1200;
 export const CHUNK_SIZE = 800;
 /** Target overlap, composed of complete sentences whenever possible. */
 export const CHUNK_OVERLAP = 150;
+/** Bump when chunk text or headers change (cleaning rules, aliases) so every document is re-indexed. */
+export const CHUNKER_VERSION = 'chunker.v3-hcm-wards';
 
 const contact = /(?:[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.[\p{L}]{2,}|(?:https?:\/\/|www\.)\S+|(?<![\d+])(?:\+84[ .()-]?[35789](?:[ .()-]?\d){8}|0[35789](?:[ .()-]?\d){8}|\+[1-9](?:[ .()-]?\d){7,14})(?!\d))/giu;
 // Unicode-aware word edges: JS \b is ASCII-only, so "chi" used to match "chi\u1ec1u".
