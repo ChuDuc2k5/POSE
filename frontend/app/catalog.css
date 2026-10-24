@@ -1,23 +1,21 @@
 .catalog-workspace { --catalog-ink:var(--nx-ink); --catalog-muted:var(--nx-muted); --catalog-line:var(--nx-line); --catalog-green:var(--nx-primary); display:flex; min-height:100svh; color:var(--catalog-ink); background:var(--nx-page); }
-.catalog-sidebar { width:225px; flex-shrink:0; padding:32px 22px 22px; background:var(--nx-navy); color:var(--nx-on-dark-muted); display:flex; flex-direction:column; position:sticky; top:0; height:100svh; }
+.catalog-sidebar { width:225px; flex-shrink:0; padding:32px 22px 22px; background:var(--nx-surface-soft); color:var(--nx-ink); border-right:1px solid var(--nx-line); display:flex; flex-direction:column; position:sticky; top:0; height:100svh; }
 .catalog-sidebar .brand { font-size:24px; gap:10px; margin:0 6px 43px; }
-.catalog-sidebar .brand-mark { background:var(--nx-primary-line); color:var(--nx-ink); width:39px; height:39px; border-radius:12px; }
-.catalog-sidebar .brand-caption { font-size:5px; letter-spacing:.08em; color:var(--nx-on-dark-muted); }
 .catalog-sidebar-label { font-size:8px; letter-spacing:.15em; color:var(--nx-muted); margin:0 12px 17px; }
 .catalog-sidebar nav { display:flex; flex-direction:column; gap:7px; }
-.catalog-sidebar nav button { display:flex; align-items:center; gap:12px; padding:14px 13px; border:1px solid transparent; background:transparent; font-size:12px; color:var(--nx-on-dark-muted); border-radius:10px; text-align:left; }
-.catalog-sidebar nav button > svg:last-child { margin-left:auto; opacity:.35; }
-.catalog-sidebar nav button.active { background:#ffffff0d; border-color:#ffffff1c; color:var(--nx-on-dark-muted); }
-.catalog-sidebar nav button.active > svg:last-child { opacity:1; }
-.catalog-sidebar nav button:hover { background:#ffffff0d; }
+.catalog-sidebar nav :is(button,a) { display:flex; align-items:center; gap:12px; padding:14px 13px; border:1px solid transparent; background:transparent; font-size:12px; color:var(--nx-muted); border-radius:10px; text-align:left; text-decoration:none; }
+.catalog-sidebar nav :is(button,a) > svg:last-child { margin-left:auto; opacity:.35; }
+.catalog-sidebar nav :is(button,a).active { background:var(--nx-primary-soft); border-color:var(--nx-primary-line); color:var(--nx-primary); }
+.catalog-sidebar nav :is(button,a).active > svg:last-child { opacity:1; }
+.catalog-sidebar nav :is(button,a):hover { background:#ffffff0d; }
 .catalog-sidebar-note { margin:36px 7px 24px; padding:20px 15px; border:1px solid #ffffff19; border-radius:12px; background:linear-gradient(135deg,#ffffff08,transparent); }
-.catalog-sidebar-note > svg { color:var(--nx-on-dark-muted); }
+.catalog-sidebar-note > svg { color:var(--nx-muted); }
 .catalog-sidebar-note h3 { font-size:12px; font-weight:500; margin:13px 0 7px; letter-spacing:0; }
 .catalog-sidebar-note p { font-size:10px; color:var(--nx-muted); margin:0; line-height:1.8; }
 .catalog-sidebar-bottom { margin-top:auto; border-top:1px solid #ffffff1b; padding:20px 7px 0; display:flex; flex-direction:column; gap:19px; }
-.catalog-sidebar-bottom > a { display:flex; gap:10px; align-items:center; font-size:11px; text-decoration:none; color:var(--nx-on-dark-muted); }
+.catalog-sidebar-bottom > a { display:flex; gap:10px; align-items:center; font-size:11px; text-decoration:none; color:var(--nx-muted); }
 .catalog-sidebar-bottom > a > svg:last-child { margin-left:auto; opacity:.5; }
-.catalog-sidebar-bottom .button { background:transparent; border-color:#ffffff29; color:var(--nx-on-dark-muted); min-height:38px; font-size:10px; border-radius:8px; }
+.catalog-sidebar-bottom .button { background:transparent; border-color:var(--nx-line-strong); color:var(--nx-muted); min-height:38px; font-size:10px; border-radius:8px; }
 .catalog-workspace-main { flex:1; min-width:0; }
 .catalog-topbar { display:flex; align-items:center; justify-content:space-between; gap:20px; min-height:83px; background:var(--nx-surface); border-bottom:1px solid var(--catalog-line); padding:16px 35px; }
 .catalog-topbar > div { display:flex; align-items:center; gap:10px; font-size:11px; color:var(--nx-muted); }
@@ -111,7 +109,7 @@
 /* Native dialog keeps keyboard focus inside the editor and supports Escape. */
 .catalog-editor { color:var(--nx-ink); border:1px solid var(--nx-line); border-radius:18px; padding:0; width:760px; max-width:calc(100% - 32px); max-height:calc(100svh - 48px); margin:auto; box-shadow:0 22px 90px #00000033; overflow:hidden; }
 .catalog-editor[open] { display:flex; flex-direction:column; }
-.catalog-editor::backdrop { background:#d4af3766; backdrop-filter:blur(4px); }
+.catalog-editor::backdrop { background:color-mix(in srgb,var(--nx-navy) 40%,transparent); backdrop-filter:blur(4px); }
 .catalog-editor-header { display:flex; gap:14px; align-items:center; padding:25px 28px 21px; flex-shrink:0; }
 .catalog-editor-symbol { display:grid; place-items:center; width:46px; height:46px; background:var(--nx-primary-soft); color:var(--nx-muted); border:1px solid var(--nx-line); border-radius:13px; }
 .catalog-editor-header .eyebrow { font-size:8px; letter-spacing:.13em; color:var(--nx-muted); }
@@ -175,7 +173,7 @@
 .catalog-media-preview img { width:100%; height:100%; object-fit:cover; }
 .catalog-media-preview > div { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:11px; color:var(--nx-muted); }
 .catalog-media-preview > div > span { font-size:8px; letter-spacing:.15em; }
-.catalog-media-size { position:absolute; left:10px; bottom:10px; background:#0b0b0be8; border-radius:5px; padding:4px 7px; font-size:8px; color:var(--nx-muted); }
+.catalog-media-size { position:absolute; left:10px; bottom:10px; background:color-mix(in srgb,var(--nx-navy) 91%,transparent); border-radius:5px; padding:4px 7px; font-size:8px; color:var(--nx-muted); }
 .catalog-media-preview a { position:absolute; right:10px; bottom:10px; background:var(--nx-surface); border:1px solid var(--nx-line); color:var(--nx-muted); width:27px; height:27px; display:grid; place-items:center; border-radius:7px; }
 .catalog-media-card form { padding:15px; }
 .catalog-media-card .catalog-form-grid { gap:10px; margin-top:13px; }

@@ -72,7 +72,7 @@ export function AuthForm({ mode, verificationFailed = false }: { mode: 'signin' 
     </aside>
     <section className="access-content">
       <header className="access-topbar"><Link href="/" className="back-link"><ArrowLeft size={16}/> Về trang chủ</Link><Link href="/terms" className="access-help">Điều khoản & quyền riêng tư <ArrowRight size={14}/></Link></header>
-      <div className="access-mobile-brand"><Brand iconVariant="lavender"/></div>
+      <div className="access-mobile-brand"><Brand light={false}/></div>
       <div className="access-form-wrap">
         <nav className="access-mode" aria-label="Tài khoản"><Link href="/sign-in" aria-current={!signup ? 'page' : undefined}>Đăng nhập</Link><Link href="/sign-up" aria-current={signup ? 'page' : undefined}>Đăng ký</Link></nav>
         <span className={registered ? 'access-form-icon' : 'access-brand-emblem'}>{registered ? <Mail size={24}/> : <TeravaMark size={46} variant="mark"/>}</span>

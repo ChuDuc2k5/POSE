@@ -5,7 +5,7 @@ import { roleHome, roleLabels, type Role } from '@/lib/roles';
 
 export function WorkspaceEntry({ role, name }: { role: Role; name: string }) {
   return <main className="account-page">
-    <header className="account-header container"><Brand href={roleHome(role)}/><Link href="/account" className="text-link">Tài khoản của tôi</Link></header>
+    <header className="account-header container"><Brand light={false} href={roleHome(role)}/><Link href="/account" className="text-link">Tài khoản của tôi</Link></header>
     <section className="account-card">
       <span className="eyebrow">{roleLabels[role]}</span>
       <h1>{role === 'Admin' ? 'Không gian quản trị' : 'Trang chủ tư vấn'}</h1>
