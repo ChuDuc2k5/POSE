@@ -23,9 +23,13 @@ export function campaignErrors(v:Record<string,unknown>,create=false) {
 }
 export function filterErrors(v:unknown):Record<string,string> {
  if(!object(v))return {filter:'Bộ lọc không hợp lệ.'};
- if(Object.keys(v).some(k=>!['temperature','lead_status','source','created_from','created_to','lead_ids'].includes(k)))return {filter:'Bộ lọc có trường không hợp lệ.'};
+ if(Object.keys(v).some(k=>!['temperature','lead_status','source','created_from','created_to','lead_ids','match_campaign_products','min_match','needs_location','needs_property_type','timeline','interacted_days','exclude_called_days','confirmed_needs_only'].includes(k)))return {filter:'Bộ lọc có trường không hợp lệ.'};
  const choices:Record<string,string[]>={temperature:['HOT','WARM','COLD','UNRATED'],lead_status:['NEW','CONTACTED','QUALIFIED','FOLLOW_UP','CONVERTED','LOST'],source:['Inquiry','WebChat','Call','Manual','Import']};
  for(const k of ['temperature','lead_status','source','lead_ids'])if(v[k]!==undefined && (!Array.isArray(v[k]) || v[k].length>500 || v[k].some(x=>typeof x!=='string' || (k==='lead_ids' ? !uuidPattern.test(x):!choices[k].includes(x)))))return {filter:'Kiểm tra bộ lọc; tối đa 500 Lead.'};
+ for(const k of ['needs_location','needs_property_type','timeline'])if(v[k]!==undefined && (!Array.isArray(v[k]) || v[k].length>500 || v[k].some(x=>typeof x!=='string')))return {filter:'Bộ lọc mới không hợp lệ.'};
+ if(v.match_campaign_products!==undefined && typeof v.match_campaign_products!=='boolean' || v.confirmed_needs_only!==undefined && typeof v.confirmed_needs_only!=='boolean')return {filter:'Bộ lọc mới không hợp lệ.'};
+ if(v.min_match!==undefined && (!Number.isInteger(v.min_match) || Number(v.min_match)<0 || Number(v.min_match)>85))return {filter:'Điểm phù hợp phải từ 0 đến 85.'};
+ if(v.interacted_days!==undefined && (!Number.isInteger(v.interacted_days) || Number(v.interacted_days)<1 || Number(v.interacted_days)>365) || v.exclude_called_days!==undefined && (!Number.isInteger(v.exclude_called_days) || Number(v.exclude_called_days)<1 || Number(v.exclude_called_days)>90))return {filter:'Khoảng ngày không hợp lệ.'};
  for(const k of ['created_from','created_to'])if(v[k]!==undefined && (typeof v[k]!=='string' || !Number.isFinite(Date.parse(v[k] as string))))return {filter:'Ngày tạo không hợp lệ.'};
  if(typeof v.created_from==='string' && typeof v.created_to==='string' && Date.parse(v.created_from)>Date.parse(v.created_to))return {filter:'Khoảng ngày tạo không hợp lệ.'};
  return {};
