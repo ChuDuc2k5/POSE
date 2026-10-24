@@ -10,10 +10,11 @@ import { RecommendationCard } from './recommendation-card';
 
 type Source={id:string;code:string;name:string;updated_at:string;price:number|null;availability:keyof typeof availabilityLabels;transaction_type:'Sale'|'Rent';price_period:'Total'|'Month';number?:number;cover_id?:string|null;area?:number|null;bedrooms?:number|null;location?:string;reason?:string;relaxed_reason?:string};
 type PendingAction={id:string;tool:string;summary_vi:string;status?:string;requires_verified_phone?:boolean};
-type Message={role:'user'|'assistant';content:string;sources?:Source[];related?:Source[];action?:PendingAction};
+type Message={role:'user'|'assistant';content:string;sources?:Source[];related?:Source[];action?:PendingAction;options?:string[]};
 type HistoryItem={id:string;title:string;time:string;updated_at?:string;message_count?:number;messages?:Message[]};
+const historyCollapsedKey='terava-chat-history-collapsed-v1';
 function validMessage(message:Message){
-  return message && (message.role==='user'||message.role==='assistant') && typeof message.content==='string' &&
+  return message && (message.role==='user'||message.role==='assistant') && typeof message.content==='string' && (!message.options || Array.isArray(message.options) && message.options.length<=3 && message.options.every(option=>typeof option==='string')) &&
     (!message.sources || Array.isArray(message.sources) && message.sources.every(source=>source && typeof source.id==='string' && typeof source.name==='string' && typeof source.code==='string' && typeof source.updated_at==='string' && (source.price===null || typeof source.price==='number') && Object.hasOwn(availabilityLabels,source.availability))) && (!message.related || Array.isArray(message.related)) && (!message.action || typeof message.action.id==='string' && typeof message.action.summary_vi==='string');
 }
 type VoiceState='idle'|'listening'|'thinking'|'speaking';
@@ -26,6 +27,20 @@ const returnPathStorageKey='terava-chat-return-path-v1';
 const localHistoryKey='terava-chat-history-v1';
 const voiceLabels:Record<VoiceState,string>={idle:'Chạm để nói',listening:'Đang nghe…',thinking:'Đang suy nghĩ…',speaking:'Đang trả lời…'};
 const normalize=(value:string)=>value.toLocaleLowerCase('vi').replace(/[^\p{L}\p{N} ]/gu,'').replace(/\s+/g,' ').trim();
+const historyTimestamp=(item:HistoryItem)=>new Date(item.updated_at||item.time||0).getTime();
+function mergeHistory(...lists:HistoryItem[][]){
+  const merged=new Map<string,HistoryItem>();
+  for(const list of lists)for(const item of list){
+    if(!item?.id)continue;
+    const previous=merged.get(item.id);
+    merged.set(item.id,previous ? {...previous,...item,messages:item.messages?.length?item.messages:previous.messages} : item);
+  }
+  return [...merged.values()].sort((a,b)=>historyTimestamp(b)-historyTimestamp(a)||b.id.localeCompare(a.id));
+}
+function historyBucket(item:HistoryItem){
+  const age=Date.now()-historyTimestamp(item),day=86400000;
+  return age<day?'Hôm nay':age<7*day?'7 ngày qua':'Cũ hơn';
+}
 const maskTitle=(value:string)=>value.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,'[email đã ẩn]').replace(/(?:\+?84|0)[35789](?:[ .()-]?\d){8}/g,'[đã ẩn số liên hệ]').replace(/\s+/g,' ').trim().slice(0,80);
 
 function recognitionCtor():RecognitionCtor|null{
@@ -53,7 +68,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   const speechSupported=useSyncExternalStore(subscribeNever,()=>!!recognitionCtor(),()=>false);
   const pending=useRef(false),recognition=useRef<Recognition|null>(null),voiceOn=useRef(false),log=useRef<HTMLDivElement>(null),input=useRef<HTMLTextAreaElement>(null),atBottom=useRef(true);
   const history=useRef<Message[]>([]),sessionRef=useRef<string|undefined>(undefined),relatedRef=useRef<Source[]>([]);
-  const panel=useRef<HTMLElement>(null),launcher=useRef<HTMLButtonElement>(null),finishSpeech=useRef<(()=>void)|null>(null),voiceEpoch=useRef(0);
+  const panel=useRef<HTMLElement>(null),launcher=useRef<HTMLButtonElement>(null),finishSpeech=useRef<(()=>void)|null>(null),voiceEpoch=useRef(0),requestController=useRef<AbortController|null>(null),conversationEpoch=useRef(0),historySessionRef=useRef<string|undefined>(undefined);
   const voiceActive=voice!==null;
   const [restored,setRestored]=useState(false);
   useEffect(()=>{
@@ -69,23 +84,28 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
     }catch{}
     setRestored(true);
   },[ownerKey]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(()=>{try{setHistoryCollapsed(window.localStorage.getItem(historyCollapsedKey)==='1');}catch{}},[]);
+  useEffect(()=>{try{window.localStorage.setItem(historyCollapsedKey,historyCollapsed?'1':'0');}catch{}},[historyCollapsed]);
   useEffect(()=>{
     if(!fullPage)return;
     let cancelled=false;
     const load=async()=>{
+      let serverItems:HistoryItem[]=[];
       if(signedIn){
-        try{const response=await fetch('/api/ai/sessions?page=1');if(response.ok){const result=await response.json();if(!cancelled)setHistoryItems((result.items||[]).map((item:HistoryItem)=>({...item,time:item.updated_at||item.time})));return;}}catch{}
+        try{const response=await fetch('/api/ai/sessions?page=1');if(response.ok){const result=await response.json();serverItems=(result.items||[]).map((item:HistoryItem)=>({...item,time:item.updated_at||item.time}));}}catch{}
       }
-      try{const saved=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');if(!cancelled&&Array.isArray(saved))setHistoryItems(saved.slice(0,20).map((item:HistoryItem)=>({...item,title:maskTitle(item.title)})));}catch{}
+      try{const saved=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');if(Array.isArray(saved)){const localItems=saved.slice(0,20).map((item:HistoryItem)=>({...item,title:maskTitle(item.title)}));serverItems=mergeHistory(serverItems,localItems);}}catch{}
+      if(!cancelled)setHistoryItems(mergeHistory(serverItems));
     };
     void load();return()=>{cancelled=true;};
   },[fullPage,signedIn,session]);
   useEffect(()=>{
-    if(!fullPage||!messages.length||!session||busy)return;
+    if(!fullPage||!messages.length||!session)return;
     const first=messages.find(message=>message.role==='user');if(!first)return;
-    const item:HistoryItem={id:session,title:maskTitle(first.content),time:new Date().toISOString(),messages};
-    if(!signedIn||!store){try{const current=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');const next=[item,...(Array.isArray(current)?current.filter((entry:HistoryItem)=>entry.id!==session):[])].slice(0,20);window.localStorage.setItem(localHistoryKey,JSON.stringify(next));window.setTimeout(()=>setHistoryItems(next),0);}catch{}}
-  },[fullPage,messages,session,busy,signedIn,store]);
+    const item:HistoryItem={id:session,title:maskTitle(first.content),time:new Date().toISOString(),message_count:messages.length,messages};
+    try{const current=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');const next=mergeHistory([item],Array.isArray(current)?current:[]).slice(0,20);window.localStorage.setItem(localHistoryKey,JSON.stringify(next));window.setTimeout(()=>setHistoryItems(existing=>mergeHistory([item],existing).slice(0,20)),0);}catch{}
+  },[fullPage,messages,session]);
   useEffect(()=>{
     if(!restored)return;
     try{window.sessionStorage.setItem(chatStorageKey,JSON.stringify({ownerKey,messages:messages.slice(-30),session_id:session,store,open,draft:text}));}catch{}
@@ -116,20 +136,26 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   const ask=useCallback(async(message:string)=>{
     const content=message.trim();if(!content || pending.current)return null;
     if(content.length>2000){setError('Tin nhắn tối đa 2.000 ký tự.');return null;}
+    const epoch=conversationEpoch.current;
+    const requestSession=sessionRef.current;
+    historySessionRef.current=historySessionRef.current || crypto.randomUUID();
+    const controller=new AbortController();requestController.current=controller;
     pending.current=true;setBusy(true);setError('');
     setMessages(list=>[...list,{role:'user',content}]);
     try{
-      const response=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',Accept:'text/event-stream'},body:JSON.stringify({session_id:sessionRef.current,message:content,history:history.current.slice(-10).map(({role,content})=>({role,content})),store_transcript:store,property_id:propertyId || null})});
+      const response=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',Accept:'text/event-stream'},signal:controller.signal,body:JSON.stringify({session_id:requestSession,message:content,history:history.current.slice(-10).map(({role,content})=>({role,content})),store_transcript:store,property_id:propertyId || null})});
+      if(epoch!==conversationEpoch.current)return null;
       if(!response.ok)throw new Error((await response.json()).message);
-      if(!response.headers.get('content-type')?.includes('text/event-stream')){const result=await response.json();sessionRef.current=result.session.id;setSession(result.session.id);setMessages(list=>[...list,{role:'assistant',content:result.reply,sources:result.sources,related:result.related,action:result.action}]);return result.reply as string;}
+      if(!response.headers.get('content-type')?.includes('text/event-stream')){const result=await response.json();sessionRef.current=result.session.id;setSession(result.session.id);setMessages(list=>[...list,{role:'assistant',content:result.reply,sources:result.sources,related:result.related,action:result.action,options:result.clarify?.needed?result.clarify.options:undefined}]);return result.reply as string;}
       const reader=response.body?.getReader();if(!reader)throw new Error('Không nhận được nội dung trả lời.');let buffer='',reply='',sources:Source[]=[],action:PendingAction|undefined;setMessages(list=>[...list,{role:'assistant',content:''}]);
-      const update=()=>setMessages(list=>{const copy=[...list];copy[copy.length-1]={role:'assistant',content:reply,sources,related:relatedRef.current,action};return copy;});
+      const update=()=>{if(epoch!==conversationEpoch.current)return;setMessages(list=>{const copy=[...list],last=copy.length-1;if(last>=0&&copy[last].role==='assistant')copy[last]={role:'assistant',content:reply,sources,related:relatedRef.current,action};return copy;});};
       while(true){const chunk=await reader.read();buffer+=new TextDecoder().decode(chunk.value||new Uint8Array(),{stream:!chunk.done});let end;while((end=buffer.indexOf('\n\n'))>=0){const block=buffer.slice(0,end);buffer=buffer.slice(end+2);const lines=block.split('\n'),line=lines.find(value=>value.startsWith('data:'));if(!line)continue;/* The SSE event name is on its own `event:` line; `type` inside data is optional. */const event={type:lines.find(value=>value.startsWith('event:'))?.slice(6).trim(),...JSON.parse(line.slice(5))};if(event.related)relatedRef.current=event.related;if(event.type==='meta'){sessionRef.current=event.session_id;setSession(sessionRef.current);sources=event.sources||[];}else if(event.type==='delta')reply+=event.text||'';else if(event.type==='action')action=event.action;else if(event.type==='done')reply=event.message||reply;update();}if(chunk.done)break;}
       return reply;
     }catch(e){
+      if(epoch!==conversationEpoch.current || controller.signal.aborted)return null;
       setMessages(list=>list.slice(0,-1));setText(content);
       setError(e instanceof Error ? e.message:'Chưa thể gửi tin nhắn.');return null;
-    }finally{pending.current=false;setBusy(false);}
+    }finally{if(epoch===conversationEpoch.current){requestController.current=null;pending.current=false;setBusy(false);}}
   },[propertyId,store]);
 
   async function send(){if(pending.current || dictating)return;const message=text;setText('');if(await ask(message))input.current?.focus();}
@@ -223,8 +249,22 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
       const result=await response.json();if(!response.ok)throw new Error(result.message);setNotice(result.message);setHandoffOpen(false);
     }catch(e){setError(e instanceof Error ? e.message:'Chưa thể bàn giao.');}finally{pending.current=false;setBusy(false);}
   }
-  function reset(){try{window.sessionStorage.removeItem(chatStorageKey);}catch{}stopVoice();setPreferred('');sessionRef.current=undefined;setSession(undefined);setMessages([]);setStore(false);setNotice('');setHandoffKey(undefined);setError('');setText('');setHandoffOpen(false);}
+  function cancelPending(){
+    if(!pending.current)return;
+    conversationEpoch.current++;requestController.current?.abort();requestController.current=null;
+    const stopped=[...history.current];
+    const last=stopped.at(-1);
+    if(stopped.length&&(last?.role==='user'||last?.role==='assistant'&&last.content==='')){
+      const messagesWithStop=last.role==='assistant' ? [...stopped.slice(0,-1),{role:'assistant' as const,content:'Đã dừng'}] : [...stopped,{role:'assistant' as const,content:'Đã dừng'}];
+      const stoppedSession=historySessionRef.current||sessionRef.current;
+      if(stoppedSession){const first=messagesWithStop.find(message=>message.role==='user');if(first){const item:HistoryItem={id:stoppedSession,title:maskTitle(first.content),time:new Date().toISOString(),message_count:messagesWithStop.length,messages:messagesWithStop};try{const current=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');const next=mergeHistory([item],Array.isArray(current)?current:[]).slice(0,20);window.localStorage.setItem(localHistoryKey,JSON.stringify(next));setHistoryItems(next);}catch{}}}
+      setMessages(messagesWithStop);
+    }
+    pending.current=false;setBusy(false);
+  }
+  function reset(){cancelPending();try{window.sessionStorage.removeItem(chatStorageKey);}catch{}stopVoice();setPreferred('');sessionRef.current=undefined;historySessionRef.current=undefined;setSession(undefined);setMessages([]);setStore(false);setNotice('');setHandoffKey(undefined);setError('');setText('');setHandoffOpen(false);}
   async function loadHistory(item:HistoryItem){
+    cancelPending();
     try{const response=await fetch(`/api/ai/sessions/${item.id}`);if(!response.ok)throw new Error('Không thể tải lịch sử.');const result=await response.json();const loaded=(result.session?.messages||[]).filter(validMessage);sessionRef.current=item.id;setSession(item.id);setMessages(loaded);setStore(true);setHistoryOpen(false);setError('');}
     catch(error){if(item.messages?.length){sessionRef.current=item.id;setSession(item.id);setMessages(item.messages);setStore(false);setHistoryOpen(false);return;}setError(error instanceof Error?error.message:'Không thể tải lịch sử.');}
   }
@@ -254,7 +294,10 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   if(!visible || !restored)return null;
   const pageSuggestions=fullPage?['Thuê chung cư Thủ Đức','Mua căn hộ Quận 7','Thuê nhà phố Bình Thạnh','Mua nhà phố Quận 10']:suggestions;
   const filteredHistory=historyItems.filter(item=>!historySearch||item.title.toLocaleLowerCase().includes(historySearch.toLocaleLowerCase()));
+  const historyGroups=['Hôm nay','7 ngày qua','Cũ hơn'].map(label=>({label,items:filteredHistory.filter(item=>historyBucket(item)===label)})).filter(group=>group.items.length);
+  void historyGroups;
   return <aside className={`ai-chat${fullPage?' ai-chat-full':''}`}>
+    {fullPage && <div className="ai-history-summary" aria-live="polite"><strong>{historyItems.length} cuộc trò chuyện</strong><small>{signedIn&&store?'Đã lưu vào tài khoản':'Lưu trên thiết bị này'} · T%E1%BB%91i đa 20 cuộc, cũ nhất sẽ được loại bỏ.</small></div>}
     {open && <section ref={panel} id="ai-chat-panel" className="ai-panel" role="dialog" aria-label="Trợ lý AI TERAVA" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close();}if(e.key==='Tab'){const nodes=panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],textarea:not(:disabled),input:not(:disabled)');if(nodes?.length){const first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}}}}>
       {fullPage && <aside className={`ai-history${historyOpen?' is-open':''}${historyCollapsed?' is-collapsed':''}`} aria-label="Lịch sử trò chuyện">
         <span className="sr-only">Hôm nay · 7 ngày qua · Cũ hơn</span><div className="ai-history-head"><strong>Lịch sử</strong><button type="button" className="ai-icon" onClick={()=>setHistoryCollapsed(value=>!value)} aria-label={historyCollapsed?'Mở thanh lịch sử':'Thu gọn thanh lịch sử'}>{historyCollapsed?<ChevronRight size={18}/>:<ChevronLeft size={18}/>}</button></div>
@@ -282,6 +325,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
         {messages.map((m,i)=>m.role==='user'
           ? <div className="ai-row ai-row-user" key={i}><p className="ai-bubble">{m.content}</p></div>
           : <div className="ai-row ai-row-assistant" key={i}><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><div className="ai-answer"><p>{renderReply(m.content)}</p>{m.action && <div className="ai-action-card"><strong>{m.action.summary_vi}</strong><div><button type="button" disabled={busy} onClick={()=>void decide(m.action!.id,true)}>Xác nhận</button><button type="button" disabled={busy} onClick={()=>void decide(m.action!.id,false)}>Huỷ</button></div></div>}
+              {m.options?.length && <div className="ai-clarify-options" role="group" aria-label="Chọn khu vực">{m.options.map(option=><button type="button" key={option} disabled={busy} onClick={()=>void ask(option)}>{option}</button>)}</div>}
               {!!m.sources?.length && <div className="ai-sources">{m.sources.map(s=><Link className="ai-source" href={`/properties/${s.id}`} key={s.id}><strong>{s.name}</strong><span>{s.code} · {s.price===null ? 'Giá chưa công bố':`${new Intl.NumberFormat('vi-VN').format(s.price)} VND${s.price_period==='Month' ? '/tháng':''}`}</span><em className={`ai-status ai-status-${s.availability}`}>{s.transaction_type==='Rent'&&s.availability==='Available' ? 'Còn cho thuê':availabilityLabels[s.availability]}</em><small>Cập nhật {new Date(s.updated_at).toLocaleString('vi-VN')}</small></Link>)}</div>}
                {!!m.sources?.length && <div className="ai-property-list">{m.sources.slice(0,5).map(s=><div key={s.id} data-source-number={s.number} className={citation===s.number?'is-citation-target':''}><RecommendationCard source={s} related={false} onAsk={message=>void ask(message)} signedIn={signedIn}/></div>)}</div>}
                {!!m.related?.length && <section className="ai-related"><h3>Có thể bạn quan tâm</h3><div className="ai-property-list">{m.related.slice(0,3).map(s=><RecommendationCard key={s.id} source={s} related onAsk={message=>void ask(message)} signedIn={signedIn}/>)}</div></section>}

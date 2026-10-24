@@ -16,6 +16,7 @@ import { runAgent } from './agent.ts';
 import { querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
 import { setAiRequestSession } from './request-log.js';
 import { questionPreview } from './privacy.js';
+import { clarificationFor } from './history-aware.js';
 
 export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI tạm thời không khả dụng. Bạn có thể thử lại, xem danh sách bất động sản hoặc gửi yêu cầu tư vấn.',retry:true,search_url:'/properties',inquiry_url:'/customer/inquiries/new'},503);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -87,6 +88,12 @@ export class AiService {
     if(!consumeAttempt('ai-ip',requestClientIp(),100) || !consumeAttempt('ai-session',id,40))return catalogError('RATE_LIMIT','Bạn đã gửi nhiều tin nhắn. Vui lòng thử lại sau.',429);
     const guest=!who.session, source=guest ? this.privacy.stripPhones(input.message):input.message;
     const sanitizedHistory=history.map(turn=>({role:turn.role,content:guest ? this.privacy.stripPhones(turn.content):turn.content}));
+    const clarification=clarificationFor(source, sanitizedHistory);
+    if(clarification.needed){
+      const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:clarification.question,p_sources:[],p_actions:[],p_fields:{},p_score:null});
+      if(committed.error)return catalogDatabaseError(committed.error);
+      return catalogJson({session:committed.data,reply:clarification.question,scope:'in_scope',sources:[],related:[],clarify:clarification,proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
+    }
     let searchPerformed=input.filters!==undefined || !!input.property_id,rag:RetrievalResult|null=null;
     let items:Evidence[]=[],related:Record<string,unknown>[]=[];
     const search=async(searchFilters:Record<string,unknown>,propertyId:string|null=null,referenceIds:string[]=[],searchQuery=source)=>{

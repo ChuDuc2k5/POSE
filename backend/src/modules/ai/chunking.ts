@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { hcmWards } from './hcm-wards.js';
 
 /** Descriptions at or below this size stay in one chunk. */
 export const CHUNK_SINGLE_MAX = 1200;
@@ -70,6 +71,12 @@ export function districtAliases(source: PropertyChunkSource) {
   const aliases = new Set<string>();
   for (const match of text.matchAll(/\bQ\.?\s*(\d{1,2})\b/giu)) aliases.add(`Qu\u1eadn ${match[1]}`);
   for (const match of text.matchAll(/\bQu\u1eadn\s+(\d{1,2})\b/giu)) aliases.add(`Qu\u1eadn ${match[1]}`);
+  const folded = text.normalize('NFC').toLocaleLowerCase('vi');
+  const locationFolded = source.location.normalize('NFC').toLocaleLowerCase('vi');
+  for (const row of hcmWards) {
+    if (folded.includes(row.ward.toLocaleLowerCase('vi'))) for (const district of row.formerDistricts) if (locationFolded.trim() !== 'thủ đức' || district !== 'Thủ Đức') aliases.add(district);
+    if (locationFolded.trim() !== 'thủ đức' && row.formerDistricts.some(district => locationFolded.includes(district.toLocaleLowerCase('vi')))) aliases.add(row.ward);
+  }
   if (/\b(?:TP\.?|Th\u00e0nh\s*ph\u1ed1)\s+Th\u1ee7\s*\u0110\u1ee9c\b/iu.test(text)) aliases.add('Th\u00e0nh ph\u1ed1 Th\u1ee7 \u0110\u1ee9c');
   return [...aliases];
 }
