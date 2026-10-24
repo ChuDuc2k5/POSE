@@ -29,6 +29,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "TERAVA Group | Nền tảng bất động sản, dữ liệu & AI",
   description: "TERAVA kết nối thông tin bất động sản, khách hàng và đội ngũ tư vấn trong một không gian làm việc thống nhất.",
+  icons: {
+    icon: { url: '/brand/terava-icon-navy.svg', type: 'image/svg+xml', sizes: 'any' },
+  },
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
