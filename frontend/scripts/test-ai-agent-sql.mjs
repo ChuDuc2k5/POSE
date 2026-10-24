@@ -46,7 +46,7 @@ try{
  create table public.ai_extracted_preferences(id uuid primary key default gen_random_uuid(),lead_id uuid not null references public.leads(id),field_name varchar not null,field_value text,confidence numeric,source_call_id uuid references public.calls(id),created_at timestamptz not null default now());
  create table public.ai_analyses(id uuid primary key default gen_random_uuid(),call_id uuid not null references public.calls(id),lead_id uuid references public.leads(id),needs text,budget numeric,interested_property text,preferred_location text,expected_timeline varchar,interest_level varchar,purchase_intent varchar,rejection_reason text,lead_score integer,temperature public.lead_temperature,summary text,raw_analysis jsonb,created_at timestamptz not null default now());
  `);
- for(const file of ['auth-access.sql','account-profile.sql','property-management.sql','property-discovery.sql','property-listing-source.sql','lead-contact-foundation.sql','calling-contract.sql','ai-agent.sql','ai-agent-tools.sql','ai-knowledge.sql']){
+ for(const file of ['auth-access.sql','account-profile.sql','property-management.sql','property-discovery.sql','property-listing-source.sql','lead-contact-foundation.sql','calling-contract.sql','ai-agent.sql','ai-agent-tools.sql','ai-knowledge.sql','property-similar.sql']){
   let sql=await readFile(new URL(`../../supabase/${file}`,import.meta.url),'utf8');
   // The external PGlite pgvector build currently provides the vector type but
   // cannot create the cosine HNSW operator class; production PostgreSQL runs
@@ -62,4 +62,5 @@ try{
  console.log(knowledge.at(-1).rows[0].result);
  const tools=await db.exec(await readFile(new URL('../../supabase/test-ai-agent-tools.sql',import.meta.url),'utf8'));
  const pendingResult=tools.flatMap(statement=>statement.rows||[]).find(row=>row.result)?.result;if(!pendingResult)throw new Error('MISSING_PENDING_ACTION_SQL_RESULT');console.log(pendingResult);
+ const similar=await db.exec(await readFile(new URL('../../supabase/test-property-similar.sql',import.meta.url),'utf8'));const similarResult=similar.flatMap(statement=>statement.rows||[]).find(row=>row.result)?.result;if(!similarResult)throw new Error('MISSING_PROPERTY_SIMILAR_SQL_RESULT');console.log(similarResult);
 }catch(error){console.error(`FAIL: M06 SQL: ${error.message}`);if(error.where)console.error(error.where);if(process.env.DEBUG_SQL)console.error(error);process.exitCode=1;}finally{await db.close();}

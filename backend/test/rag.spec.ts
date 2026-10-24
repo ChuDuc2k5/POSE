@@ -3,8 +3,9 @@ import { once } from 'node:events';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CHUNK_OVERLAP, CHUNK_SINGLE_MAX, CHUNK_SIZE, cleanKnowledgeText, propertyChunks, splitKnowledgeText } from '../src/modules/ai/chunking.js';
 import { embeddingConfig, EmbeddingService, EMBEDDING_BATCH_MAX } from '../src/modules/ai/embeddings.js';
-import { applyThresholds, currentModelRows, reciprocalRankFusion, renderRetrievedContext, type RankedChunk } from '../src/modules/ai/retrieval.js';
+import { applyThresholds, currentModelRows, deterministicReason, reciprocalRankFusion, renderRetrievedContext, type RankedChunk } from '../src/modules/ai/retrieval.js';
 import { indexNeedsEmbedding } from '../src/modules/ai/indexing.js';
+import { cosineSimilarity, meanVector, ruleSimilarProperties } from '../src/modules/ai/similar.js';
 
 const env={...process.env};
 afterEach(()=>{process.env={...env};});
@@ -46,3 +47,4 @@ describe('hybrid ranking',()=>{
 });
 
 describe('index idempotency',()=>{it('skips only when both hash and model match',()=>{expect(indexNeedsEmbedding({content_hash:'h',embed_model:'m'},'h','m')).toBe(false);expect(indexNeedsEmbedding({content_hash:'h',embed_model:'m'},'h','other')).toBe(true);expect(indexNeedsEmbedding({content_hash:'h',embed_model:null},'h',null)).toBe(false);});});
+describe('similar properties',()=>{it('computes a mean vector and cosine ranking primitives',()=>{expect(meanVector([[1,3],[3,1]])).toEqual([2,2]);expect(cosineSimilarity([1,0],[1,0])).toBe(1);expect(cosineSimilarity([1,0],[0,1])).toBe(0);});it('uses the deterministic rule fallback constraints',()=>{const source={id:'a',district:'Q7',property_type:'Apartment',transaction_type:'Rent',price:100};expect(ruleSimilarProperties(source,[{id:'b',district:'Q7',property_type:'Apartment',transaction_type:'Rent',price:120},{id:'c',district:'Q7',property_type:'House',transaction_type:'Rent',price:100},{id:'a',district:'Q7',property_type:'Apartment',transaction_type:'Rent',price:100}]).map(item=>item.id)).toEqual(['b']);});it('extracts a short reason without price and PII',()=>{expect(deterministicReason('Gần chợ, sổ hồng riêng. Giá 3 tỷ, gọi 0901234567.')).toBe('Gần chợ, sổ hồng riêng.');});});
