@@ -5,7 +5,7 @@ export const GUARD_VERSION='guard.v3';
 export const safeReply='Tôi chưa thể xác nhận câu trả lời an toàn từ dữ liệu hiện có. Bạn có thể yêu cầu chuyên viên tư vấn hỗ trợ.';
 export const disclosure='Tôi là trợ lý AI của TERAVA.';
 const realEstateWords=/căn|nhà|đất|phòng|giá|thuê|mua|bất động sản|dự án|khu vực|diện tích|chuyên viên|lịch xem|yêu thích|Q\d|RV-/i;
-const explicitOutOfScope=/\b(?:code|lập trình|bài tập|chính trị|bầu cử|y tế|bác sĩ|thuốc|chẩn đoán|luật hình sự|học toán|homework|politics|medical)\b/i;
+const explicitOutOfScope=/\b(?:code|python|programming|lập trình|bài tập|học toán|math|chính trị|bầu cử|election|y tế|bác sĩ|đau đầu|thuốc|medicine|medical|chẩn đoán|luật hình sự|homework|dịch|translate|translation|đầu tư|investment|chứng khoán|stocks|customers?|leads?|politics)\b/i;
 export function isOutOfScope(text:string, intent:'real_estate'|'other'|'unknown'='unknown', hasPropertyHistory=false) {
   // The model owns intent classification. This deterministic guard only blocks an
   // explicit non-property topic when neither the turn nor the session supplies a

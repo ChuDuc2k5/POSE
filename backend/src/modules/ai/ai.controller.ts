@@ -54,3 +54,11 @@ export class AdminAiController {
   @Get('usage')
   usage(@Req() req:Request,@Res() res:Response){return dispatch(req,res,request=>this.ai.getUsage(request));}
 }
+
+@Controller('admin')
+export class AdminUsageController {
+  constructor(private readonly ai: AiService) {}
+  @Roles('Admin')
+  @Get('ai-usage')
+  usage(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, request => this.ai.getUsage(request)); }
+}

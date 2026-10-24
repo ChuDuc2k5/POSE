@@ -21,6 +21,11 @@ language sql security invoker set search_path='' as $$ select pose_private.log_a
 revoke all on function public.pose_system_log_ai_request(uuid,text,text,text,text,text[],int,int,int,int,text,text) from public,anon,authenticated;
 grant execute on function public.pose_system_log_ai_request(uuid,text,text,text,text,text[],int,int,int,int,text,text) to service_role;
 
+do $$ begin
+  create type pose_private.admin_ai_usage as (day date,model text,requests bigint,total_tokens bigint,p50_latency_ms numeric,p95_latency_ms numeric,fallback_rate numeric,estimated_cost numeric);
+exception when duplicate_object then null;
+end $$;
+
 create or replace function pose_private.admin_ai_usage(p_from timestamptz,p_to timestamptz,p_price_input_per_m numeric,p_price_output_per_m numeric)
 returns table(day date,model text,requests bigint,total_tokens bigint,p50_latency_ms numeric,p95_latency_ms numeric,fallback_rate numeric,estimated_cost numeric)
 language sql security invoker set search_path='' as $$
