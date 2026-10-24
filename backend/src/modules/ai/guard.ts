@@ -26,6 +26,18 @@ export function injection(text:string) { return /bỏ qua (?:hướng dẫn|ch�
 const secrets=/SUPABASE_|AI_API_|AI_MODEL|AI_TIMEOUT_MS|NEXT_PUBLIC_|CRON_SECRET|sk-[a-z0-9]|service_role|process\.env/i;
 const privateCustomers=/khách hàng khác|lead khác|other customers?/gi;
 const links=/[\w.+-]+@[\w.-]+\.[a-z]{2,}|https?:\/\//i;
+/**
+ * Reply used when the model's answer stays blocked after regeneration but retrieval found listings:
+ * built only from catalogue fields (live price and status), so it is grounded by construction.
+ */
+export function groundedSummary(evidence:Evidence[]) {
+  const properties=evidence.filter(e=>e.source_type!=='Faq');
+  if(!properties.length)return safeReply;
+  const status:Record<string,string>={Available:'đang mở bán',Sold:'Đã bán, không còn mở bán',Reserved:'Đã giữ chỗ',Unavailable:'Tạm ngưng giao dịch'};
+  const price=(e:Evidence)=>e.price===null ? 'giá chưa công bố' : `${Number(e.price).toLocaleString('vi-VN')} VND${e.price_period==='Month' || e.transaction_type==='Rent' ? '/tháng':''}`;
+  const lines=properties.map((e,index)=>`[${e.number ?? index+1}] ${e.name} – ${e.location} – ${price(e)} – ${status[e.availability] || e.availability}`);
+  return `Mình tìm thấy ${properties.length} bất động sản phù hợp trong dữ liệu đã công bố (giá và tình trạng lấy trực tiếp từ hệ thống):\n${lines.join('\n')}\nBạn muốn xem chi tiết, lưu hoặc đề nghị lịch xem căn nào?`;
+}
 export type Evidence={id:string;code:string;name:string;price:number|null;availability:string;updated_at:string;location:string;property_type:string;transaction_type?:'Sale'|'Rent';price_period?:'Total'|'Month';number?:number;source_type?:'Property'|'Faq';reason?:string};
 const clauses=(text:string)=>text.split(/\n|[;!?]|(?<!\d)[.,](?!\d)/).filter(Boolean);
 function negated(text:string,index:number){
