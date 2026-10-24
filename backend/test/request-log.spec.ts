@@ -21,3 +21,15 @@ describe('AI request cost', () => {
     expect(estimateCostUsd('embed', 'text-embedding-bge-m3', 5000, 0)).toBe(0);
   });
 });
+
+import { vi } from 'vitest';
+import { logAiRequest } from '../src/modules/ai/request-log.js';
+describe('AI request log under unit tests', () => {
+  it('never calls Supabase while VITEST is set (no live rows from test runs)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    logAiRequest({ kind: 'embed', model: 'fake', latencyMs: 1, status: 'ok' });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+});

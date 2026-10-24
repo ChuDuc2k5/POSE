@@ -31,6 +31,8 @@ export function estimateCostUsd(kind: string, model: string, promptTokens: numbe
   return (promptTokens * (env('AI_PRICE_INPUT_PER_M') ?? listed?.input ?? 0) + completionTokens * (env('AI_PRICE_OUTPUT_PER_M') ?? listed?.output ?? 0)) / 1e6;
 }
 export function logAiRequest(input: { kind: string; model?: string; promptName?: string | null; promptVersion?: string | null; toolsCalled?: string[]; promptTokens?: number; completionTokens?: number; totalTokens?: number; latencyMs: number; status: AiRequestStatus; errorCode?: string | null; sessionId?: string | null; turnId?: string | null; questionPreview?: string | null }) {
+  // Unit tests load the real backend .env; they must never write the live request log.
+  if (process.env.VITEST) return;
   const context = requestSession.getStore() ?? emptyContext();
   void import('../supabase/supabase.service.js').then(({systemClient})=>systemClient().rpc('pose_system_log_ai_request', {
     p_session_id: input.sessionId === undefined ? context.sessionId : input.sessionId,
