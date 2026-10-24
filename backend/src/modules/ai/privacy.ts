@@ -8,3 +8,5 @@ export function stripPhones(text:string) {
   });
 }
 export function hasPhone(text:string){return stripPhones(text)!==text;}
+export function maskEmail(text:string){return text.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,'[email đã ẩn]');}
+export function questionPreview(text:string){return maskEmail(stripPhones(text)).replace(/\s+/g,' ').trim().slice(0,160);}
