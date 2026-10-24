@@ -10,7 +10,7 @@ import { uuidPattern } from '../../common/catalog.js';
 import { object } from './extraction.js';
 import { inferSearch } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
-import { correctionData, disclosure, GUARD_VERSION, safeReply, isOutOfScope, scopeFromTopic, outOfScopeReply, type Evidence } from './guard.js';
+import { correctionData, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
@@ -193,7 +193,7 @@ export class AiService {
     }
     items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5);
     const finalRag=rag as RetrievalResult|null;if(finalRag){const rendered=renderRetrievedContextWithCards(finalRag.chunks,new Set(items.map(x=>x.id)));rag={...finalRag,...rendered};items=items.map(item=>({...item,number:((rendered.sources.find(s=>(s as {id?:string}).id===item.id) as {number?:number}|undefined)?.number),source_type:'Property'}));}else items=items.map((item,index)=>({...item,number:index+1,source_type:'Property'}));
-    if(!violation){violation=this.guard.outputReason(result.reply,items,source,{retrievalFound:rag?.found??items.length>0,faqOnly:items.length>0&&items.every(x=>x.source_type==='Faq')});if(violation)log('output',result.reply,violation);}
+    if(!violation){violation=this.guard.outputReason(result.reply,items,source,{retrievalFound:rag?.found??items.length>0,faqOnly:items.length>0&&items.every(x=>x.source_type==='Faq')});if(violation){log('output',result.reply,violation);console.warn(JSON.stringify({event:'guard_block',reason:violation,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:items.map(x=>x.number??null)}));}}
     let blocked=false;
     if(violation){
       log('final_output',result.reply,violation);
@@ -204,7 +204,7 @@ export class AiService {
       if(retryViolation){log('regeneration',result.reply,retryViolation);blocked=true;}
       else { violation=null; log('regeneration',{},null); }
     }
-    const reply=(count===0 ? `${disclosure}\n`:'')+(related.length && !items.length ? 'Không có bất động sản nào khớp các tiêu chí bạn nêu.\n' : '')+(blocked ? safeReply:result.reply);
+    const reply=(count===0 ? `${disclosure}\n`:'')+(related.length && !items.length ? 'Không có bất động sản nào khớp các tiêu chí bạn nêu.\n' : '')+(blocked ? groundedSummary(items):result.reply);
     if(!blocked){
       try {
         const modelNeeds=await extractNeedsAfterReply(source,reply);
