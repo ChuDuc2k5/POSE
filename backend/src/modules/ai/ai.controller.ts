@@ -14,6 +14,9 @@ export class AiController {
   @Post('chat')
   chat(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, request => this.ai.chat(request)); }
   @Public()
+  @Post('chat/stream')
+  chatStream(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, request => this.ai.chat(request)); }
+  @Public()
   @Get('sessions/:id')
   session(@Req() req: Request, @Res() res: Response) { return dispatch<{id:string}>(req, res, async (request, context) => this.ai.getChat(request, (await context.params).id)); }
   @Public()
@@ -41,11 +44,13 @@ export class AiController {
 
 @Controller('admin/ai')
 export class AdminAiController {
-  constructor(private readonly indexer:KnowledgeIndexer) {}
+  constructor(private readonly indexer:KnowledgeIndexer, private readonly ai:AiService) {}
   @Roles('Admin')
   @Post('reindex')
   reindex(@Req() req:Request,@Res() res:Response){return dispatch(req,res,async request=>{
     if(!validOrigin(request))return catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403);
     try{return catalogJson(await this.indexer.reindexAll());}catch{return catalogError('INDEX_UNAVAILABLE','Không thể lập lại chỉ mục tri thức.',503);}
   });}
+  @Get('usage')
+  usage(@Req() req:Request,@Res() res:Response){return dispatch(req,res,request=>this.ai.getUsage(request));}
 }

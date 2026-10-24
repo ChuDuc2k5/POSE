@@ -14,9 +14,11 @@ import { correctionData, disclosure, GUARD_VERSION, safeReply, isOutOfScope, out
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
+import { setAiRequestSession } from './request-log.js';
 
 export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI tạm thời không khả dụng. Bạn có thể thử lại, xem danh sách bất động sản hoặc gửi yêu cầu tư vấn.',retry:true,search_url:'/properties',inquiry_url:'/customer/inquiries/new'},503);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
+const realEstateWordsForHistory=(text:string)=>/căn|nhà|đất|phòng|giá|thuê|mua|bất động sản|dự án|khu vực|diện tích|chuyên viên|lịch xem|yêu thích|Q\d|RV-/i.test(text);
 async function identity() {
   const session=await authenticatedSession();
   if(session && session.role!=='User')return {error:catalogError('FORBIDDEN','Hội thoại dành cho khách hàng.',403)} as const;
@@ -70,6 +72,7 @@ export class AiService {
     if(!object(filters) || !this.guard.toolAllowed({name:'search_properties',arguments:filters}))return catalogError('INVALID_FILTER','Bộ lọc không hợp lệ.',400);
     const who=await identity();if(who.error)return who.error;
     const id=typeof input.session_id==='string' ? input.session_id:randomUUID();
+    setAiRequestSession(id);
     let count=0,interestIds:string[]=[],scoring:{needs:Record<string,{value:unknown;evidence?:string;confirmed_by?:unknown}>;verified:boolean;version:number;interest_ids?:string[];score_result?:ScoreResult}|null=null;
     if(input.session_id){const prior=await readSession(id,who);if(prior.error)return catalogDatabaseError(prior.error);count=prior.data.message_count;scoring=prior.data.scoring;interestIds=prior.data.suggested_property_ids || [];if(prior.data.store_transcript!==input.store_transcript || prior.data.status==='Closed')return catalogError('SESSION_CONFLICT','Lựa chọn lưu áp dụng cho cả phiên; hãy bắt đầu phiên mới để thay đổi.',409);}
     else if(who.client){const context=await who.client.rpc('pose_ai_score_context');if(context.error)return catalogDatabaseError(context.error);scoring=context.data;}
@@ -109,7 +112,8 @@ export class AiService {
     let standalone=source, queryKeywords:string[]=[], queryFilters:Record<string,unknown>=inferred || {};
     const realEstateIntent=Object.keys(queryFilters).length>0 || /căn|nhà|đất|phòng|giá|thuê|mua|bất động sản|Q\d|RV-/i.test(source);
     // Refuse before retrieval and before constructing an agent with tools.
-    if (isOutOfScope(source, realEstateIntent || input.property_id ? 'real_estate' : 'unknown')) {
+    const propertyHistory=history.some(turn=>realEstateWordsForHistory(turn.content)) || interestIds.length>0;
+    if (isOutOfScope(source, realEstateIntent || input.property_id ? 'real_estate' : 'unknown', propertyHistory)) {
       const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:false,p_message:source,p_reply:outOfScopeReply,p_sources:[],p_actions:[],p_fields:{},p_score:null});
       if(committed.error)return catalogDatabaseError(committed.error);
       return catalogJson({session:committed.data,reply:outOfScopeReply,sources:[],related:[],blocked:false,proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
@@ -212,8 +216,17 @@ export class AiService {
     return catalogJson(payload);
   }catch{return unavailable();}
 }
-async getChat(request:NextRequest,id:string) {
+  async getChat(request:NextRequest,id:string) {
   try {if(!uuidPattern.test(id))return catalogError('NOT_FOUND','Không tìm thấy hội thoại.',404);const who=await identity();if(who.error)return who.error;const result=await readSession(id,who);return result.error ? catalogDatabaseError(result.error):catalogJson({session:result.data});}catch{return unavailable();}
+}
+async getUsage(request:NextRequest) {
+  if(!validOrigin(request))return catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403);
+  const session=await authenticatedSession();
+  if(!session)return catalogError('UNAUTHORIZED','Vui lòng đăng nhập.',401);
+  if(session.role!=='Admin')return catalogError('FORBIDDEN','Bạn không có quyền xem sử dụng AI.',403);
+  const url=new URL(request.url), from=url.searchParams.get('from'), to=url.searchParams.get('to');
+  const result=await authClient(session.access).rpc('pose_system_admin_ai_usage',{p_from:from||null,p_to:to||null, p_price_input_per_m:Number(process.env.AI_PRICE_INPUT_PER_M||0),p_price_output_per_m:Number(process.env.AI_PRICE_OUTPUT_PER_M||0)});
+  return result.error ? catalogDatabaseError(result.error) : catalogJson({items:result.data||[]});
 }
   async handoff(request:NextRequest) {
   try {

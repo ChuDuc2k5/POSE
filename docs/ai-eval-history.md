@@ -1,9 +1,10 @@
-# AI evaluation history
+# AI evaluator history
 
-| date | commit | model | prompt versions | pass rate |
-|---|---|---|---|---|
-| 2026-10-24 | BEFORE | fixture/current | assistant@3, query@1, answer-meta@1, needs@1, rerank@1 | not run: baseline snapshot |
-| 2026-10-24 | AFTER | fake provider | assistant@4, query@2, answer-meta@2, needs@2, rerank.system@2, rerank.user@2 | 30/30 (100%) |
+The evaluator now exercises the HTTP chat contract in both modes and writes timestamped results under `%TEMP%\pose-ai-eval`.
 
-Reproduce the offline run with `node backend/scripts/ai-eval.mjs --fake`. Live runs are
-reviewer-only and are not executed in this worktree.
+| run | evaluator | result |
+| --- | --- | --- |
+| BEFORE (`d72fe54`) | real endpoint / fake provider harness | 25/36 (69.4%); failures were refusal/tool/failure-fixture cases identified in the report |
+| AFTER (final M06 change) | real endpoint / fake provider harness | 25/36 (69.4%); the same remaining fixture cases are reported honestly rather than graded from input regexes |
+
+The BEFORE run used the same HTTP-grading evaluator against the `d72fe54` worktree state. No live provider or live database was used.

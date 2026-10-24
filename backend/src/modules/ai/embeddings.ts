@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { logAiRequest } from './request-log.js';
 
 export const EMBEDDING_BATCH_MAX=64;
 let warned=false;
@@ -19,6 +20,7 @@ export class EmbeddingService{
   config(){return embeddingConfig();}
   async embed(inputs:string[]){
     const config=this.config();if(!config) return null;
+    const started=Date.now();
     const vectors:number[][]=[];
     for(let offset=0;offset<inputs.length;offset+=EMBEDDING_BATCH_MAX){
       const input=inputs.slice(offset,offset+EMBEDDING_BATCH_MAX);
@@ -29,6 +31,7 @@ export class EmbeddingService{
       if(batch.length!==input.length||batch.some(vector=>vector.length!==config.dimensions||vector.some(value=>!Number.isFinite(value))))throw new Error('INVALID_EMBEDDING');
       vectors.push(...batch);
     }
+    logAiRequest({kind:'embed',model:config.model,latencyMs:Date.now()-started,status:'ok'});
     return {model:config.model,vectors};
   }
 }

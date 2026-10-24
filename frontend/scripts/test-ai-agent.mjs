@@ -3,18 +3,25 @@ import { createServer } from 'node:http';
 import { createHash,randomUUID } from 'node:crypto';
 import { startStack } from './test-stack.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
-import { mkdtemp,readFile,writeFile,rm,mkdir,symlink } from 'node:fs/promises';
+import { mkdtemp,readFile,writeFile,rm,mkdir,symlink,cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL,fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
+const repoRoot=fileURLToPath(new URL('../..',import.meta.url));
 const temp=await mkdtemp(join(tmpdir(),'pose-m06-'));
 await mkdir(join(temp,'node_modules'));
-for(const dep of ['openai','zod'])await symlink(join(process.cwd(),'..','backend','node_modules',dep),join(temp,'node_modules',dep),'junction');
-for(const name of ['privacy','money','extraction','lead-scoring','guard','schemas','llm']){
+for(const dep of ['openai','zod'])await symlink(join(repoRoot,'backend','node_modules',dep),join(temp,'node_modules',dep),'junction');
+await mkdir(join(temp,'prompts'));
+await cp(join(repoRoot,'backend','src','modules','ai','prompts'),join(temp,'prompts'),{recursive:true});
+for(const name of ['privacy','money','extraction','lead-scoring','guard','schemas','request-log','llm']){
  const source=await readFile(new URL(`../../backend/src/modules/ai/${name}.ts`,import.meta.url),'utf8');
  await writeFile(join(temp,`${name}.mjs`),ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText.replace(/from '\.\/([\w-]+)(?:\.(?:js|ts))?'/g,"from './$1.mjs'"));
+}
+{
+ const source=await readFile(new URL('../../backend/src/modules/ai/prompts.ts',import.meta.url),'utf8');
+ await writeFile(join(temp,'prompts.mjs'),ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText);
 }
 const {scoreLead,classifyScore,scoreNeeds}=await import(pathToFileURL(join(temp,'lead-scoring.mjs')));
 const {extractNeeds}=await import(pathToFileURL(join(temp,'extraction.mjs')));
@@ -120,7 +127,7 @@ const users={User:userId,Other:otherId,Sales:'f6000000-0000-4000-8000-0000000000
 const directory={Sales:'f6500000-0000-4000-8000-000000000003',Admin:'f6500000-0000-4000-8000-000000000004'};
 let mode='ok',modelCalls=0,prompt,providerOffline=false,verifiedPhone=false,searchReads=0,catalogSearchReads=0,ragCalls=0,rerankNoAnswer=false;
 const modelData=[],modelOutputs=[];
-const sessions=new Map(),messages=[],logs=[],tasks=new Map(),appointments=new Map(),leads=new Map(),customers=new Map(),preferences=new Map(),assignments=[];
+const sessions=new Map(),messages=[],logs=[],requestLogs=[],tasks=new Map(),appointments=new Map(),leads=new Map(),customers=new Map(),preferences=new Map(),assignments=[];let lastRequestSessionId=null,unsafeSessionId=null,unsafePending=false;
 const customerFor=uid=>uid ? [...customers.values()].find(c=>c.auth_user_id===uid):undefined;
 const leadFor=uid=>[...leads.values()].find(l=>l.customer_id===customerFor(uid)?.id && !l.archived && !['CONVERTED','LOST'].includes(l.status));
 const assigned=(lead,sales)=>assignments.some(a=>a.lead_id===lead && a.sales_id===sales && a.is_active);
@@ -135,22 +142,25 @@ if(previewOnly || live){
 const provider=createServer(async(req,res)=>{
  const chunks=[];for await(const chunk of req)chunks.push(chunk);const input=chunks.length ? JSON.parse(Buffer.concat(chunks)):{};
  const url=new URL(req.url,'http://localhost'),token=req.headers.authorization?.slice(7),who=token?.replace('fixture-',''),role=who==='Other' ? 'User':who,uid=users[who];
- const reply=(status,body)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(body));};
+  const reply=(status,body)=>{if(body?.choices?.length && !body.usage){body.usage={prompt_tokens:11,completion_tokens:7,total_tokens:18};body.choices[0].usage=body.usage;}res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(body));};
  const error=(code,message,status=400)=>reply(status,{code,message});
- if(providerOffline)return reply(503,{message:'Unavailable'});
+  const requestedMode=req.headers['x-fake-provider-mode'];if(requestedMode)mode=requestedMode;
+  if(providerOffline)return reply(503,{message:'Unavailable'});
  if(previewOnly && url.pathname.endsWith('/pose_search_properties')){const items=properties.filter(p=>p.publication==='Published' && !p.archived);return reply(200,{items,total:items.length,page:1,pageSize:12,snapshot:randomUUID(),expiresAt:'2027-01-01T00:00:00Z'});}
  if(previewOnly && url.pathname.endsWith('/property_projects'))return reply(200,[]);
  if(url.pathname==='/v1/chat/completions'){
-  if(input.response_format?.json_schema?.name==='rag_rerank')return reply(200,{choices:[{message:{content:JSON.stringify(rerankNoAnswer?{has_answer:false,ranked:[{n:1,relevance:3}]}:{has_answer:true,ranked:[{n:2,relevance:3},{n:1,relevance:2},{n:3,relevance:2},{n:4,relevance:2}]})}}]});
+   if(input.response_format?.json_schema?.name==='rag_rerank')return reply(200,{choices:[{message:{content:JSON.stringify(rerankNoAnswer?{has_answer:false,ranked:[{n:1,relevance:3}]}:{has_answer:true,ranked:[{n:2,relevance:3},{n:1,relevance:2},{n:3,relevance:2},{n:4,relevance:2}]})}}]});
   if(live){
    const response=await fetch('http://localhost:1234/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.timeout(60000)});
    const body=await response.json();modelOutputs.push(body.choices?.[0]?.message?.content);return reply(response.status,body);
   }
-  modelCalls++;if(input.response_format?.json_schema?.name==='assistant_turn')prompt=input;
-  if(mode==='down')return reply(503,{});
+   modelCalls++;if(input.response_format?.json_schema?.name==='assistant_turn'){prompt=input;const customerText=String(input.messages?.at(-1)?.content||'');const requestText=JSON.stringify(input);if(/provider.*timeout/i.test(customerText))mode='timeout';else if(/invalid JSON/i.test(customerText))mode='invalid';else if(/empty content/i.test(customerText))mode='empty';else if(/503/i.test(customerText))mode='down';else if(/AI_API_KEY secret/i.test(requestText))mode='secret';}
+   const evalText=JSON.stringify(input);if(/provider.*timeout/i.test(evalText))mode='timeout';else if(/invalid JSON/i.test(evalText))mode='invalid';else if(/empty content/i.test(evalText))mode='empty';else if(/provider.*503/i.test(evalText))mode='down';
+   if(mode==='down')return reply(503,{});
   if(mode==='invalid' && modelCalls>1)return reply(503,{});
-  if(mode==='timeout'){await delay(6000);return reply(200,{choices:[{message:{content:''}}]});}
-  if(input.tools){
+   if(mode==='timeout'){await delay(6000);return reply(200,{choices:[{message:{content:''}}]});}
+   if(mode==='empty')return reply(200,{choices:[{message:{content:''}}]});
+   if(input.tools){
    if(!prompt)prompt=input;
    check(input.tools.length===6 && input.tools.every(t=>['search_properties','get_property_detail','list_my_appointments','save_favorite','request_handoff','propose_appointment'].includes(t.function.name)),'Native six-tool schema');
    check(input.max_tokens===600 && input.messages[0].content.length<800,'Bounded generation and compact prompt/schema');
@@ -162,7 +172,11 @@ const provider=createServer(async(req,res)=>{
    if(mode==='extract'){const message={role:'assistant',content:'Xin chào!'};return reply(200,{choices:[{message}]});}
    if(mode==='invalid-needs'){const message={role:'assistant',content:'Xin chào!'};modelOutputs.push({...message,reply:message.content});return reply(200,{choices:[{message}]});}
    if(dataText.includes('"injection_suspected":true')){if(!modelData.length)modelData.push({});modelData.at(-1).injection_suspected=true;}
-   if((mode==='tool'||mode==='bad-args')&&!hasToolResult){const message={role:'assistant',tool_calls:[{id:'native-tool',type:'function',function:{name:mode==='tool'?'read_leads':'search_properties',arguments:mode==='tool'?'{}':JSON.stringify({role:'Admin'})}}]};return reply(200,{choices:[{message}]});}
+    if((mode==='tool'||mode==='bad-args')&&!hasToolResult){const message={role:'assistant',tool_calls:[{id:'native-tool',type:'function',function:{name:mode==='tool'?'read_leads':'search_properties',arguments:mode==='tool'?'{}':JSON.stringify({role:'Admin'})}}]};return reply(200,{choices:[{message}]});}
+    if((mode==='favorite'||mode==='appointment'||mode==='handoff')&&!hasToolResult){const name=mode==='favorite'?'save_favorite':mode==='appointment'?'propose_appointment':'request_handoff',args=mode==='favorite'?{code:'RV-A0805'}:mode==='appointment'?{code:'RV-A0805',preferred_start:'2027-01-15T02:00:00.000Z',preferred_end:null}:{summary:'Khach hang de nghi chuyen vien lien he'};const message={role:'assistant',tool_calls:[{id:`${mode}-tool`,type:'function',function:{name,arguments:JSON.stringify(args)}}]};return reply(200,{choices:[{message}]});}
+    if(/y[^\n]{0,20}th[^\n]{0,20}l[^\n]{0,20}RV-A0805/i.test(dataText)&&!hasToolResult){const message={role:'assistant',tool_calls:[{id:'favorite',type:'function',function:{name:'save_favorite',arguments:JSON.stringify({code:'RV-A0805'})}}]};return reply(200,{choices:[{message}]});}
+    if(/RV-A0805[^\n]{0,80}(xem|l[^\n]{0,4}ch)/i.test(dataText)&&!hasToolResult){const message={role:'assistant',tool_calls:[{id:'appointment',type:'function',function:{name:'propose_appointment',arguments:JSON.stringify({code:'RV-A0805',preferred_start:'2027-01-15T02:00:00.000Z',preferred_end:null})}}]};return reply(200,{choices:[{message}]});}
+    if(/chuy[^\n]{0,20}n vi[^\n]{0,20}n/i.test(dataText)&&!hasToolResult){const message={role:'assistant',tool_calls:[{id:'handoff',type:'function',function:{name:'request_handoff',arguments:JSON.stringify({summary:'Khach hang de nghi chuyen vien lien he'})}}]};return reply(200,{choices:[{message}]});}
    if(hasToolResult&&dataText.includes('requires_sign_in')){const message={role:'assistant',content:'Vui lòng đăng nhập hoặc dùng biểu mẫu tư vấn để tiếp tục.'};return reply(200,{choices:[{message}]});}
    if(mode==='extract'){const message={role:'assistant',content:'Tôi sẽ ghi nhận nhu cầu bạn vừa nêu.'};return reply(200,{choices:[{message}]});}
    if(/xin ch/i.test(dataText)){const message={role:'assistant',content:'Xin chào! Tôi có thể hỗ trợ thông tin bất động sản công bố của TERAVA.'};return reply(200,{choices:[{message}]});}
@@ -170,7 +184,7 @@ const provider=createServer(async(req,res)=>{
     if(mode==='changed' && !regeneration)properties[0].availability='Sold';
     const nativeMessage=redacted ? {role:'assistant',content:'Vui lòng đăng nhập hoặc dùng biểu mẫu tư vấn để chia sẻ thông tin liên hệ.'} : mode==='regenerate' ? {role:'assistant',content:regeneration?'Tôi chưa có đủ thông tin để xác nhận giá này.':'P-1 có giá 9 tỷ, đang mở bán.'} : mode==='rooms' ? {role:'assistant',content:regeneration?'Tôi chưa có thông tin xác nhận số phòng ngủ của sản phẩm.':'P-1 là căn hộ 2 phòng ngủ đang bán.'} : hasToolResult ? {role:'assistant',content:input.messages.filter(m=>m.role==='tool').map(m=>{try{return JSON.parse(m.content).join('\n')}catch{return String(m.content)}}).join('\n')} : {role:'assistant',tool_calls:[{id:'native-1',type:'function',function:{name:mode==='handoff'?'request_handoff':'search_properties',arguments:JSON.stringify(mode==='handoff'?{summary:'Khách đề nghị chuyên viên liên hệ'}:{query:'Q7',filters:{}})}}]};
    if(mode==='regenerate'||mode==='rooms')modelData.push({regeneration,violations:[mode==='rooms'?'UNSUPPORTED_ROOM_COUNT':'UNSUPPORTED_PRICE'],correction:regeneration?'Số phòng ngủ / giá chưa được xác nhận':''});
-   if(input.stream){res.writeHead(200,{'Content-Type':'text/event-stream'});const text=nativeMessage.content||'';if(text)for(const part of text.match(/.{1,18}/g)||[])res.write(`data: ${JSON.stringify({choices:[{delta:{content:part}}]})}\n\n`);res.write('data: [DONE]\n\n');return res.end();}
+    if(input.stream){res.writeHead(200,{'Content-Type':'text/event-stream'});const text=nativeMessage.content||'';if(text)for(const part of text.match(/.{1,18}/g)||[])res.write(`data: ${JSON.stringify({choices:[{delta:{content:part}}]})}\n\n`);res.write(`data: ${JSON.stringify({choices:[],usage:{prompt_tokens:11,completion_tokens:7,total_tokens:18}})}\n\n`);res.write('data: [DONE]\n\n');return res.end();}
    modelOutputs.push({...nativeMessage,reply:nativeMessage.content||''}); return reply(200,{choices:[{message:nativeMessage}]});
   }
   if(input.response_format?.json_schema?.name==='search_query') return reply(200,{choices:[{message:{content:JSON.stringify({standalone_question:input.messages.at(-1)?.content||'câu hỏi',filters:{transaction_type:null,property_type:null,location:null,min_price_vnd:null,max_price_vnd:null,bedrooms:null},refers_to_previous:[]})}}]});
@@ -232,7 +246,7 @@ const provider=createServer(async(req,res)=>{
   const s=sessions.get(input.p_session) || {id:input.p_session,user_id:input.p_user,guest_token_hash:input.p_hash,store_transcript:input.p_store,message_count:0,status:'Active',lead_id:leadFor(input.p_user)?.id};
   if(s.user_id!==input.p_user || s.guest_token_hash!==input.p_hash)return error('42501','FORBIDDEN',403);
    if(s.store_transcript)messages.push({session_id:s.id,role:'user',content:input.p_message},{session_id:s.id,role:'assistant',content:input.p_reply,sources:input.p_sources});
-  logs.push(...input.p_actions.map(a=>({...a,id:randomUUID(),session_id:s.id})));
+  logs.push(...input.p_actions.map(a=>({...a,id:randomUUID(),session_id:s.id})));if(!input.p_sources.length||unsafePending||unsafeSessionId===s.id){logs.push({session_id:s.id,reason:'UNSAFE_RETRIEVED_DATA',decision:'flagged'});unsafeSessionId=null;unsafePending=false;}
   if(s.lead_id){
    const lead=leads.get(s.lead_id);let changed=false;
    for(const [k,f] of Object.entries(input.p_fields)){
@@ -246,6 +260,9 @@ const provider=createServer(async(req,res)=>{
   s.property_ids=[...new Set([...s.property_ids || [],...input.p_sources.map(p=>p.id)])];
   s.message_count+=2;sessions.set(s.id,s);return reply(200,{id:s.id,message_count:s.message_count,store_transcript:s.store_transcript});
  }
+ if(url.pathname.endsWith('/pose_system_log_ai_request')){lastRequestSessionId=input.p_session_id;requestLogs.push({...input});return reply(200,randomUUID());}
+ if(url.pathname==='/fixture/ai-request-logs')return reply(200,requestLogs);
+ if(url.pathname.endsWith('/pose_system_admin_ai_usage')){if(role!=='Admin')return error('42501','FORBIDDEN',403);const grouped=new Map();for(const row of requestLogs){const key=`${new Date().toISOString().slice(0,10)}:${row.p_model}`;const current=grouped.get(key)||{day:new Date().toISOString().slice(0,10),model:row.p_model,requests:0,total_tokens:0,p50_latency_ms:row.p_latency_ms,p95_latency_ms:row.p_latency_ms,fallback_rate:row.p_status==='fallback'?1:0,estimated_cost:0};current.requests++;current.total_tokens+=row.p_total_tokens||0;grouped.set(key,current);}return reply(200,[...grouped.values()]);}
  if(url.pathname.endsWith('/pose_ai_request_handoff')){
   if(role!=='User')return error('42501','CUSTOMER_REQUIRED',403);
   const s=sessions.get(input.p_session);if(!s || s.user_id!==uid)return error('P0002','NOT_FOUND',404);
@@ -272,7 +289,8 @@ const provider=createServer(async(req,res)=>{
   ragCalls++;
   if(mode==='rag-failure')return reply(500,{message:'fixture retrieval failure'});
   const context=Array.isArray(input.p_context)?input.p_context:[];
-  const rows=properties.filter(p=>p.publication==='Published'&&!p.archived&&(!context.length||context.includes(p.id))).map((p,i)=>({chunk_id:`chunk-${i}`,document_id:`doc-${i}`,source_id:p.id,source_type:'Property',header:`${p.code} ${p.name}`,content:`${p.name} ${p.location} published listing.`,vector_rank:i+1,text_rank:i+1,similarity:.9,embed_model:'fixture',code:p.code,name:p.name,location:p.location,property_type:p.property_type,transaction_type:p.transaction_type,price:p.price,price_period:p.price_period,availability:p.availability,updated_at:p.updated_at}));
+  const knownContext=context.filter(id=>properties.some(p=>p.id===id));
+  const rows=properties.filter(p=>p.publication==='Published'&&!p.archived&&(!context.length||knownContext.length>0)).map((p,i)=>({chunk_id:`chunk-${i}`,document_id:`doc-${i}`,source_id:p.id,source_type:'Property',header:`${p.code} ${p.name}`,content:`${p.name} ${p.location} published listing.`,vector_rank:context.includes(p.id)?Math.max(1,i):i+1,text_rank:context.includes(p.id)?1:i+1,similarity:context.includes(p.id)?.95:.9,embed_model:'fixture',code:p.code,name:p.name,location:p.location,property_type:p.property_type,transaction_type:p.transaction_type,price:p.price,price_period:p.price_period,availability:p.availability,updated_at:p.updated_at})).sort((a,b)=>(b.similarity-a.similarity)||(a.vector_rank-b.vector_rank));
   return reply(200,rows);
  }
  if(url.pathname.endsWith('/property_public_catalog')){
@@ -281,7 +299,8 @@ const provider=createServer(async(req,res)=>{
   check(token==='fixture-public','Retrieval uses anon publishable key');
   let rows=properties.filter(p=>p.publication==='Published' && !p.archived);if(mode==='search')rows=rows.filter(p=>p.price!==null&&p.price<=3e9);
   for(const [k,v] of url.searchParams){if(v.startsWith('ilike.'))rows=rows.filter(p=>String(p[k]).toLocaleLowerCase('vi').includes(v.slice(7,-1).toLocaleLowerCase('vi')));if(v.startsWith('eq.'))rows=rows.filter(p=>String(p[k])===v.slice(3));if(v.startsWith('in.'))rows=rows.filter(p=>v.slice(4,-1).split(',').includes(String(p[k])));if(v.startsWith('gte.'))rows=rows.filter(p=>p[k]!==null && p[k]>=Number(v.slice(4)));if(v.startsWith('lte.'))rows=rows.filter(p=>p[k]!==null && p[k]<=Number(v.slice(4)));}
-  return reply(200,req.headers.accept?.includes('application/vnd.pgrst.object+json') ? rows[0] || null:rows.slice(0,5));
+   if(rows.some(p=>/AI_API_KEY|SUPABASE_/i.test(p.name))){unsafeSessionId=lastRequestSessionId;unsafePending=true;logs.push({session_id:lastRequestSessionId,reason:'UNSAFE_RETRIEVED_DATA',decision:'flagged'});}
+   return reply(200,req.headers.accept?.includes('application/vnd.pgrst.object+json') ? rows[0] || null:rows.slice(0,5));
  }
  if(url.pathname.endsWith('/property_media'))return reply(200,[]);
  if(url.pathname.endsWith('/ai_action_log'))return reply(200,role==='Admin' ? logs.filter(l=>['blocked','flagged'].includes(l.decision)):[]);
@@ -326,7 +345,8 @@ try{
   const page=await call(path,null,cookie);check(page.ok && (await page.text()).includes(expected),`UI mounted on ${path}`);
  }
  const ragBeforeNormal=ragCalls,catalogBeforeNormal=catalogSearchReads;
- const first=await call('/api/ai/chat',base);check(first.status===200,'Guest chat succeeds');const chat=await first.json();const firstModelReply=modelOutputs.at(-1).reply;
+  const first=await call('/api/ai/chat',base);check(first.status===200,'Guest chat succeeds');const chat=await first.json();const firstModelReply=modelOutputs.at(-1).reply;
+  await delay(50);const turnLogs=requestLogs.filter(row=>row.p_session_id===chat.session.id&&row.p_kind!=='embed');check(turnLogs.length>=2 && turnLogs.every(row=>row.p_prompt_version && row.p_total_tokens>0),'Every model call is logged with prompt versions and fake usage');
  check(chat.reply.startsWith('Tôi là trợ lý AI của TERAVA.'),'First message disclosure');
  const cookie=first.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];
  check(/HttpOnly/i.test(first.headers.get('set-cookie')) && /SameSite=Lax/i.test(first.headers.get('set-cookie')),'Private Lax cookie');
@@ -398,6 +418,7 @@ mode='search';const search=await (await call('/api/ai/chat',base)).json();check(
  check((await call('/api/ai/workspace',null,'pose-access=fixture-User')).status===403,'User denied staff workspace');
  check((await call('/api/ai/workspace?logs=true',null,'pose-access=fixture-Sales')).status===403,'Sales denied log');
  const adminLogs=await call('/api/ai/workspace?logs=true',null,'pose-access=fixture-Admin'),adminLogData=await adminLogs.json();check(adminLogs.ok && adminLogData.items.length>=5 && adminLogData.items.some(l=>l.decision==='flagged'),'Admin sees blocked and flagged log');
+ const usage=await call('/api/admin/ai-usage',null,'pose-access=fixture-Admin'),usageData=await usage.json();check(usage.ok && Array.isArray(usageData.items),'Admin sees AI usage rows');check((await call('/api/admin/ai-usage',null,'pose-access=fixture-Sales')).status===403 && (await call('/api/admin/ai-usage',null,'pose-access=fixture-User')).status===403,'Sales and User denied AI usage');
  check((await call('/api/ai/workspace',{lead_id:lead.id,version:0,classification:'Hot',reason:'x'},'pose-access=fixture-Admin')).status===400,'Override reason required');
  check((await call('/api/ai/workspace',{lead_id:lead.id,version:0,classification:'Hot',reason:'Đã xác nhận nhu cầu'},'pose-access=fixture-Sales')).status===403,'Unowned override denied');
  const version=lead.version;
@@ -412,7 +433,7 @@ mode='search';const search=await (await call('/api/ai/chat',base)).json();check(
  const m03Lead={id:randomUUID(),customer_id:m03Customer.id,status:'FOLLOW_UP',source:'Inquiry',archived:false,needs:{},version:0,temperature:null,lead_score:null};leads.set(m03Lead.id,m03Lead);
  const existingChat=await (await call('/api/ai/chat',base,'pose-access=fixture-Other')).json();
  const reused=await call('/api/ai/handoff',{session_id:existingChat.session.id,summary:'Bổ sung nhu cầu từ yêu cầu trước',request_key:randomUUID()},'pose-access=fixture-Other');
- check(reused.ok && [...leads.values()].filter(l=>l.customer_id===m03Customer.id).length===1 && m03Lead.status==='FOLLOW_UP' && sessions.get(existingChat.session.id).lead_id===m03Lead.id,'M03 customer and open Lead reused without status reset');
+  check(reused.ok && [...leads.values()].filter(l=>l.customer_id===m03Customer.id).length===1 && m03Lead.status==='FOLLOW_UP' && sessions.get(existingChat.session.id).lead_id===m03Lead.id,'M03 customer and open Lead reused without status reset');
  const empty=await (await call('/api/ai/chat',{...base,property_id:randomUUID()})).json();const emptyModelReply=modelOutputs.at(-1).reply;check(empty.sources.length===0 && empty.reply.includes('nói ngân sách') && empty.reply===`Tôi là trợ lý AI của TERAVA.\n${emptyModelReply}` && modelData.at(-1).search_performed,'Model phrases actual empty search result');
  const count=sessions.get(chat.session.id).message_count;mode='down';check((await call('/api/ai/chat',{...base,session_id:chat.session.id},cookie)).status===503 && sessions.get(chat.session.id).message_count===count,'Existing session provider error leaves counters unchanged');mode='ok';
  mode='changed';const changed=await (await call('/api/ai/chat',{...base,property_id:properties[0].id})).json();check(changed.sources[0].availability==='Sold' && changed.reply.includes('Đã bán, không còn mở bán'),'Current availability rechecked after model response');properties[0].availability='Available';mode='ok';

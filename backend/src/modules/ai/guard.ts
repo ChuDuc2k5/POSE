@@ -6,8 +6,11 @@ export const safeReply='Tôi chưa thể xác nhận câu trả lời an toàn t
 export const disclosure='Tôi là trợ lý AI của TERAVA.';
 const realEstateWords=/căn|nhà|đất|phòng|giá|thuê|mua|bất động sản|dự án|khu vực|diện tích|chuyên viên|lịch xem|yêu thích|Q\d|RV-/i;
 const explicitOutOfScope=/\b(?:code|lập trình|bài tập|chính trị|bầu cử|y tế|bác sĩ|thuốc|chẩn đoán|luật hình sự|học toán|homework|politics|medical)\b/i;
-export function isOutOfScope(text:string, intent:'real_estate'|'other'|'unknown'='unknown') {
-  return intent==='other' || (intent!=='real_estate' && explicitOutOfScope.test(text)) || (!realEstateWords.test(text) && text.trim().length>0);
+export function isOutOfScope(text:string, intent:'real_estate'|'other'|'unknown'='unknown', hasPropertyHistory=false) {
+  // The model owns intent classification. This deterministic guard only blocks an
+  // explicit non-property topic when neither the turn nor the session supplies a
+  // property signal; greetings, thanks, and contextual follow-ups stay in-chat.
+  return explicitOutOfScope.test(text) && intent!=='real_estate' && !realEstateWords.test(text) && !hasPropertyHistory;
 }
 export const outOfScopeReply='Tôi chỉ hỗ trợ tìm hiểu bất động sản TERAVA, xem thông tin căn hộ/dự án và kết nối chuyên viên. Bạn có thể hỏi về giá, khu vực, loại hình hoặc lịch xem nhà.';
 export function correctionData(reason:string){
@@ -37,8 +40,11 @@ export function toolAllowed(tool:unknown): tool is {name:string;arguments:Record
   if (!object(tool) || Object.keys(tool).some(k=>!['name','arguments'].includes(k)) || !object(tool.arguments)) return false;
   const args=tool.arguments;
   if (tool.name==='search_properties') return Object.keys(args).every(k=>['location','type','minPrice','maxPrice','bedrooms','transaction_type'].includes(k)) && Object.entries(args).every(([k,v])=>k==='transaction_type' ? ['Sale','Rent'].includes(v as string):k==='type' ? propertyTypes.includes(v as string):k==='location' ? typeof v==='string' && v.length>0 && v.length<=120:typeof v==='number' && Number.isFinite(v) && v>=0 && v<=1e15) && !(typeof args.minPrice==='number' && typeof args.maxPrice==='number' && args.minPrice>args.maxPrice);
-  if (tool.name==='request_handoff') return Object.keys(args).length===0;
-  if (tool.name==='propose_appointment') return Object.keys(args).length===2 && ['start','end'].every(k=>typeof args[k]==='string' && Number.isFinite(Date.parse(args[k] as string))) && Date.parse(args.end as string)>Date.parse(args.start as string);
+  if (tool.name==='get_property_detail') return Object.keys(args).length===1 && typeof args.code==='string' && args.code.length>0 && args.code.length<=40;
+  if (tool.name==='list_my_appointments') return Object.keys(args).length===0;
+  if (tool.name==='save_favorite') return Object.keys(args).length===1 && typeof args.code==='string' && args.code.length>0 && args.code.length<=40;
+  if (tool.name==='request_handoff') return Object.keys(args).length===0 || (Object.keys(args).length===1 && typeof args.summary==='string' && args.summary.trim().length>=3 && args.summary.length<=2000);
+  if (tool.name==='propose_appointment') return Object.keys(args).length===3 && typeof args.code==='string' && Number.isFinite(Date.parse(args.preferred_start as string)) && (args.preferred_end===null || Number.isFinite(Date.parse(args.preferred_end as string)));
   return false;
 }
 function references(text:string,evidence:Evidence[]){return evidence.filter(e=>[e.code,e.id,e.name].some(v=>new RegExp(`(?<![a-z0-9_-])${v.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?![a-z0-9_-])`,'i').test(text)));}
