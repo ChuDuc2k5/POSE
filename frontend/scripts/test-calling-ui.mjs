@@ -21,7 +21,7 @@ try {
  server.stdout.on('data',x=>output+=x);server.stderr.on('data',x=>output+=x);
  for(let i=0;i<120 && !output.includes('PREVIEW READY:');i++){if(server.exitCode!==null)break;await delay(100);}
  assert.ok(output.includes('PREVIEW READY:'),'isolated preview ready: '+output);
- child=spawn(chrome,['--headless','--disable-gpu','--no-first-run','--disable-background-networking','--remote-debugging-port=3502',`--user-data-dir=${join(root,'isolated-'+Date.now())}`,'about:blank'],{windowsHide:true,stdio:'ignore'});
+ child=spawn(chrome,['--headless','--no-sandbox','--disable-gpu','--no-first-run','--disable-background-networking','--remote-debugging-port=3502',`--user-data-dir=${join(root,'isolated-'+Date.now())}`,'about:blank'],{windowsHide:true,stdio:'ignore'});
  let target;
  for(let i=0;i<40;i++){try{target=await (await fetch('http://127.0.0.1:3502/json/new?about:blank',{method:'PUT'})).json();if(target.webSocketDebuggerUrl)break;}catch{}await delay(250);}
  assert.ok(target?.webSocketDebuggerUrl,'Chrome test target ready');

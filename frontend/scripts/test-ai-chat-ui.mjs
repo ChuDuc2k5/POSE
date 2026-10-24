@@ -65,7 +65,8 @@ try{
  await evaluate("window.originalSession=chatRequests[0];window.originalMessages=document.querySelector('.ai-log').innerText;window.documentMarker=123;window.card=document.querySelector('.discovery-card a[href^=\"/properties/\"]');window.nextProperty=card.getAttribute('href').split('/').at(-1);card.click()");
  await wait("location.pathname==='/properties/'+window.nextProperty && !!document.querySelector('.ai-panel') && document.querySelector('.ai-panel-head').innerText.includes('Đang xem:')");
  check(await evaluate("documentMarker===123 && document.querySelector('.ai-log').innerText===originalMessages && document.querySelector('#ai-message').value==='Bản nháp đang viết' && document.querySelector('.ai-switch input').checked"),'client navigation retains open panel, messages, consent and draft');
- await screenshot('property-context-380');
+ await send('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false});await screenshot('property-context-1280');
+ await send('Emulation.setDeviceMetricsOverride',{width:380,height:900,deviceScaleFactor:1,mobile:true});await screenshot('property-context-380');
  await type('Câu hỏi về căn đang xem');await click('Gửi');await wait('chatRequests.length===2');await wait("!document.querySelector('.ai-typing')");
  check(await evaluate("chatRequests[1].session_id==='f6300000-0000-4000-8000-000000000009' && chatRequests[1].property_id===nextProperty && chatRequests[1].history.length===2 && chatRequests[1].store_transcript"),'next request retains session and history with current property');
  await type('Bản nháp sau tải lại');await send('Page.reload');await delay(500);await wait("!!document.querySelector('.ai-panel') && document.querySelectorAll('.ai-row').length===4");
