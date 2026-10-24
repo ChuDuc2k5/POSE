@@ -5,12 +5,14 @@ import { ArrowUp, AudioLines, Mic, MicOff, Plus, UserRound, X } from 'lucide-rea
 import { TeravaMark } from './brand';
 import { availabilityLabels } from '@/lib/catalog';
 import { chatStorageKey } from '@/lib/chat-storage';
+import { RecommendationCard } from './recommendation-card';
 
-type Source={id:string;code:string;name:string;updated_at:string;price:number|null;availability:keyof typeof availabilityLabels;transaction_type:'Sale'|'Rent';price_period:'Total'|'Month'};
-type Message={role:'user'|'assistant';content:string;sources?:Source[]};
+type Source={id:string;code:string;name:string;updated_at:string;price:number|null;availability:keyof typeof availabilityLabels;transaction_type:'Sale'|'Rent';price_period:'Total'|'Month';number?:number;cover_id?:string|null;area?:number|null;bedrooms?:number|null;location?:string;reason?:string;relaxed_reason?:string};
+type PendingAction={id:string;tool:string;summary_vi:string;status?:string;requires_verified_phone?:boolean};
+type Message={role:'user'|'assistant';content:string;sources?:Source[];related?:Source[];action?:PendingAction};
 function validMessage(message:Message){
   return message && (message.role==='user'||message.role==='assistant') && typeof message.content==='string' &&
-    (!message.sources || Array.isArray(message.sources) && message.sources.every(source=>source && typeof source.id==='string' && typeof source.name==='string' && typeof source.code==='string' && typeof source.updated_at==='string' && (source.price===null || typeof source.price==='number') && Object.hasOwn(availabilityLabels,source.availability)));
+    (!message.sources || Array.isArray(message.sources) && message.sources.every(source=>source && typeof source.id==='string' && typeof source.name==='string' && typeof source.code==='string' && typeof source.updated_at==='string' && (source.price===null || typeof source.price==='number') && Object.hasOwn(availabilityLabels,source.availability))) && (!message.related || Array.isArray(message.related)) && (!message.action || typeof message.action.id==='string' && typeof message.action.summary_vi==='string');
 }
 type VoiceState='idle'|'listening'|'thinking'|'speaking';
 type Recognition={lang:string;interimResults:boolean;continuous:boolean;start():void;stop():void;abort():void;
@@ -37,10 +39,12 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   const [messages,setMessages]=useState<Message[]>([]),[text,setText]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [dictating,setDictating]=useState(false),[voice,setVoice]=useState<VoiceState|null>(null),[heard,setHeard]=useState('');
   const [handoffOpen,setHandoffOpen]=useState(false),[preferred,setPreferred]=useState(''),[handoffKey,setHandoffKey]=useState<string>(),[notice,setNotice]=useState('');
+  const [consents,setConsents]=useState<Record<string,{Call:boolean;AIVoice:boolean}>>({}),[deciding,setDeciding]=useState<string>();
+  void deciding;
   // Speech support is a browser capability: false during server rendering, real value after hydration.
   const speechSupported=useSyncExternalStore(subscribeNever,()=>!!recognitionCtor(),()=>false);
   const pending=useRef(false),recognition=useRef<Recognition|null>(null),voiceOn=useRef(false),log=useRef<HTMLDivElement>(null),input=useRef<HTMLTextAreaElement>(null);
-  const history=useRef<Message[]>([]),sessionRef=useRef<string|undefined>(undefined);
+  const history=useRef<Message[]>([]),sessionRef=useRef<string|undefined>(undefined),relatedRef=useRef<Source[]>([]);
   const panel=useRef<HTMLElement>(null),launcher=useRef<HTMLButtonElement>(null),finishSpeech=useRef<(()=>void)|null>(null),voiceEpoch=useRef(0);
   const voiceActive=voice!==null;
   const [restored,setRestored]=useState(false);
@@ -83,11 +87,13 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
     pending.current=true;setBusy(true);setError('');
     setMessages(list=>[...list,{role:'user',content}]);
     try{
-      const response=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:sessionRef.current,message:content,history:history.current.slice(-10).map(({role,content})=>({role,content})),store_transcript:store,property_id:propertyId || null})});
-      const result=await response.json();if(!response.ok)throw new Error(result.message);
-      sessionRef.current=result.session.id;setSession(result.session.id);
-      setMessages(list=>[...list,{role:'assistant',content:result.reply,sources:result.sources}]);
-      return result.reply as string;
+      const response=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',Accept:'text/event-stream'},body:JSON.stringify({session_id:sessionRef.current,message:content,history:history.current.slice(-10).map(({role,content})=>({role,content})),store_transcript:store,property_id:propertyId || null})});
+      if(!response.ok)throw new Error((await response.json()).message);
+      if(!response.headers.get('content-type')?.includes('text/event-stream')){const result=await response.json();sessionRef.current=result.session.id;setSession(result.session.id);setMessages(list=>[...list,{role:'assistant',content:result.reply,sources:result.sources,related:result.related,action:result.action}]);return result.reply as string;}
+      const reader=response.body?.getReader();if(!reader)throw new Error('Không nhận được nội dung trả lời.');let buffer='',reply='',sources:Source[]=[],action:PendingAction|undefined;setMessages(list=>[...list,{role:'assistant',content:''}]);
+      const update=()=>setMessages(list=>{const copy=[...list];copy[copy.length-1]={role:'assistant',content:reply,sources,related:relatedRef.current,action};return copy;});
+      while(true){const chunk=await reader.read();buffer+=new TextDecoder().decode(chunk.value||new Uint8Array(),{stream:!chunk.done});let end;while((end=buffer.indexOf('\n\n'))>=0){const block=buffer.slice(0,end);buffer=buffer.slice(end+2);const line=block.split('\n').find(value=>value.startsWith('data:'));if(!line)continue;const event=JSON.parse(line.slice(5));if(event.related)relatedRef.current=event.related;if(event.type==='meta'){sessionRef.current=event.session_id;setSession(sessionRef.current);sources=event.sources||[];}else if(event.type==='delta')reply+=event.text||'';else if(event.type==='action')action=event.action;else if(event.type==='done')reply=event.message||reply;update();}if(chunk.done)break;}
+      return reply;
     }catch(e){
       setMessages(list=>list.slice(0,-1));setText(content);
       setError(e instanceof Error ? e.message:'Chưa thể gửi tin nhắn.');return null;
@@ -159,6 +165,10 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   function stopVoice(){voiceOn.current=false;voiceEpoch.current++;abortRecognition();cancelSpeech();setDictating(false);setVoice(null);setHeard('');}
   function close(){stopVoice();setOpen(false);requestAnimationFrame(()=>launcher.current?.focus());}
 
+  async function decide(id:string,confirm:boolean){
+    setDeciding(id);try{const response=await fetch(`/api/ai/actions/${id}/${confirm?'confirm':'cancel'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({consents:confirm?(consents[id]||{Call:false,AIVoice:false}):{}})});const result=await response.json();if(!response.ok)throw new Error(result.message);setNotice(result.message||'Đã cập nhật yêu cầu.');setMessages(list=>list.map(m=>m.action?.id===id?{...m,action:{...m.action,status:result.action?.status|| (confirm?'Confirmed':'Cancelled'),requires_verified_phone:result.action?.no_verified_phone}}:m));}catch(e){setError(e instanceof Error?e.message:'Không thể cập nhật yêu cầu.');}finally{setDeciding(undefined);}
+  }
+
   async function handoff(){
     if(!session || pending.current)return;pending.current=true;setBusy(true);setError('');const key=handoffKey || crypto.randomUUID();setHandoffKey(key);
     try{
@@ -188,15 +198,18 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
         </div>}
         {messages.map((m,i)=>m.role==='user'
           ? <div className="ai-row ai-row-user" key={i}><p className="ai-bubble">{m.content}</p></div>
-          : <div className="ai-row ai-row-assistant" key={i}><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><div className="ai-answer"><p>{m.content}</p>
+          : <div className="ai-row ai-row-assistant" key={i}><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><div className="ai-answer"><p>{m.content}</p>{m.action && <div className="ai-action-card"><strong>{m.action.summary_vi}</strong><div><button type="button" disabled={busy} onClick={()=>void decide(m.action!.id,true)}>Xác nhận</button><button type="button" disabled={busy} onClick={()=>void decide(m.action!.id,false)}>Huỷ</button></div></div>}
               {!!m.sources?.length && <div className="ai-sources">{m.sources.map(s=><Link className="ai-source" href={`/properties/${s.id}`} key={s.id}><strong>{s.name}</strong><span>{s.code} · {s.price===null ? 'Giá chưa công bố':`${new Intl.NumberFormat('vi-VN').format(s.price)} VND${s.price_period==='Month' ? '/tháng':''}`}</span><em className={`ai-status ai-status-${s.availability}`}>{s.transaction_type==='Rent'&&s.availability==='Available' ? 'Còn cho thuê':availabilityLabels[s.availability]}</em><small>Cập nhật {new Date(s.updated_at).toLocaleString('vi-VN')}</small></Link>)}</div>}
-            </div></div>)}
+               {!!m.sources?.length && <div className="ai-property-list">{m.sources.slice(0,5).map(s=><RecommendationCard key={s.id} source={s} related={false} onAsk={message=>void ask(message)} signedIn={signedIn}/>)}</div>}
+               {!!m.related?.length && <section className="ai-related"><h3>Có thể bạn quan tâm</h3><div className="ai-property-list">{m.related.slice(0,3).map(s=><RecommendationCard key={s.id} source={s} related onAsk={message=>void ask(message)} signedIn={signedIn}/>)}</div></section>}
+             </div></div>)}
         {busy && voice!=='thinking' && <div className="ai-row ai-row-assistant"><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><span className="ai-typing" role="status" aria-label="Trợ lý đang soạn câu trả lời…"><i/><i/><i/></span></div>}
         {notice && <p className="ai-notice" role="status">{notice}</p>}
       </div>
 
       {error && <div className="ai-error" role="alert"><p>{error}</p><Link href="/customer/inquiries/new">Gửi biểu mẫu tư vấn</Link></div>}
 
+      {messages.filter(m=>m.action && (!m.action.status||m.action.status==='Pending') && (m.action.tool==='request_handoff'||m.action.tool==='propose_appointment')).map(m=>{const action=m.action!;const chosen=consents[action.id]||{Call:false,AIVoice:false};return <div className="ai-action-consent" key={`consent-${action.id}`}><p>Contact consent</p><label><input type="checkbox" checked={chosen.Call} onChange={e=>setConsents(c=>({...c,[action.id]:{...chosen,Call:e.target.checked}}))}/> Call</label><label><input type="checkbox" checked={chosen.AIVoice} onChange={e=>setConsents(c=>({...c,[action.id]:{...chosen,AIVoice:e.target.checked}}))}/> AI voice</label></div>})}
       {voice ? <div className="ai-voice" data-state={voice}>
         <button type="button" className="ai-orb" onClick={()=>{if(voice==='idle')voiceTurn();}} aria-label={voiceLabels[voice]}><span/><span/><span/></button>
         <strong role="status" aria-live="polite">{voiceLabels[voice]}</strong>

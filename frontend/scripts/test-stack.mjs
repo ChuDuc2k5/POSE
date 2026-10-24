@@ -16,7 +16,7 @@ async function stop(child) {
 }
 export async function startStack(port, providerEnv, options = {}) {
   const backendPort = options.backendPort ?? port + 2;
-  const env = { ...process.env, REDIS_PORT: '6399', NEXT_PUBLIC_API_URL: '', ...providerEnv, FRONTEND_URL: `http://localhost:${port}`, BACKEND_URL: `http://127.0.0.1:${backendPort}`, BACKEND_PORT: String(backendPort), NODE_ENV: 'production' };
+  const env = { ...process.env, REDIS_PORT: '6399', NEXT_PUBLIC_API_URL: `http://127.0.0.1:${backendPort}`, ...providerEnv, FRONTEND_URL: `http://localhost:${port}`, BACKEND_URL: `http://127.0.0.1:${backendPort}`, BACKEND_PORT: String(backendPort), NODE_ENV: 'production' };
   let api, app;
   try {
     if (options.build !== false) {

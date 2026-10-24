@@ -6,6 +6,7 @@ import * as projects from './catalog-projects.handlers.js';
 import * as properties from './catalog-properties.handlers.js';
 import * as search from './catalog-search.handlers.js';
 import * as property from './catalog-properties-id.handlers.js';
+import * as similar from './catalog-similar.handlers.js';
 import * as media from './catalog-media-id.handlers.js';
 import * as adminCatalog from './admin-catalog-kind.handlers.js';
 import * as adminItem from './admin-catalog-kind-id.handlers.js';
@@ -26,6 +27,9 @@ export class CatalogController {
   @Get('catalog/properties/:id')
   @Public()
   readProperty(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, property.GET); }
+  @Get('properties/:id/similar')
+  @Public()
+  similarProperties(@Req() request: Request, @Res() response: Response) { return dispatch<{id:string}>(request, response, similar.GET); }
   @Get('catalog/media/:id')
   @Public()
   downloadMedia(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, media.GET); }

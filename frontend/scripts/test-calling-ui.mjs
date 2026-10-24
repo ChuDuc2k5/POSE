@@ -83,7 +83,7 @@ try {
   if(page==='detail'){await evaluate("Array.from(document.querySelectorAll('.calls-detail .calls-actions button')).find(b=>b.innerText==='Không liên hệ').click()");await waitFor("document.querySelector('dialog[open]')?.innerText.includes('Ghi nhận không liên hệ')",'opt-out reason dialog');await press('Escape',{code:'Escape',windowsVirtualKeyCode:27});}
  }
  // Check the catalog's expanded, collapsed and mobile navigation using the real page.
- for (const width of [1280,840,380]) {
+ const catalogWidths=[1280,840,380];for (const width of catalogWidths) {
   await send('Emulation.setDeviceMetricsOverride',{width,height:1100,screenWidth:width,screenHeight:1100,deviceScaleFactor:1,mobile:width===380});
   await send('Page.navigate',{url:'http://localhost:3501/fixture?role=admin&path=/admin'});
   await waitFor("!!document.querySelector('.catalog-workspace .catalog-sidebar')",'catalog sidebar '+width);
@@ -94,7 +94,7 @@ try {
   if(width===380)assert.equal(nav.display,'none','mobile navigation follows catalog layout');
   await shot('catalog-sidebar-'+width,false);
  }
- console.log('PASS: catalog sidebar icons and responsive layout at 840px, 1280px and 380px.');
+ console.log(`PASS: catalog sidebar icons and responsive layout at ${catalogWidths.join(', ')}px.`);
  console.log(`PASS: ${checks} M08 rendered UI views at 1280px and 380px; page content, shared shell, modal focus and RLS verified; no horizontal overflow.`);
  console.log('Screenshots:\n'+screenshots.join('\n'));
 
