@@ -1,5 +1,16 @@
 import { object, propertyTypes } from './extraction.ts';
 import { moneyAmounts } from './money.ts';
+export function sanitizeReply(reply:string) { return reply.replace(/\[n\]/gi,'').replace(/\bDATA\b/g,'dữ liệu').replace(/[ \t]{2,}/g,' ').trim(); }
+const word = (source:string) => new RegExp(`(?<![\\p{L}])(?:${source})(?![\\p{L}])`,'iu');
+export function explicitWriteIntent(text:string) {
+  const normalized=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  return word('luu(?: can| lai)|yeu thich|dat lich|hen xem|goi lai|lien he(?: voi| lai)?(?: toi|minh|em|anh|chi)|gap chuyen vien|nhan vien tu van|chuyen vien tu van').test(normalized);
+}
+export function sourcesFromCitations<T extends { number?: number }>(reply:string, sources:T[], referencedListing=false) {
+  if (referencedListing) return sources;
+  const cited=[...new Set([...reply.matchAll(/\[(\d{1,3})\]/g)].map(match=>Number(match[1])))];
+  return cited.map(number=>sources.find(source=>source.number===number)).filter((source):source is T=>Boolean(source));
+}
 export { stripPhones } from './privacy.ts';
 import { withFormerDistrict } from './ward-label.js';
 export const GUARD_VERSION='guard.v3';

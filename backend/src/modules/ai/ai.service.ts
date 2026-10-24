@@ -8,15 +8,16 @@ import { systemClient } from '../supabase/supabase.service.js';
 import { catalogDatabaseError, catalogError, catalogInput, catalogJson } from '../catalog/catalog.service.js';
 import { uuidPattern } from '../../common/catalog.js';
 import { object } from './extraction.js';
-import { inferSearch } from './infer-search.js';
+import { inferSearch, inferTransactionType } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
-import { correctionData, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, type Evidence } from './guard.js';
+import { correctionData, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
 import { setAiRequestSession } from './request-log.js';
 import { questionPreview } from './privacy.js';
-import { clarificationFor } from './history-aware.js';
+import { clarificationFor, referencedListingCodes } from './history-aware.js';
+import { sanitizeReply } from './guard.js';
 import { withFormerDistrict } from './ward-label.js';
 
 export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI tạm thời không khả dụng. Bạn có thể thử lại, xem danh sách bất động sản hoặc gửi yêu cầu tư vấn.',retry:true,search_url:'/properties',inquiry_url:'/customer/inquiries/new'},503);
@@ -55,6 +56,13 @@ async function retrieveIds(ids:string[]):Promise<Evidence[]> {
   const order=new Map(ids.map((id,index)=>[id,index]));
   return (result.data || []).sort((a,b)=>(order.get(a.id)??Number.MAX_SAFE_INTEGER)-(order.get(b.id)??Number.MAX_SAFE_INTEGER)).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[];
 }
+async function retrieveCodes(codes:string[]):Promise<Evidence[]> {
+  if(!codes.length)return [];
+  const result=await authClient().from('property_public_catalog').select('id,code,name,cover_id,area,bedrooms,price,availability,updated_at,location,property_type,transaction_type,price_period').in('code',[...new Set(codes)].slice(0,5)).limit(5);
+  if(result.error)throw new Error('RETRIEVAL_UNAVAILABLE');
+  const order=new Map(codes.map((code,index)=>[code.toLowerCase(),index]));
+  return (result.data || []).sort((a,b)=>(order.get(a.code.toLowerCase())??Number.MAX_SAFE_INTEGER)-(order.get(b.code.toLowerCase())??Number.MAX_SAFE_INTEGER)).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[];
+}
 // The whole catalogue is in Ho Chi Minh City, whose name is written many ways ("TP.HCM",
 // "Thành phố Hồ Chí Minh"…); a city-level location is not a filter and would only miss rows.
 const cityOnly=/^(?:tp\.?\s*|thành phố\s*)?(?:hcm|hồ chí minh|ho chi minh|sài gòn|saigon)$/i;
@@ -89,6 +97,15 @@ export class AiService {
     if(!consumeAttempt('ai-ip',requestClientIp(),100) || !consumeAttempt('ai-session',id,40))return catalogError('RATE_LIMIT','Bạn đã gửi nhiều tin nhắn. Vui lòng thử lại sau.',429);
     const guest=!who.session, source=guest ? this.privacy.stripPhones(input.message):input.message;
     const sanitizedHistory=history.map(turn=>({role:turn.role,content:guest ? this.privacy.stripPhones(turn.content):turn.content}));
+    const codeReference=referencedListingCodes(source,sanitizedHistory);
+    let referencedItems:Evidence[]=[];
+    if(codeReference.ambiguous){
+      referencedItems=await retrieveCodes(codeReference.codes);
+      const clarify={needed:true,question:'Bạn đang hỏi căn nào?',options:referencedItems.slice(0,5).map(item=>`${item.code} - ${item.name}`)};
+      const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:clarify.question,p_sources:[],p_actions:[],p_fields:{},p_score:null});
+      if(committed.error)return catalogDatabaseError(committed.error);
+      return catalogJson({session:committed.data,reply:clarify.question,scope:'in_scope',sources:[],related:[],clarify,proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
+    }
     const clarification=clarificationFor(source, sanitizedHistory);
     if(clarification.needed){
       const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:clarification.question,p_sources:[],p_actions:[],p_fields:{},p_score:null});
@@ -146,6 +163,8 @@ export class AiService {
         queryFilters.location=locationFilter(queryFilters.location);
         approximatePriceRange(queryFilters);
         queryFilters=Object.fromEntries(Object.entries(queryFilters).filter(([,v])=>v!==null&&v!==undefined));
+        const inferredTransaction=inferTransactionType(source);
+        if(inferredTransaction)queryFilters.transaction_type=inferredTransaction;
         referenceIds=query.refers_to_previous.map(index=>interestIds[index-1]).filter((value):value is string=>typeof value==='string');
       } catch(error) { if(!(error instanceof Error && error.message==='NOT_A_PROPERTY_QUERY'))log('query_step',source,'invalid_query','flagged'); }
     }
@@ -157,7 +176,8 @@ export class AiService {
       return catalogJson({session:committed.data,reply:outOfScopeReply,scope:'out_of_scope',sources:[],related:[],blocked:false,proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
     }
     const pureReference=referenceIds.length>0 && Object.keys(queryFilters).length===0 && /\b(?:căn|can|nhà|nha|lô|lo|khu|kết quả|ket qua|đó|do|vừa|vua|thứ|thu|nào|nao|tiếp|tiep|trước|truoc|nêu|neu)\b/i.test(source);
-    if(pureReference) { items=await retrieveIds(referenceIds); searchPerformed=false; }
+    if(codeReference.codes.length) { items=await retrieveCodes(codeReference.codes); searchPerformed=false; }
+    else if(pureReference) { items=await retrieveIds(referenceIds); searchPerformed=false; }
     else if((realEstateIntent || modelTopic==='real_estate') && !searchPerformed) { items=await search(queryFilters,null,referenceIds,[standalone,...queryKeywords].join(' ')); searchPerformed=true; }
     const extracted:Record<string,unknown>={};
     const contextBlocks=items.map((item,index)=>`[${item.number || index+1}] ${item.code || ''} ${item.name || ''} ${withFormerDistrict(item.location || '')} price=${item.price ?? 'unknown'} availability=${item.availability || 'unknown'}`).join('\n');
@@ -171,6 +191,7 @@ export class AiService {
       return {error:'unknown_read_tool'};
     };
     const createPending=async(name:string,args:unknown)=>{
+      if(!explicitWriteIntent(source)) { log(name,args,guest?'SIGN_IN_REQUIRED':'WRITE_NOT_REQUESTED','flagged'); return null; }
       if(guest) { log(name,args,'SIGN_IN_REQUIRED','flagged'); return null; }
       const summary=name==='request_handoff' ? String((args as {summary:string}).summary) : name==='propose_appointment' ? `Đề nghị lịch xem ${(args as {code?:string}).code || ''} lúc ${(args as {preferred_start:string}).preferred_start}` : `Lưu ${(args as {code:string}).code} vào yêu thích`;
       const pending=await who.client!.rpc('pose_ai_create_pending',{p_session:id,p_tool:name,p_args:args,p_summary:summary,p_key:`${id}:${hash(JSON.stringify({name,args}))}`});
@@ -190,7 +211,7 @@ export class AiService {
     }
     for(const blockedReason of agent.blocked) log('agent',blockedReason,blockedReason,'flagged');
     let result={reply:agent.text || 'Hiện tôi chưa đủ dữ liệu để trả lời chính xác.',tool_calls:[] as unknown[],needs:{},flags:[] as never[]};
-    result.reply=agent.text || result.reply;
+    result.reply=sanitizeReply(agent.text || result.reply);
     let violation:string|null=agent.blocked.length ? 'AGENT_BLOCKED':null;
     // C3: citations are read from the reply itself (deterministic); a small model's self-reported
     // `cited` list is unreliable. The model's grounding verdict only matters for uncited claims.
@@ -201,13 +222,15 @@ export class AiService {
     }
     items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5);
     const finalRag=rag as RetrievalResult|null;if(finalRag){const rendered=renderRetrievedContextWithCards(finalRag.chunks,new Set(items.map(x=>x.id)));rag={...finalRag,...rendered};items=items.map(item=>({...item,number:((rendered.sources.find(s=>(s as {id?:string}).id===item.id) as {number?:number}|undefined)?.number),source_type:'Property'}));}else items=items.map((item,index)=>({...item,number:index+1,source_type:'Property'}));
+    const referencedAnswer=codeReference.codes.length>0 || pureReference;
+    items=sourcesFromCitations(result.reply,items,referencedAnswer);
     if(!violation){violation=this.guard.outputReason(result.reply,items,source,{retrievalFound:rag?.found??items.length>0,faqOnly:items.length>0&&items.every(x=>x.source_type==='Faq')});if(violation){log('output',result.reply,violation);console.warn(JSON.stringify({event:'guard_block',reason:violation,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:items.map(x=>x.number??null)}));}}
     let blocked=false;
     if(violation){
       log('final_output',result.reply,violation);
       const retryMessages=[...agentMessages,{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({regeneration:true,violation,...correctionData(violation)})}\nEND_UNTRUSTED_DATA`}];
       agent=await run(retryMessages);
-      result.reply=agent.text || safeReply;
+      result.reply=sanitizeReply(agent.text || safeReply);
       const retryViolation=this.guard.outputReason(result.reply,items,source,{retrievalFound:rag?.found??items.length>0,faqOnly:items.length>0&&items.every(x=>x.source_type==='Faq')});
       if(retryViolation){log('regeneration',result.reply,retryViolation);blocked=true;}
       else { violation=null; log('regeneration',{},null); }
