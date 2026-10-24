@@ -1,6 +1,10 @@
 import { Module } from '@nestjs/common';
-import { AiController } from './ai.controller.js';
+import { AiController, AdminAiController } from './ai.controller.js';
 import { AiService } from './ai.service.js';
 import { AiLlmService, AiGuardService, AiExtractionService, AiScoringService, AiPrivacyService, AiMoneyService } from './ai-logic.services.js';
-@Module({ controllers: [AiController], providers: [AiService, AiLlmService, AiGuardService, AiExtractionService, AiScoringService, AiPrivacyService, AiMoneyService] })
+import { QueueModule } from '../queue/queue.module.js';
+import { EmbeddingService } from './embeddings.js';
+import { RetrievalService } from './retrieval.js';
+import { KnowledgeIndexer } from './indexing.js';
+@Module({ imports:[QueueModule],controllers: [AiController,AdminAiController], providers: [AiService, AiLlmService, AiGuardService, AiExtractionService, AiScoringService, AiPrivacyService, AiMoneyService, EmbeddingService, RetrievalService, KnowledgeIndexer],exports:[RetrievalService,KnowledgeIndexer] })
 export class AiModule {}

@@ -12,6 +12,7 @@ import { object } from './extraction.js';
 import { inferSearch } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
 import { correctionData, disclosure, GUARD_VERSION, safeReply, type Evidence } from './guard.js';
+import { RetrievalService, type RetrievalResult } from './retrieval.js';
 
 export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI hiện chưa khả dụng. Vui lòng thử lại hoặc gửi yêu cầu tư vấn.',retry:true,inquiry_url:'/customer/inquiries/new'},503);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -48,7 +49,7 @@ async function retrieveIds(ids:string[]):Promise<Evidence[]> {
 }
 @Injectable()
 export class AiService {
-  constructor(private readonly llm: AiLlmService, private readonly guard: AiGuardService, private readonly extraction: AiExtractionService, private readonly scoring: AiScoringService, private readonly privacy: AiPrivacyService) {}
+  constructor(private readonly llm: AiLlmService, private readonly guard: AiGuardService, private readonly extraction: AiExtractionService, private readonly scoring: AiScoringService, private readonly privacy: AiPrivacyService,private readonly retrieval:RetrievalService) {}
   async chat(request:NextRequest) {
   try {
     if(!validOrigin(request))return catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403);
@@ -67,14 +68,19 @@ export class AiService {
     if(!consumeAttempt('ai-ip',requestClientIp(),100) || !consumeAttempt('ai-session',id,40))return catalogError('RATE_LIMIT','Bạn đã gửi nhiều tin nhắn. Vui lòng thử lại sau.',429);
     const guest=!who.session, source=guest ? this.privacy.stripPhones(input.message):input.message;
     const sanitizedHistory=history.map(turn=>({role:turn.role,content:guest ? this.privacy.stripPhones(turn.content):turn.content}));
-    let searchPerformed=input.filters!==undefined || !!input.property_id;
-    let items=searchPerformed ? await retrieve(filters,input.property_id as string|null || null):[];
+    let searchPerformed=input.filters!==undefined || !!input.property_id,rag:RetrievalResult|null=null;
+    let items:Evidence[]=[];
+    const search=async(searchFilters:Record<string,unknown>,propertyId:string|null=null)=>{
+      try{rag=await this.retrieval.search(source,searchFilters,{propertyId,propertyIds:interestIds.slice(-20)});return (rag.sources.filter(item=>item.id).map(item=>({...item,id:item.id as string,name:item.title as string})) as unknown) as Evidence[];}
+      catch{return retrieve(searchFilters,propertyId);}
+    };
+    if(searchPerformed)items=await search(filters,input.property_id as string|null || null);
     // Small models rarely ask for a search on their own; search the catalogue from the
     // question itself, and if nothing matches widen once so the answer can compare.
     const inferred=searchPerformed ? null:inferSearch(source);
     if(inferred){
-      items=await retrieve(inferred,null);
-      if(!items.length && Object.keys(inferred).length){const {location,transaction_type}=inferred;items=await retrieve({...location ? {location}:{},...transaction_type ? {transaction_type}:{}},null);}
+      items=await search(inferred,null);
+      if(!items.length && Object.keys(inferred).length){const {location,transaction_type}=inferred;items=await search({...location ? {location}:{},...transaction_type ? {transaction_type}:{}},null);}
       searchPerformed=true;
     }
     const actions:{tool:string;args_hash:string;decision:string;reason:string;rule_version:string}[]=[];
@@ -83,7 +89,7 @@ export class AiService {
     items=safeEvidence(items);
     const suspected=this.guard.injection(input.message) || sanitizedHistory.some(t=>this.guard.injection(t.content));
     if(suspected)log('input',source,'PROMPT_INJECTION','flagged');
-    const data=()=>({customer_text:source,history:sanitizedHistory,properties:items,search_performed:searchPerformed,injection_suspected:suspected,contact_redacted:guest && source!==input.message,signed_in:!guest});
+    const data=()=>({customer_text:source,history:sanitizedHistory,properties:items,retrieval:{found:rag?.found??items.length>0,grounding:rag?.grounding??(items.length?'catalog':'none'),context:rag?.context||''},search_performed:searchPerformed,injection_suspected:suspected,contact_redacted:guest && source!==input.message,signed_in:!guest});
     const extracted:Record<string,unknown>={};
     const turn=async(input:unknown)=>{const result=await this.llm.complete(input);Object.assign(extracted,result.needs);for(const flag of result.flags)log(flag.tool,flag.args,flag.reason,'flagged');return result;};
     let result=await turn(data()),violation:string|null=null,proposals:unknown[]=[];
@@ -94,7 +100,7 @@ export class AiService {
       if(!this.guard.toolAllowed(t))continue;
       if(t.name==='search_properties'){
         if(searched){violation='TOOL_LIMIT';log(t.name,t.arguments,violation);break;}
-        log(t.name,t.arguments,null);items=safeEvidence(await retrieve({...t.arguments,...inferred?.transaction_type ? {transaction_type:inferred.transaction_type}:{}},null));searchPerformed=true;searched=true;
+        log(t.name,t.arguments,null);items=safeEvidence(await search({...t.arguments,...inferred?.transaction_type ? {transaction_type:inferred.transaction_type}:{}},null));searchPerformed=true;searched=true;
       }else if(guest){violation='SIGN_IN_REQUIRED';log(t.name,t.arguments,violation);}
       else{log(t.name,t.arguments,null);proposals.push(t);}
     }
@@ -102,13 +108,13 @@ export class AiService {
       result=await turn({...data(),tools_complete:true});
       if(result.tool_calls?.length){violation='TOOL_RECURSION_BLOCKED';for(const t of result.tool_calls)log('recursive_tool',t,violation);}
     }
-    items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5);
+    items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5).map((item,index)=>({...item,number:index+1}));
     if(!violation){violation=this.guard.outputReason(result.reply,items,source);if(violation)log('output',result.reply,violation);}
     let blocked=false;
     if(violation){
       proposals=[];
       result=await turn({...data(),regeneration:true,tools_complete:true,...correctionData(violation)});
-      items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5);
+      items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5).map((item,index)=>({...item,number:index+1}));
       const failed=result.tool_calls?.length ? 'TOOL_RECURSION_BLOCKED':this.guard.outputReason(result.reply,items,source);
       if(failed){log('final_output',result.tool_calls?.length ? result.tool_calls:result.reply,failed);blocked=true;}
       else log('regeneration',{},null);

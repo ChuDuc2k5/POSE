@@ -1,12 +1,15 @@
 import { Controller, Get, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { Public } from '../../auth/auth.guard.js';
+import { Public, Roles } from '../../auth/auth.guard.js';
 import { dispatch } from '../../common/http.js';
 import { AiService } from './ai.service.js';
+import { KnowledgeIndexer } from './indexing.js';
+import { validOrigin } from '../../common/http.js';
+import { catalogError, catalogJson } from '../catalog/catalog.service.js';
 import * as workspace from './workspace.handlers.js';
 @Controller('ai')
 export class AiController {
-  constructor(private readonly ai: AiService) {}
+  constructor(private readonly ai: AiService,private readonly indexer:KnowledgeIndexer) {}
   @Public()
   @Post('chat')
   chat(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, request => this.ai.chat(request)); }
@@ -22,4 +25,21 @@ export class AiController {
   @Public()
   @Post('workspace')
   override(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, workspace.POST); }
+  @Roles('Admin')
+  @Post('admin/reindex')
+  reindex(@Req() req: Request,@Res() res:Response){return dispatch(req,res,async request=>{
+    if(!validOrigin(request))return catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403);
+    try{return catalogJson(await this.indexer.reindexAll());}catch{return catalogError('INDEX_UNAVAILABLE','Không thể lập lại chỉ mục tri thức.',503);}
+  });}
+}
+
+@Controller('admin/ai')
+export class AdminAiController {
+  constructor(private readonly indexer:KnowledgeIndexer) {}
+  @Roles('Admin')
+  @Post('reindex')
+  reindex(@Req() req:Request,@Res() res:Response){return dispatch(req,res,async request=>{
+    if(!validOrigin(request))return catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403);
+    try{return catalogJson(await this.indexer.reindexAll());}catch{return catalogError('INDEX_UNAVAILABLE','Không thể lập lại chỉ mục tri thức.',503);}
+  });}
 }
