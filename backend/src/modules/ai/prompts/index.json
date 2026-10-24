@@ -4,5 +4,5 @@
   "answer-meta": { "file": "answer-meta.system.md", "version": "answer-meta@2" },
   "needs": { "file": "needs.system.md", "version": "needs@2" },
   "rerank.system": { "file": "rerank.system.md", "version": "rerank.system@2" },
-  "rerank.user": { "file": "rerank.user.md", "version": "rerank.user@2" }
+  "rerank.user": { "file": "rerank.user.md", "version": "rerank.user@3" }
 }

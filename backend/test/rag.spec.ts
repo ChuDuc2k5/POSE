@@ -100,3 +100,26 @@ describe('model reranking',()=>{
 
 describe('index idempotency',()=>{it('skips only when both hash and model match',()=>{expect(indexNeedsEmbedding({content_hash:'h',embed_model:'m'},'h','m')).toBe(false);expect(indexNeedsEmbedding({content_hash:'h',embed_model:'m'},'h','other')).toBe(true);expect(indexNeedsEmbedding({content_hash:'h',embed_model:null},'h',null)).toBe(false);});});
 describe('similar properties',()=>{it('computes a mean vector and cosine ranking primitives',()=>{expect(meanVector([[1,3],[3,1]])).toEqual([2,2]);expect(cosineSimilarity([1,0],[1,0])).toBe(1);expect(cosineSimilarity([1,0],[0,1])).toBe(0);});it('uses the deterministic rule fallback constraints',()=>{const source={id:'a',district:'Q7',property_type:'Apartment',transaction_type:'Rent',price:100};expect(ruleSimilarProperties(source,[{id:'b',district:'Q7',property_type:'Apartment',transaction_type:'Rent',price:120},{id:'c',district:'Q7',property_type:'House',transaction_type:'Rent',price:100},{id:'a',district:'Q7',property_type:'Apartment',transaction_type:'Rent',price:100}]).map(item=>item.id)).toEqual(['b']);});it('extracts a short reason without price and PII',()=>{expect(deterministicReason('Gần chợ, sổ hồng riêng. Giá 3 tỷ, gọi 0901234567.')).toBe('Gần chợ, sổ hồng riêng.');});});
+
+describe('rerank keep-similarity guard',()=>{
+ it('keeps confident retrieval when the model rejects everything, only above the configured similarity',async()=>{
+  const rows=[row('a','p1',{similarity:.8,text_rank:1}),row('b','p2',{similarity:.75})];
+  const reject=async()=>({has_answer:false,ranked:[]});
+  process.env.AI_RAG_RERANK_KEEP_SIM='0.7';
+  expect((await rerank('q',rows,{model:reject})).chunks.length).toBeGreaterThan(0);
+  process.env.AI_RAG_RERANK_KEEP_SIM='0.9';
+  expect((await rerank('q',rows,{model:reject})).found).toBe(false);
+  delete process.env.AI_RAG_RERANK_KEEP_SIM;
+  expect((await rerank('q',rows,{model:reject})).found).toBe(false);
+ });
+});
+
+describe('knowledge text cleaning keeps non-price Vietnamese words',()=>{
+ it('keeps "thời gian", "gia đình", "chiều rộng" and drops real price/broker clauses',async()=>{
+  const {cleanKnowledgeText,faqChunks}=await import('../src/modules/ai/chunking.js');
+  const text=cleanKnowledgeText('Phù hợp cho gia đình trẻ. Chiều rộng 5m, thời gian bàn giao quý 3. Giá bán 3,2 tỷ. Liên hệ anh Tuấn 0901234567.');
+  expect(text).toContain('gia đình');expect(text).toContain('Chiều rộng 5m');expect(text).toContain('thời gian bàn giao');
+  expect(text).not.toMatch(/3,2 tỷ|Giá bán|Liên hệ|0901234567/);
+  expect(faqChunks('Làm sao đăng ký xem nhà?','Thời gian chỉ được xác nhận sau khi chuyên viên liên hệ.')[0].content).toContain('liên hệ');
+ });
+});
