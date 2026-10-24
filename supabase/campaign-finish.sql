@@ -59,6 +59,11 @@ begin
  end loop; return null;
 end $$;
 
+-- Rebind the public system wrapper after replacing the private claim function;
+-- otherwise PostgreSQL can retain the renamed pre-finish function dependency.
+create or replace function public.pose_system_claim_call_job(p_worker text,p_lease_seconds integer,p_now timestamptz,p_global integer default 2)
+returns jsonb language sql security invoker set search_path='' as $$select pose_private.claim_call_job(p_worker,p_lease_seconds,p_now,p_global)$$;
+
 -- Completion remains atomic, and now has an auditable state transition.
 alter function pose_private.campaign_complete(uuid) rename to campaign_complete_m07_base;
 create function pose_private.campaign_complete(p_campaign uuid) returns void language plpgsql security definer set search_path='' as $$
