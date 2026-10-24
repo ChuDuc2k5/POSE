@@ -1,6 +1,6 @@
 import '../dist/env.js';
 import { readFile } from 'node:fs/promises';
-import { RetrievalService } from '../dist/modules/ai/retrieval.js';
+import { RetrievalService, applyThresholds } from '../dist/modules/ai/retrieval.js';
 import { EmbeddingService } from '../dist/modules/ai/embeddings.js';
 import { inferSearch } from '../dist/modules/ai/infer-search.js';
 import { querySearch } from '../dist/modules/ai/llm.js';
@@ -33,6 +33,7 @@ const ordinal = (text, count=0) => {
   return [];
 };
 const cache = new Map();
+const retrievalCache = new Map();
 
 async function prepare(item) {
   const previous = item.context?.previous_expected_codes || [];
@@ -46,14 +47,21 @@ async function prepare(item) {
 }
 
 async function evaluate(prepared, min, no, textRank) {
-  process.env.AI_RAG_MIN_SCORE = min.toFixed(2); process.env.AI_RAG_NO_ANSWER_SCORE = no.toFixed(2); process.env.AI_RAG_MIN_TEXT_RANK = String(textRank);
+  const thresholdOptions = { minScore: min, noAnswerScore: no, minTextRank: textRank };
   let hit = 0, mrr = 0, truePositive = 0, falsePositive = 0;
   for (let i = 0; i < fixture.length; i++) {
     const item = fixture[i], plan = prepared[i];
     const pureReference = plan.refs.length > 0 && Object.keys(plan.filters).length === 0;
+    const context = { propertyIds: plan.refs.length ? contextIds(plan.refs) : [] };
+    const cacheKey = JSON.stringify([item.question, plan.query.standalone_question, plan.filters, context.propertyIds]);
+    let ranked = retrievalCache.get(cacheKey);
+    if (!pureReference && !ranked) {
+      ranked = await service.searchRowsWithEmbedding(plan.query.standalone_question, plan.filters, context, plan.embedding);
+      retrievalCache.set(cacheKey, ranked);
+    }
     const result = pureReference
       ? { found: true, chunks: plan.refs.map(code => snapshot.find(row => row.code === code)).filter(Boolean) }
-      : await service.searchWithEmbedding(plan.query.standalone_question, plan.filters, { propertyIds: plan.refs.length ? contextIds(plan.refs) : [] }, plan.embedding);
+      : (() => { const chunks = applyThresholds(ranked, thresholdOptions); return { found: chunks.length > 0, chunks }; })();
     const codes = result.chunks.slice(0, 5).map(row => row.code).filter(Boolean);
     if (item.expected_codes.length) {
       const rank = item.expected_codes.map(code => codes.indexOf(code)).find(index => index >= 0);
@@ -66,6 +74,31 @@ async function evaluate(prepared, min, no, textRank) {
 }
 
 const prepared = await Promise.all(fixture.map(prepare));
+const defaultOptions = { minScore: Number(process.env.AI_RAG_MIN_SCORE || 0.30), noAnswerScore: Number(process.env.AI_RAG_NO_ANSWER_SCORE || 0.50), minTextRank: Number(process.env.AI_RAG_MIN_TEXT_RANK || 5) };
+const defaultMisses = [];
+for (let i = 0; i < fixture.length; i++) {
+  const item = fixture[i], plan = prepared[i];
+  if (!item.expected_codes.length || (plan.refs.length && !Object.keys(plan.filters).length)) continue;
+  const key = JSON.stringify([item.question, plan.query.standalone_question, plan.filters, plan.refs.length ? contextIds(plan.refs) : []]);
+  const ranked = retrievalCache.get(key) || await service.searchRowsWithEmbedding(plan.query.standalone_question, plan.filters, { propertyIds: plan.refs.length ? contextIds(plan.refs) : [] }, plan.embedding);
+  retrievalCache.set(key, ranked);
+  if (!applyThresholds(ranked, defaultOptions).some(row => item.expected_codes.includes(row.code))) defaultMisses.push(item.id);
+}
+console.log(`DEFAULT_MISSES ${defaultMisses.join(',') || 'none'}`);
+const causes = { hard_filter: 0, below_top5: 0, absent_vector_and_text: 0, other: 0 };
+for (const id of defaultMisses) {
+  const i = fixture.findIndex(item => item.id === id), item = fixture[i], plan = prepared[i], expected = new Set(item.expected_codes);
+  const context = { propertyIds: plan.refs.length ? contextIds(plan.refs) : [] };
+  const filtered = retrievalCache.get(JSON.stringify([item.question, plan.query.standalone_question, plan.filters, context.propertyIds]));
+  const unfiltered = await service.searchRowsWithEmbedding(plan.query.standalone_question, {}, context, plan.embedding);
+  const filteredCodes = new Set((filtered || []).map(row => row.code));
+  const allCodes = new Set(unfiltered.map(row => row.code));
+  if ([...expected].some(code => allCodes.has(code) && !filteredCodes.has(code))) causes.hard_filter++;
+  else if ([...expected].some(code => filteredCodes.has(code))) causes.below_top5++;
+  else if (![...expected].some(code => allCodes.has(code))) causes.absent_vector_and_text++;
+  else causes.other++;
+}
+console.log(`MISS_CAUSES hard_filter=${causes.hard_filter} below_top5=${causes.below_top5} absent_vector_and_text=${causes.absent_vector_and_text} other=${causes.other}`);
 let best = null;
 console.log('min_score no_answer min_text_rank recall@5 MRR noans_P noans_R F1');
 for (const min of [0.30,0.35,0.40,0.45,0.50,0.55,0.60,0.65,0.70]) for (const no of [0.30,0.35,0.40,0.45,0.50,0.55,0.60,0.65,0.70]) for (const textRank of [1,3,5,10]) {
