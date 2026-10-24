@@ -26,7 +26,7 @@ const returnPathStorageKey='terava-chat-return-path-v1';
 const localHistoryKey='terava-chat-history-v1';
 const voiceLabels:Record<VoiceState,string>={idle:'Chạm để nói',listening:'Đang nghe…',thinking:'Đang suy nghĩ…',speaking:'Đang trả lời…'};
 const normalize=(value:string)=>value.toLocaleLowerCase('vi').replace(/[^\p{L}\p{N} ]/gu,'').replace(/\s+/g,' ').trim();
-const maskTitle=(value:string)=>value.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,'[email Ä‘Ã£ áº©n]').replace(/(?:\+?84|0)[35789](?:[ .()-]?\d){8}/g,'[Ä‘Ã£ áº©n sá»‘ liÃªn há»‡]').replace(/\s+/g,' ').trim().slice(0,80);
+const maskTitle=(value:string)=>value.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,'[email đã ẩn]').replace(/(?:\+?84|0)[35789](?:[ .()-]?\d){8}/g,'[đã ẩn số liên hệ]').replace(/\s+/g,' ').trim().slice(0,80);
 
 function recognitionCtor():RecognitionCtor|null{
   if(typeof window==='undefined')return null;

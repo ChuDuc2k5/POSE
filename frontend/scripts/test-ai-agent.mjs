@@ -254,7 +254,7 @@ const provider=createServer(async(req,res)=>{
  if(url.pathname.endsWith('/pose_ai_score_context'))return reply(200,scoringFor(leadFor(uid)));
  if(url.pathname.endsWith('/pose_ai_list_sessions')){
   if(!uid)return error('42501','AUTH_REQUIRED',401);
-  const rows=[...sessions.values()].filter(s=>s.user_id===uid&&s.store_transcript&&s.status!=='Closed').sort((a,b)=>String(b.last_message_at||'').localeCompare(String(a.last_message_at||''))).map(s=>({id:s.id,title:String(messages.find(m=>m.session_id===s.id&&m.role==='user')?.content||'Cuá»™c trÃ² chuyá»‡n má»›i').replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,'[email Ä‘Ã£ áº©n]').replace(/(?:\+?84|0)[35789](?:[ .()-]?\d){8}/g,'[Ä‘Ã£ áº©n sá»‘ liÃªn há»‡]'),updated_at:s.last_message_at||s.created_at,message_count:s.message_count}));
+  const rows=[...sessions.values()].filter(s=>s.user_id===uid&&s.store_transcript&&s.status!=='Closed').sort((a,b)=>String(b.last_message_at||'').localeCompare(String(a.last_message_at||''))).map(s=>({id:s.id,title:String(messages.find(m=>m.session_id===s.id&&m.role==='user')?.content||'Cuộc trò chuyện mới').replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,'[email đã ẩn]').replace(/(?:\+?84|0)[35789](?:[ .()-]?\d){8}/g,'[đã ẩn số liên hệ]'),updated_at:s.last_message_at||s.created_at,message_count:s.message_count}));
   return reply(200,rows);
  }
  if(url.pathname.endsWith('/pose_ai_read_session') || url.pathname.endsWith('/pose_system_ai_read_guest')){
