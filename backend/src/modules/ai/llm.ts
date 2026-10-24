@@ -75,7 +75,7 @@ export async function structured<T>(schema: z.ZodType<T>, name: string, messages
     if (seen < count) { console.info(JSON.stringify({ event: 'rerank_raw', raw: content })); process.env.AI_RAG_RERANK_DEBUG_SEEN = String(seen + 1); }
   }
   const value=schema.parse(JSON.parse(content));
-  logAiRequest({kind:logKind(name),model,promptName:name,promptVersion:name==='search_query'?promptVersion('query'):name==='needs_v1'?promptVersion('needs'):name==='rag_rerank'?promptVersion('rerank.system'):promptVersion('answer-meta'),promptTokens:usage?.prompt_tokens,completionTokens:usage?.completion_tokens,totalTokens:usage?.total_tokens,latencyMs:Date.now()-started,status:'ok'});
+  logAiRequest({kind:logKind(name),model,promptName:name,promptVersion:name==='search_query'?promptVersion('query'):name==='needs_v1'?promptVersion('needs'):name==='rag_rerank'?`${promptVersion('rerank.system')}+${promptVersion('rerank.user')}`:promptVersion('answer-meta'),promptTokens:usage?.prompt_tokens,completionTokens:usage?.completion_tokens,totalTokens:usage?.total_tokens,latencyMs:Date.now()-started,status:'ok'});
   return value;
   } catch(error) { logAiRequest({kind:logKind(name),model,promptName:name,latencyMs:Date.now()-started,status:requestStatus(error),errorCode:error instanceof Error?error.message:'UNKNOWN'}); throw error; }
 }

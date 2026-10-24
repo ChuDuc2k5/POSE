@@ -15,6 +15,7 @@ import { RetrievalService, renderRetrievedContextWithCards, deterministicReason,
 import { runAgent } from './agent.ts';
 import { querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
 import { setAiRequestSession } from './request-log.js';
+import { questionPreview } from './privacy.js';
 
 export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI tạm thời không khả dụng. Bạn có thể thử lại, xem danh sách bất động sản hoặc gửi yêu cầu tư vấn.',retry:true,search_url:'/properties',inquiry_url:'/customer/inquiries/new'},503);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -78,7 +79,8 @@ export class AiService {
     if(!object(filters) || !this.guard.toolAllowed({name:'search_properties',arguments:filters}))return catalogError('INVALID_FILTER','Bộ lọc không hợp lệ.',400);
     const who=await identity();if(who.error)return who.error;
     const id=typeof input.session_id==='string' ? input.session_id:randomUUID();
-    setAiRequestSession(id);
+    const turnId = randomUUID();
+    setAiRequestSession(id, turnId, questionPreview(input.message));
     let count=0,interestIds:string[]=[],scoring:{needs:Record<string,{value:unknown;evidence?:string;confirmed_by?:unknown}>;verified:boolean;version:number;interest_ids?:string[];score_result?:ScoreResult}|null=null;
     if(input.session_id){const prior=await readSession(id,who);if(prior.error)return catalogDatabaseError(prior.error);count=prior.data.message_count;scoring=prior.data.scoring;interestIds=prior.data.suggested_property_ids || [];if(prior.data.store_transcript!==input.store_transcript || prior.data.status==='Closed')return catalogError('SESSION_CONFLICT','Lựa chọn lưu áp dụng cho cả phiên; hãy bắt đầu phiên mới để thay đổi.',409);}
     else if(who.client){const context=await who.client.rpc('pose_ai_score_context');if(context.error)return catalogDatabaseError(context.error);scoring=context.data;}
@@ -242,13 +244,33 @@ export class AiService {
   try {if(!uuidPattern.test(id))return catalogError('NOT_FOUND','Không tìm thấy hội thoại.',404);const who=await identity();if(who.error)return who.error;const result=await readSession(id,who);return result.error ? catalogDatabaseError(result.error):catalogJson({session:result.data});}catch{return unavailable();}
 }
 async getUsage(request:NextRequest) {
-  if(!validOrigin(request))return catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403);
+  // Read-only GET: browsers send no Origin on same-origin GETs; CSRF checks guard state changes only.
   const session=await authenticatedSession();
   if(!session)return catalogError('UNAUTHORIZED','Vui lòng đăng nhập.',401);
   if(session.role!=='Admin')return catalogError('FORBIDDEN','Bạn không có quyền xem sử dụng AI.',403);
   const url=new URL(request.url), from=url.searchParams.get('from'), to=url.searchParams.get('to');
   const result=await authClient(session.access).rpc('pose_system_admin_ai_usage',{p_from:from||null,p_to:to||null});
   return result.error ? catalogDatabaseError(result.error) : catalogJson({items:result.data||[]});
+}
+async getAiDashboard(request:NextRequest, kind:'overview'|'series'|'kinds'|'turns'|'turn', id?:string) {
+  // Read-only GET (see getUsage): authorization is the Admin session check below.
+  const session=await authenticatedSession();
+  if(!session)return catalogError('UNAUTHORIZED','Vui lòng đăng nhập.',401);
+  if(session.role!=='Admin')return catalogError('FORBIDDEN','Bạn không có quyền xem dashboard AI.',403);
+  const url=new URL(request.url), from=url.searchParams.get('from'), to=url.searchParams.get('to');
+  const parseDate=(value:string|null)=>value && Number.isFinite(Date.parse(value)) ? value:null;
+  const pFrom=parseDate(from), pTo=parseDate(to);
+  if((from&&!pFrom)||(to&&!pTo)||(pFrom&&pTo&&Date.parse(pFrom)>=Date.parse(pTo)))return catalogError('INVALID_INPUT','Khoảng thời gian không hợp lệ.',400);
+  if(kind==='overview') { const result=await authClient(session.access).rpc('pose_system_admin_ai_overview'); return result.error?catalogDatabaseError(result.error):catalogJson({items:result.data||[]}); }
+  if(kind==='series'||kind==='kinds') {
+    const bucket=url.searchParams.get('bucket');
+    if(kind==='series'&&bucket&&!['day','week','month'].includes(bucket))return catalogError('INVALID_INPUT','Bucket không hợp lệ.',400);
+    const result=await authClient(session.access).rpc(kind==='series'?'pose_system_admin_ai_series':'pose_system_admin_ai_by_kind',kind==='series'?{p_bucket:bucket||'day',p_from:pFrom||new Date(Date.now()-30*86400000).toISOString(),p_to:pTo||new Date().toISOString()}:{p_from:pFrom||new Date(Date.now()-30*86400000).toISOString(),p_to:pTo||new Date().toISOString()});
+    return result.error?catalogDatabaseError(result.error):catalogJson({items:result.data||[]});
+  }
+  if(kind==='turn') { if(!id||!uuidPattern.test(id))return catalogError('INVALID_INPUT','Mã lượt không hợp lệ.',400); const result=await authClient(session.access).rpc('pose_system_admin_ai_turn_calls',{p_turn_id:id}); return result.error?catalogDatabaseError(result.error):catalogJson({items:result.data||[]}); }
+  const page=Math.max(1,Number(url.searchParams.get('page')||1)); const limit=25; const result=await authClient(session.access).rpc('pose_system_admin_ai_turns',{p_from:pFrom||new Date(Date.now()-30*86400000).toISOString(),p_to:pTo||new Date().toISOString(),p_search:url.searchParams.get('q')||null,p_limit:limit,p_offset:(page-1)*limit});
+  return result.error?catalogDatabaseError(result.error):catalogJson({items:result.data||[],total:result.data?.[0]?.total_count||0,page,limit});
 }
   async handoff(request:NextRequest) {
   try {

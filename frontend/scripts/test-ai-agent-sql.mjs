@@ -46,7 +46,7 @@ try{
  create table public.ai_extracted_preferences(id uuid primary key default gen_random_uuid(),lead_id uuid not null references public.leads(id),field_name varchar not null,field_value text,confidence numeric,source_call_id uuid references public.calls(id),created_at timestamptz not null default now());
  create table public.ai_analyses(id uuid primary key default gen_random_uuid(),call_id uuid not null references public.calls(id),lead_id uuid references public.leads(id),needs text,budget numeric,interested_property text,preferred_location text,expected_timeline varchar,interest_level varchar,purchase_intent varchar,rejection_reason text,lead_score integer,temperature public.lead_temperature,summary text,raw_analysis jsonb,created_at timestamptz not null default now());
  `);
- for(const file of ['auth-access.sql','account-profile.sql','property-management.sql','property-discovery.sql','property-listing-source.sql','lead-contact-foundation.sql','calling-contract.sql','ai-agent.sql','ai-agent-tools.sql','ai-knowledge.sql','ai-rag-real-change-1.sql','property-similar.sql','ai-request-log.sql','ai-request-log-cost.sql','ai-request-log-session.sql']){
+ for(const file of ['auth-access.sql','account-profile.sql','property-management.sql','property-discovery.sql','property-listing-source.sql','lead-contact-foundation.sql','calling-contract.sql','ai-agent.sql','ai-agent-tools.sql','ai-knowledge.sql','ai-rag-real-change-1.sql','property-similar.sql','ai-request-log.sql','ai-request-log-cost.sql','ai-request-log-session.sql','ai-request-log-turns.sql']){
   let sql=await readFile(new URL(`../../supabase/${file}`,import.meta.url),'utf8');
   if(file==='ai-request-log.sql')await db.exec("create or replace function pose_private.directory_admin() returns boolean language sql stable as $$ select coalesce((pose_private.pose_access_context()->>'role')='Admin',false) $$;");
   // The external PGlite pgvector build currently provides the vector type but
@@ -65,6 +65,44 @@ try{
  for(const role of ['anon','authenticated']){let denied=false;await db.exec(`set role ${role}`);try{await db.query('select count(*) from public.ai_request_log');}catch{denied=true;}await db.exec('reset role');if(!denied)throw new Error(`${role} can read ai_request_log`);}
  {let denied=false;await db.exec('set role anon');try{await db.query("select public.pose_system_log_ai_request(null,'chat','x',null,null,'{}',0,0,0,0,'ok',null,0)");}catch{denied=true;}await db.exec('reset role');if(!denied)throw new Error('anon can log AI requests');}
  await db.exec('delete from public.ai_request_log');
+ // M06 AI Platform Dashboard: exact aggregates over fixed rows (Asia/Ho_Chi_Minh days, Monday weeks).
+ await db.exec("create or replace function pose_private.directory_admin() returns boolean language sql stable as $$ select coalesce(current_setting('test.ai_admin',true),'')='1' $$");
+ await db.exec('set role service_role');
+ await db.query("select public.pose_system_log_ai_request(null,'chat','gpt-4.1-mini','assistant','assistant@5','{}',1,1,2,1,'ok',null,0,'11111111-1111-4111-8111-111111111111','Hỏi thử')");
+ await db.exec('reset role');
+ if((await db.query("select turn_id::text t from public.ai_request_log")).rows[0].t!=='11111111-1111-4111-8111-111111111111')throw new Error('service_role cannot log turn ids');
+ await db.exec('delete from public.ai_request_log');
+ const turnIdA='aaaaaaaa-0000-4000-8000-000000000001',turnIdB='bbbbbbbb-0000-4000-8000-000000000002',turnIdC='cccccccc-0000-4000-8000-000000000003',turnIdD='dddddddd-0000-4000-8000-000000000004';
+ // A: Wed 2026-10-21 06:30 VN (still Tue 20th in UTC); B: Tue 2026-10-20 23:30 VN; C: Sun 2026-10-18 19:00 VN (previous ISO week; Mon 2026-10-19 starts the next); D: now.
+ await db.query(`insert into public.ai_request_log(turn_id,question_preview,kind,model,prompt_version,tools_called,prompt_tokens,completion_tokens,total_tokens,latency_ms,status,estimated_cost_usd,created_at) values
+  ($1,'Tìm căn hộ Quận 7','query','gpt-4.1-mini','query@3','{}',40,10,50,80,'ok',0.0005,'2026-10-20 23:30:00+00'),
+  ($1,'Tìm căn hộ Quận 7','rerank','gpt-4.1-mini','rerank.user@3','{}',50,10,60,40,'ok',0.0002,'2026-10-20 23:30:01+00'),
+  ($1,'Tìm căn hộ Quận 7','chat','gpt-4.1-mini','assistant@5','{search_properties,save_favorite}',100,40,140,120,'ok',0.001,'2026-10-20 23:30:03+00'),
+  ($2,'Cảm ơn','chat','gpt-4.1-mini','assistant@5','{}',20,10,30,60,'fallback',0.0002,'2026-10-20 16:30:00+00'),
+  ($3,'Xin chào','embed','text-embedding-3-small',null,'{}',10,0,10,5,'ok',0,'2026-10-18 12:00:00+00'),
+  ($4,'Hôm nay','chat','gpt-4.1-mini','assistant@5','{}',15,5,20,50,'ok',0.00002,now())`,[turnIdA,turnIdB,turnIdC,turnIdD]);
+ await db.exec("set test.ai_admin='1'");await db.exec('set role authenticated');
+ const turns=(await db.query("select turn_id::text id,calls::int,total_tokens::int tok,cost_usd::text cost,tools,worst_status,turn_latency_ms::int lat,total_count::int total from public.pose_system_admin_ai_turns('2026-10-01','2026-11-01')")).rows;
+ const turnA=turns.find(t=>t.id===turnIdA),turnB=turns.find(t=>t.id===turnIdB);
+ if(turns.length!==4||turns[0].total!==4||turnA.calls!==3||turnA.tok!==250||Number(turnA.cost)!==0.0017||turnA.tools.join(',')!=='save_favorite,search_properties'||turnA.lat!==3080||turnB.worst_status!=='fallback')throw new Error('admin_ai_turns mismatch: '+JSON.stringify(turns));
+ const searched=(await db.query("select turn_id::text id from public.pose_system_admin_ai_turns('2026-10-01','2026-11-01','quận 7')")).rows;
+ if(searched.length!==1||searched[0].id!==turnIdA)throw new Error('admin_ai_turns search mismatch');
+ const day=(await db.query("select to_char(bucket_start at time zone 'Asia/Ho_Chi_Minh','YYYY-MM-DD') d,questions::int q,calls::int c,total_tokens::int tok from public.pose_system_admin_ai_series('day','2026-10-17','2026-10-23')")).rows;
+ if(JSON.stringify(day)!==JSON.stringify([{d:'2026-10-18',q:1,c:1,tok:10},{d:'2026-10-20',q:1,c:1,tok:30},{d:'2026-10-21',q:1,c:3,tok:250}]))throw new Error('day series (VN time) mismatch: '+JSON.stringify(day));
+ const week=(await db.query("select to_char(bucket_start at time zone 'Asia/Ho_Chi_Minh','YYYY-MM-DD') d,questions::int q,total_tokens::int tok from public.pose_system_admin_ai_series('week','2026-10-01','2026-10-23')")).rows;
+ if(JSON.stringify(week)!==JSON.stringify([{d:'2026-10-12',q:1,tok:10},{d:'2026-10-19',q:2,tok:280}]))throw new Error('week series (Monday) mismatch: '+JSON.stringify(week));
+ const kinds=(await db.query("select kind,calls::int c,total_tokens::int tok from public.pose_system_admin_ai_by_kind('2026-10-01','2026-10-23') where kind='chat'")).rows;
+ if(kinds[0]?.c!==2||kinds[0]?.tok!==170)throw new Error('by_kind mismatch: '+JSON.stringify(kinds));
+ const turnCalls=(await db.query('select kind from public.pose_system_admin_ai_turn_calls($1)',[turnIdA])).rows.map(r=>r.kind).join(',');
+ if(turnCalls!=='query,rerank,chat')throw new Error('turn_calls order mismatch: '+turnCalls);
+ const overview=(await db.query('select period,questions::int q,calls::int c,total_tokens::int tok from public.pose_system_admin_ai_overview()')).rows;
+ if(overview.map(r=>r.period).join(',')!=='today,week,month'||overview[0].q!==1||overview[0].c!==1||overview[0].tok!==20)throw new Error('overview mismatch: '+JSON.stringify(overview));
+ await db.exec('reset role');await db.exec("set test.ai_admin='0'");await db.exec('set role authenticated');
+ const hidden=(await db.query("select count(*)::int n from public.pose_system_admin_ai_turns('2026-10-01','2026-11-01')")).rows[0].n+(await db.query('select count(*)::int n from public.pose_system_admin_ai_overview()')).rows[0].n;
+ await db.exec('reset role');if(hidden!==0)throw new Error('non-admin can read AI dashboard rows');
+ {let denied=false;await db.exec('set role anon');try{await db.query('select * from public.pose_system_admin_ai_overview()');}catch{denied=true;}await db.exec('reset role');if(!denied)throw new Error('anon can call AI dashboard RPC');}
+ await db.exec('delete from public.ai_request_log');
+ console.log('PASS: M06 AI dashboard SQL: turns (3 calls, 250 tokens, tools, latency, search), VN-day and Monday-week series, by kind, turn calls, overview today; non-admin 0 rows, anon denied.');
  console.log('PASS: M06 AI request log stores tokens, prompt version, tools and per-request cost; anon/authenticated denied.');
  const rental=await db.exec(await readFile(new URL('../../supabase/test-ai-rental.sql',import.meta.url),'utf8'));
  console.log(rental.at(-1).rows[0].result);

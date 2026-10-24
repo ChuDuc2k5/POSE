@@ -62,3 +62,13 @@ export class AdminUsageController {
   @Get('ai-usage')
   usage(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, request => this.ai.getUsage(request)); }
 }
+
+@Controller('admin/ai-dashboard')
+export class AdminAiDashboardController {
+  constructor(private readonly ai: AiService) {}
+  @Roles('Admin') @Get('overview') overview(@Req() req: Request,@Res() res: Response){return dispatch(req,res,request=>this.ai.getAiDashboard(request,'overview'));}
+  @Roles('Admin') @Get('series') series(@Req() req: Request,@Res() res: Response){return dispatch(req,res,request=>this.ai.getAiDashboard(request,'series'));}
+  @Roles('Admin') @Get('kinds') kinds(@Req() req: Request,@Res() res: Response){return dispatch(req,res,request=>this.ai.getAiDashboard(request,'kinds'));}
+  @Roles('Admin') @Get('turns') turns(@Req() req: Request,@Res() res: Response){return dispatch(req,res,request=>this.ai.getAiDashboard(request,'turns'));}
+  @Roles('Admin') @Get('turns/:id') turn(@Req() req: Request,@Res() res: Response){return dispatch<{id:string}>(req,res,async(request,context)=>this.ai.getAiDashboard(request,'turn', (await context.params).id));}
+}
