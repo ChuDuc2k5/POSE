@@ -177,6 +177,10 @@ const provider=createServer(async(req,res)=>{
   modelOutputs.push(result);
   return reply(200,{choices:[{message:{content:JSON.stringify(result)}}]});
  }
+ if(url.pathname==='/v1/embeddings'){
+  const values=Array.isArray(input.input)?input.input:[input.input];
+  return reply(200,{data:values.map((_,index)=>({index,embedding:Array(1024).fill(0).map((__,i)=>i===0?1:0)})),model:input.model||'fake-embedding'});
+ }
  if(url.pathname.endsWith('/logout')){res.writeHead(204);return res.end();}
  if(url.pathname.endsWith('/user'))return uid ? reply(200,{id:uid,aud:'authenticated',role:'authenticated',email:'fixture@example.test',email_confirmed_at:new Date().toISOString()}):reply(401,{});
  if(url.pathname.endsWith('/pose_access_context'))return reply(200,{user_id:uid,role,active:true,session_valid:true});
