@@ -1,6 +1,9 @@
 import '../dist/env.js';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { RetrievalService, applyThresholds } from '../dist/modules/ai/retrieval.js';
+import { rerank } from '../dist/modules/ai/rerank.js';
 import { EmbeddingService } from '../dist/modules/ai/embeddings.js';
 import { inferSearch } from '../dist/modules/ai/infer-search.js';
 import { querySearch } from '../dist/modules/ai/llm.js';
@@ -14,6 +17,10 @@ const words = value => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g
 for (const item of fixture) for (const code of item.expected_codes) if (!snapshot.some(row => row.code === code)) throw new Error(`Missing snapshot target ${code}`);
 
 const fake = process.env.RAG_EVAL_FAKE === '1';
+const useRerank = process.argv.includes('--rerank');
+const cacheFile = join(tmpdir(), `pose-rag-eval-${useRerank ? 'rerank' : 'thresholds'}.json`);
+let fileCache = {};
+try { fileCache = JSON.parse(await readFile(cacheFile, 'utf8')); } catch {}
 const service = fake ? new RetrievalService(new EmbeddingService(), async ({ p_query }) => {
   const query = words(p_query);
   const rows = snapshot.map((property, index) => {
@@ -34,6 +41,8 @@ const ordinal = (text, count=0) => {
 };
 const cache = new Map();
 const retrievalCache = new Map();
+const rerankCache = new Map();
+const latencies = [];
 
 async function prepare(item) {
   const previous = item.context?.previous_expected_codes || [];
@@ -46,7 +55,7 @@ async function prepare(item) {
   return { query, filters, refs, embedding };
 }
 
-async function evaluate(prepared, min, no, textRank) {
+async function evaluate(prepared, min, no, textRank, modelRerank = useRerank) {
   const thresholdOptions = { minScore: min, noAnswerScore: no, minTextRank: textRank };
   let hit = 0, mrr = 0, truePositive = 0, falsePositive = 0;
   for (let i = 0; i < fixture.length; i++) {
@@ -56,12 +65,16 @@ async function evaluate(prepared, min, no, textRank) {
     const cacheKey = JSON.stringify([item.question, plan.query.standalone_question, plan.filters, context.propertyIds]);
     let ranked = retrievalCache.get(cacheKey);
     if (!pureReference && !ranked) {
-      ranked = await service.searchRowsWithEmbedding(plan.query.standalone_question, plan.filters, context, plan.embedding);
+      const started = Date.now();
+      ranked = retrievalCache.get(cacheKey) || fileCache[`retrieval:${cacheKey}`] || await service.searchRowsWithEmbedding(plan.query.standalone_question, plan.filters, context, plan.embedding);
+      latencies.push(Date.now() - started);
       retrievalCache.set(cacheKey, ranked);
+      fileCache[`retrieval:${cacheKey}`] = ranked;
     }
+    const reranked = !pureReference && modelRerank ? (rerankCache.get(cacheKey) || fileCache[`rerank:${cacheKey}`] || await rerank(plan.query.standalone_question, ranked, {}).then(value => { rerankCache.set(cacheKey, value); fileCache[`rerank:${cacheKey}`] = value; return value; })) : null;
     const result = pureReference
       ? { found: true, chunks: plan.refs.map(code => snapshot.find(row => row.code === code)).filter(Boolean) }
-      : (() => { const chunks = applyThresholds(ranked, thresholdOptions); return { found: chunks.length > 0, chunks }; })();
+      : reranked ? { found: reranked.found, chunks: reranked.chunks } : (() => { const chunks = applyThresholds(ranked, thresholdOptions); return { found: chunks.length > 0, chunks }; })();
     const codes = result.chunks.slice(0, 5).map(row => row.code).filter(Boolean);
     if (item.expected_codes.length) {
       const rank = item.expected_codes.map(code => codes.indexOf(code)).find(index => index >= 0);
@@ -102,8 +115,16 @@ console.log(`MISS_CAUSES hard_filter=${causes.hard_filter} below_top5=${causes.b
 let best = null;
 console.log('min_score no_answer min_text_rank recall@5 MRR noans_P noans_R F1');
 for (const min of [0.30,0.35,0.40,0.45,0.50,0.55,0.60,0.65,0.70]) for (const no of [0.30,0.35,0.40,0.45,0.50,0.55,0.60,0.65,0.70]) for (const textRank of [1,3,5,10]) {
-  const result = await evaluate(prepared, min, no, textRank), row = { min, no, textRank, ...result };
+  const result = await evaluate(prepared, min, no, textRank, false), row = { min, no, textRank, ...result };
   console.log(`${min.toFixed(2)} ${no.toFixed(2)} ${textRank} ${result.recall.toFixed(3)} ${result.mrr.toFixed(3)} ${result.noansP.toFixed(3)} ${result.noansR.toFixed(3)} ${result.f1.toFixed(3)}`);
   if (!best || row.recall > best.recall || row.recall === best.recall && row.f1 > best.f1) best = row;
 }
 console.log(`BEST ${best.min.toFixed(2)} ${best.no.toFixed(2)} ${best.textRank} ${best.recall.toFixed(3)} ${best.mrr.toFixed(3)} ${best.noansP.toFixed(3)} ${best.noansR.toFixed(3)} ${best.f1.toFixed(3)}`);
+if (useRerank) {
+  const rerankResult = await evaluate(prepared, defaultOptions.minScore, defaultOptions.noAnswerScore, defaultOptions.minTextRank, true);
+  console.log('variant recall@5 MRR noans_P noans_R F1 latency_p50 latency_p95');
+  const sorted = [...latencies].sort((a, b) => a - b), pct = p => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] || 0;
+  console.log(`baseline ${best.recall.toFixed(3)} ${best.mrr.toFixed(3)} ${best.noansP.toFixed(3)} ${best.noansR.toFixed(3)} ${best.f1.toFixed(3)} ${pct(.5)} ${pct(.95)}`);
+  console.log(`rerank(pool=${process.env.AI_RAG_RERANK_POOL || 20},min=${process.env.AI_RAG_RERANK_MIN || 2}) ${rerankResult.recall.toFixed(3)} ${rerankResult.mrr.toFixed(3)} ${rerankResult.noansP.toFixed(3)} ${rerankResult.noansR.toFixed(3)} ${rerankResult.f1.toFixed(3)} ${pct(.5)} ${pct(.95)}`);
+}
+await writeFile(cacheFile, JSON.stringify(fileCache));

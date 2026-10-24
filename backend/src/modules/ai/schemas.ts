@@ -11,6 +11,7 @@ export const SearchFiltersSchema = z.object({
 
 export const SearchQuerySchema = z.object({
   standalone_question: z.string().trim().min(1).max(2000),
+  keywords: z.array(z.string().trim().min(1).max(80)).max(8).default([]),
   filters: SearchFiltersSchema,
   refers_to_previous: z.array(z.number().int().positive().max(100)).max(20),
 });

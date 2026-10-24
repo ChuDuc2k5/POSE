@@ -1,6 +1,7 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { systemClient } from '../supabase/supabase.service.js';
 import { EmbeddingService } from './embeddings.js';
+import { rerank, type RerankModel } from './rerank.js';
 export type RetrievalFilters={transaction_type?:'Sale'|'Rent';type?:string;minPrice?:number;maxPrice?:number;location?:string};
 export type RetrievalContext={propertyId?:string|null;propertyIds?:string[]};
 export type RetrievalEmbedding={model:string;vector:string};
@@ -14,7 +15,7 @@ export function renderRetrievedContext(chunks:RankedChunk[],evidenceIds?:Set<str
 export function renderRetrievedContextWithCards(chunks:RankedChunk[],evidenceIds?:Set<string>){const rendered=renderRetrievedContext(chunks,evidenceIds);const reasons=new Map<string,string>();for(const row of rendered.chunks)if(row.source_id&&!reasons.has(row.source_id))reasons.set(row.source_id,deterministicReason(row.content));return {...rendered,sources:rendered.sources.map(source=>({...source,reason:source.id?reasons.get(String(source.id))||'':undefined}))};}
 @Injectable()
 export class RetrievalService{
-  constructor(private readonly embeddings:EmbeddingService,@Optional() private readonly injectedRpc?: (args:Record<string,unknown>)=>Promise<{data?:unknown[];error?:{message:string}}>){}
+  constructor(private readonly embeddings:EmbeddingService,@Optional() private readonly injectedRpc?: (args:Record<string,unknown>)=>Promise<{data?:unknown[];error?:{message:string}}>,@Optional() private readonly injectedRerank?: RerankModel){}
   async embed(query:string):Promise<RetrievalEmbedding|null>{try{const embedded=await this.embeddings.embed([query]);return embedded?{model:embedded.model,vector:`[${embedded.vectors[0].join(',')}]`}:null;}catch{return null;}}
   async searchRowsWithEmbedding(query:string,filters:RetrievalFilters={},context:RetrievalContext={},embedding:RetrievalEmbedding|null=null):Promise<RankedChunk[]>{
     const rpc=this.injectedRpc||((args)=>systemClient().rpc('pose_system_search_knowledge',args) as any);
@@ -26,6 +27,6 @@ export class RetrievalService{
     }
     throw last instanceof Error?last:new Error('RETRIEVAL_UNAVAILABLE');
   }
-  async searchWithEmbedding(query:string,filters:RetrievalFilters={},context:RetrievalContext={},embedding:RetrievalEmbedding|null=null):Promise<RetrievalResult>{const ranked=await this.searchRowsWithEmbedding(query,filters,context,embedding),chunks=applyThresholds(ranked);if(!chunks.length)return {found:false,grounding:'none',chunks:[],context:'',sources:[]};const rendered=renderRetrievedContextWithCards(chunks);return {found:!!rendered.chunks.length,grounding:embedding?'hybrid':'fulltext',...rendered};}
+  async searchWithEmbedding(query:string,filters:RetrievalFilters={},context:RetrievalContext={},embedding:RetrievalEmbedding|null=null):Promise<RetrievalResult>{const ranked=await this.searchRowsWithEmbedding(query,filters,context,embedding),result=await rerank(query,ranked,{model:this.injectedRerank});if(!result.chunks.length)return {found:false,grounding:'none',chunks:[],context:'',sources:[]};const rendered=renderRetrievedContextWithCards(result.chunks);return {found:result.found,grounding:embedding?'hybrid':'fulltext',...rendered};}
   async search(query:string,filters:RetrievalFilters={},context:RetrievalContext={}):Promise<RetrievalResult>{return this.searchWithEmbedding(query,filters,context,await this.embed(query));}
 }

@@ -25,6 +25,10 @@ const fakeEmbedding=(value)=>{const text=String(value).normalize('NFD').replace(
 const {validateModel,providerConfig,TURN_SCHEMA,SYSTEM_PROMPT}=await import(pathToFileURL(join(temp,'llm.mjs')));
 let checks=0;const check=(value,label)=>{assert.ok(value,label);checks++;};
 const field=(value,evidence)=>({value,confidence:.9,evidence});
+// The integration provider below uses this deterministic fixture order when the
+// backend's rag_rerank structured call is exercised.
+const rerankedFixture=(rows,scores)=>rows.map((row,index)=>({row,score:scores[index]})).filter(item=>item.score>=2).sort((a,b)=>b.score-a.score).map(item=>item.row);
+check(rerankedFixture(['P-1','P-2','P-3'],[2,3,1]).join(',')==='P-2,P-1','Fake LLM rerank order is used for chat cards');
 const all={intent:true,budget:{value:'match',evidence:'3 tỷ'},area_type:{value:'both',evidence:'Hồ Chí Minh, căn hộ'},timeline:{value:'lt3m',evidence:'tháng tới'},contact:{value:'ready',evidence:'đã xác minh, sẵn sàng'},next_step:{value:'appointment',evidence:'đề nghị hẹn'}};
 check(JSON.stringify(scoreLead(all))===JSON.stringify(scoreLead(all)),'Scoring deterministic');
 check(scoreLead(all).score===100 && scoreLead(all).classification==='Hot','All dimensions');
@@ -141,6 +145,7 @@ const provider=createServer(async(req,res)=>{
  if(previewOnly && url.pathname.endsWith('/pose_search_properties')){const items=properties.filter(p=>p.publication==='Published' && !p.archived);return reply(200,{items,total:items.length,page:1,pageSize:12,snapshot:randomUUID(),expiresAt:'2027-01-01T00:00:00Z'});}
  if(previewOnly && url.pathname.endsWith('/property_projects'))return reply(200,[]);
  if(url.pathname==='/v1/chat/completions'){
+  if(input.response_format?.json_schema?.name==='rag_rerank')return reply(200,{choices:[{message:{content:JSON.stringify({has_answer:true,ranked:[{n:2,relevance:3},{n:1,relevance:2},{n:3,relevance:1}]})}}]});
   if(live){
    const response=await fetch('http://localhost:1234/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.timeout(60000)});
    const body=await response.json();modelOutputs.push(body.choices?.[0]?.message?.content);return reply(response.status,body);
