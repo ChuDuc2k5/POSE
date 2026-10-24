@@ -1,6 +1,7 @@
 begin;
 set local role service_role;
 select set_config('request.jwt.claims','{"role":"service_role"}',true);
+do $$ begin if pose_private.kb_query_text('Can nha  gan cho') <> 'gan' then raise exception 'KB_QUERY_TEXT_TOKENIZATION'; end if; end $$;
 insert into public.kb_documents(id,source_type,title,body,published) values
 ('f8a00000-0000-4000-8000-000000000001','Faq','Bản nháp không công bố','Không được trả về',false),
 ('f8a00000-0000-4000-8000-000000000002','Faq','Câu hỏi đã công bố','Hồ sơ chung cho khách hàng',true);

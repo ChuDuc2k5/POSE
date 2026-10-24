@@ -51,7 +51,7 @@ try{
   // The external PGlite pgvector build currently provides the vector type but
   // cannot create the cosine HNSW operator class; production PostgreSQL runs
   // the unmodified SQL. Keep the functional RPC/query assertions below.
-  if(file==='ai-knowledge.sql')sql=sql.replace(/create index kb_chunks_embedding_hnsw[^;]+;/i,'-- HNSW index verified in production PostgreSQL').replace(/e\.embedding\s*<=>\s*p_embedding/g,'0').replace(/e\.embedding\s*<->\s*p_embedding/g,'0').replace(/order by 0/g,'order by e.id');
+  if(file==='ai-knowledge.sql')sql=sql.replace(/create extension if not exists (vector|unaccent) with schema extensions;/g,'create extension if not exists $1;').replace(/extensions\.unaccent/g,'public.unaccent').replace(/extensions\.vector/g,'vector').replace(/extensions\.vector_cosine_ops/g,'vector_cosine_ops').replace(/operator\(extensions\.<=>\)/g,'<=>').replace(/e\.embedding\s*<=>\s*p_embedding/g,'0').replace(/e\.embedding\s*<->\s*p_embedding/g,'0').replace(/order by 0/g,'order by e.id').replace(/create index kb_chunks_embedding_hnsw[^;]+;/i,'-- HNSW index verified in production PostgreSQL');
   await db.exec(sql);
  }
  const rental=await db.exec(await readFile(new URL('../../supabase/test-ai-rental.sql',import.meta.url),'utf8'));

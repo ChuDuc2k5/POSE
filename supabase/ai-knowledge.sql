@@ -1,9 +1,10 @@
 begin;
-create extension if not exists vector;
-create extension if not exists unaccent;
+create schema if not exists extensions;
+create extension if not exists vector with schema extensions;
+create extension if not exists unaccent with schema extensions;
 
 create or replace function pose_private.kb_unaccent(value text) returns text
-language sql immutable strict parallel safe set search_path='' as $$select public.unaccent('public.unaccent',value)$$;
+language sql immutable strict parallel safe set search_path='' as $$select extensions.unaccent('extensions.unaccent',value)$$;
 
 create table public.kb_documents(
  id uuid primary key default gen_random_uuid(),
@@ -25,14 +26,14 @@ create table public.kb_chunks(
  chunk_index integer not null check(chunk_index>=0),
  content text not null,
  header text not null,
- embedding vector(1024),
+ embedding extensions.vector(1024),
  embed_model text,
  tsv tsvector generated always as (to_tsvector('simple',pose_private.kb_unaccent(header||' '||content))) stored,
  created_at timestamptz not null default now(),
  unique(document_id,chunk_index),
  check((embedding is null)=(embed_model is null))
 );
-create index kb_chunks_embedding_hnsw on public.kb_chunks using hnsw(embedding vector_cosine_ops) with(m=16,ef_construction=64);
+create index kb_chunks_embedding_hnsw on public.kb_chunks using hnsw(embedding extensions.vector_cosine_ops) with(m=16,ef_construction=64);
 create index kb_chunks_tsv_gin on public.kb_chunks using gin(tsv);
 create index kb_documents_source_updated_idx on public.kb_documents(source_type,source_updated_at);
 
@@ -84,7 +85,7 @@ begin
  perform 1 from public.kb_documents where id=p_document for update;if not found then raise exception 'NOT_FOUND' using errcode='P0002';end if;
  delete from public.kb_chunks where document_id=p_document;
  insert into public.kb_chunks(document_id,chunk_index,header,content,embedding,embed_model)
- select p_document,(v->>'chunk_index')::integer,v->>'header',v->>'content',case when v->'embedding' is null or v->'embedding'='null'::jsonb then null else (v->'embedding')::text::vector end,
+ select p_document,(v->>'chunk_index')::integer,v->>'header',v->>'content',case when v->'embedding' is null or v->'embedding'='null'::jsonb then null else (v->'embedding')::text::extensions.vector end,
    case when v->'embedding' is null or v->'embedding'='null'::jsonb then null else p_embed_model end from jsonb_array_elements(p_chunks)v;
  get diagnostics n=row_count;
  update public.kb_documents set content_hash=p_hash,source_updated_at=p_source_updated_at,updated_at=now() where id=p_document;
@@ -94,7 +95,9 @@ create or replace function public.pose_system_kb_store_chunks(p_document uuid,p_
 create or replace function public.pose_system_kb_remove_chunks(p_document uuid) returns integer language plpgsql security definer set search_path='' as $$declare n integer;begin if auth.role() is distinct from 'service_role' then raise exception 'SYSTEM_REQUIRED' using errcode='42501';end if;delete from public.kb_chunks where document_id=p_document;get diagnostics n=row_count;update public.kb_documents set content_hash=null,updated_at=now() where id=p_document;return n;end$$;
 create or replace function pose_private.kb_query_text(p_query text) returns text language sql immutable as $$select nullif(string_agg(token,' '),'') from regexp_split_to_table(pose_private.kb_unaccent(coalesce(p_query,'')),'\\s+') token where length(token)>1 and token not in ('cÃ³','cÃ³n','cÄƒn','nhÃ ','giÃ¡','lÃ ','vÃ ','á»Ÿ','cho','tÃ´i','báº¡n','muá»‘n','tÃ¬m','khÃ´ng','cÃ³');$$;
 
-create or replace function pose_private.kb_search(p_query text,p_embedding vector(1024),p_embed_model text,p_filters jsonb default '{}',p_context uuid[] default '{}')
+create or replace function pose_private.kb_query_text(p_query text) returns text language sql immutable as $$select nullif(string_agg(token,' '),'') from regexp_split_to_table(pose_private.kb_unaccent(coalesce(p_query,'')),E'\\s+') token where length(token)>1 and token not in ('co','can','nha','gia','la','o','va','khong','cho','toi','minh','nao','bao','nhieu','muon','tim','cua','voi','tu','den','mot','nhung','dang');$$;
+
+create or replace function pose_private.kb_search(p_query text,p_embedding extensions.vector(1024),p_embed_model text,p_filters jsonb default '{}',p_context uuid[] default '{}')
 returns table(chunk_id uuid,document_id uuid,source_id uuid,source_type text,header text,content text,vector_rank bigint,text_rank bigint,similarity double precision,code text,name text,price numeric,availability text,updated_at timestamptz,location text,property_type text,transaction_type text,price_period text)
 language sql stable security definer set search_path='' as $$
 with eligible as(
@@ -107,15 +110,15 @@ with eligible as(
  and (not(p_filters?'minPrice') or d.source_type='Faq' or p.price>=(p_filters->>'minPrice')::numeric)
  and (not(p_filters?'maxPrice') or d.source_type='Faq' or p.price<=(p_filters->>'maxPrice')::numeric)
  and (not(p_filters?'location') or d.source_type='Faq' or strpos(lower(p.location),lower(p_filters->>'location'))>0)
-),v as(select e.id,row_number()over(order by e.embedding<=>p_embedding)r,1-(e.embedding<=>p_embedding)s from eligible e where p_embedding is not null and e.embedding is not null and e.embed_model=p_embed_model order by e.embedding<=>p_embedding limit 20),
+),v as(select e.id,row_number()over(order by e.embedding operator(extensions.<=>) p_embedding)r,1-(e.embedding operator(extensions.<=>) p_embedding)s from eligible e where p_embedding is not null and e.embedding is not null and e.embed_model=p_embed_model order by e.embedding operator(extensions.<=>) p_embedding limit 20),
 t as(select e.id,row_number()over(order by ts_rank_cd(e.tsv,websearch_to_tsquery('simple',pose_private.kb_query_text(p_query)))desc)e_rank from eligible e where pose_private.kb_query_text(p_query) is not null and e.tsv@@websearch_to_tsquery('simple',pose_private.kb_query_text(p_query)) order by ts_rank_cd(e.tsv,websearch_to_tsquery('simple',pose_private.kb_query_text(p_query)))desc limit 20)
 select e.id,e.document_id,e.source_id,e.source_type,e.header,e.content,v.r,t.e_rank,v.s,e.code,e.name,e.price,e.availability,e.updated_at,e.location,e.property_type,e.transaction_type,e.price_period
 from eligible e left join v on v.id=e.id left join t on t.id=e.id where v.id is not null or t.id is not null;
 $$;
-create or replace function public.pose_search_knowledge(p_query text,p_embedding vector(1024) default null,p_embed_model text default null,p_filters jsonb default '{}',p_context uuid[] default '{}')
+create or replace function public.pose_search_knowledge(p_query text,p_embedding extensions.vector(1024) default null,p_embed_model text default null,p_filters jsonb default '{}',p_context uuid[] default '{}')
 returns table(chunk_id uuid,document_id uuid,source_id uuid,source_type text,header text,content text,vector_rank bigint,text_rank bigint,similarity double precision,code text,name text,price numeric,availability text,updated_at timestamptz,location text,property_type text,transaction_type text,price_period text)
 language sql security invoker set search_path='' as $$select * from pose_private.kb_search(p_query,p_embedding,p_embed_model,p_filters,p_context)$$;
-create or replace function public.pose_system_search_knowledge(p_query text,p_embedding vector(1024) default null,p_embed_model text default null,p_filters jsonb default '{}',p_context uuid[] default '{}')
+create or replace function public.pose_system_search_knowledge(p_query text,p_embedding extensions.vector(1024) default null,p_embed_model text default null,p_filters jsonb default '{}',p_context uuid[] default '{}')
 returns table(chunk_id uuid,document_id uuid,source_id uuid,source_type text,header text,content text,vector_rank bigint,text_rank bigint,similarity double precision,code text,name text,price numeric,availability text,updated_at timestamptz,location text,property_type text,transaction_type text,price_period text)
 language sql security invoker set search_path='' as $$select * from pose_private.kb_search(p_query,p_embedding,p_embed_model,p_filters,p_context)$$;
 
