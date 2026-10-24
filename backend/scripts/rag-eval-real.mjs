@@ -1,3 +1,4 @@
+import '../dist/env.js';
 import { readFile } from 'node:fs/promises';
 import { RetrievalService } from '../dist/modules/ai/retrieval.js';
 import { EmbeddingService } from '../dist/modules/ai/embeddings.js';
@@ -29,11 +30,13 @@ const service = process.env.RAG_EVAL_FAKE === '1'
     return { data: rows };
   })
   : new RetrievalService(new EmbeddingService());
+const snapshotIds = new Map(JSON.parse(await readFile(process.env.RAG_SNAPSHOT || 'C:/Users/Admin/POSE-tasks/rag-real-snapshot.json', 'utf8')).map(row => [row.code, row.id]));
+const contextIds = codes => (codes || []).map(code => snapshotIds.get(code)).filter(Boolean);
 async function evaluate() {
   let hit = 0, mrr = 0, truePositive = 0, falsePositive = 0;
   const misses = [];
   for (const item of fixture) {
-    const result = await service.search(item.question, {}, { propertyIds: item.context?.previous_expected_codes || [] });
+    const result = await service.search(item.question, {}, { propertyIds: contextIds(item.context?.previous_expected_codes) });
     const got = result.chunks.slice(0, 5).map(row => ({ code: row.code, similarity: row.similarity, text_rank: row.text_rank }));
     const codes = got.map(row => row.code).filter(Boolean);
     if (item.expected_codes.length) {
