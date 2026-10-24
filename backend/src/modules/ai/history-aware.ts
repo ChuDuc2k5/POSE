@@ -25,7 +25,11 @@ export function listingCodes(text: string) { return [...new Set(text.match(listi
 export function referencedListingCodes(message: string, history: { role: string; content: string }[]) {
   const direct = listingCodes(message);
   if (direct.length) return { codes: direct, ambiguous: false };
-  if (!backReference.test(message) || newSearch.test(message)) return { codes: [] as string[], ambiguous: false };
+  if (newSearch.test(message)) return { codes: [] as string[], ambiguous: false };
+  // Right after one listing was discussed, a question without a new search ("Tiền cọc mấy tháng?",
+  // "Khu này có ngập không?") is about that listing.
+  const last = listingCodes(history[history.length - 1]?.content || '');
+  if (!backReference.test(message)) return last.length === 1 ? { codes: last, ambiguous: false } : { codes: [] as string[], ambiguous: false };
   for (let i = history.length - 1; i >= 0; i--) {
     const codes = listingCodes(history[i]?.content || '');
     if (codes.length) return { codes, ambiguous: codes.length > 1 };
