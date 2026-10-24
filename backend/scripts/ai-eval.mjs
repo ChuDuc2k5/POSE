@@ -77,6 +77,7 @@ const modeFor = item => item.id === 'n05' ? 'favorite' : item.id === 'n06' ? 'ap
 const textOf = body => JSON.stringify(body.reply || body.message || body).toLocaleLowerCase('vi');
 const noDataPhrases = ['chưa có dữ liệu', 'không có dữ liệu', 'chưa được cung cấp', 'không thấy trong dữ liệu', 'chưa có thông tin'];
 const handoffPhrases = ['chuyên viên', 'nhân viên tư vấn', 'liên hệ', 'hỗ trợ thêm', 'tư vấn trực tiếp', 'đặt lịch'];
+noDataPhrases.push('kh\u00f4ng c\u00f3 c\u0103n', 'ch\u01b0a c\u00f3 c\u0103n', 'kh\u00f4ng t\u00ecm th\u1ea5y', 'kh\u00f4ng c\u00f3 th\u00f4ng tin', 'kh\u00f4ng c\u00f3 b\u1ea5t \u0111\u1ed9ng s\u1ea3n');
 function failure(expected, response, rows) {
   const body = response.body || {}, called = rows.flatMap(row => row.tools_called || []), answer = textOf(body);
   if (expected.fallback && response.status !== 503) return `status=${response.status}, expected provider failure`;

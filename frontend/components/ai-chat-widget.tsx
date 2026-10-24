@@ -143,7 +143,9 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
     pending.current=true;setBusy(true);setError('');
     setMessages(list=>[...list,{role:'user',content}]);
     try{
-      const response=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',Accept:'text/event-stream'},signal:controller.signal,body:JSON.stringify({session_id:requestSession,message:content,history:history.current.slice(-10).map(({role,content})=>({role,content})),store_transcript:store,property_id:propertyId || null})});
+      const requestHistory=history.current.slice(-10).map(({role,content,sources})=>({role,content:role==='assistant'&&sources?.length?`${content}\nMÃ£: ${sources.map(source=>source.code).join(', ')}`.slice(0,8000):content}));
+      requestHistory.forEach(turn=>{if(turn.role==='assistant')turn.content=turn.content.replace(/MÃ£:/g,'M\u00e3:');});
+      const response=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',Accept:'text/event-stream'},signal:controller.signal,body:JSON.stringify({session_id:requestSession,message:content,history:requestHistory,store_transcript:store,property_id:propertyId || null})});
       if(epoch!==conversationEpoch.current)return null;
       if(!response.ok)throw new Error((await response.json()).message);
       if(!response.headers.get('content-type')?.includes('text/event-stream')){const result=await response.json();sessionRef.current=result.session.id;setSession(result.session.id);setMessages(list=>[...list,{role:'assistant',content:result.reply,sources:result.sources,related:result.related,action:result.action,options:result.clarify?.needed?result.clarify.options:undefined}]);return result.reply as string;}

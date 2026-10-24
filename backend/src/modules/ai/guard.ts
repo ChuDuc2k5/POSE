@@ -1,5 +1,8 @@
 import { object, propertyTypes } from './extraction.ts';
 import { moneyAmounts } from './money.ts';
+export function sanitizeReply(reply:string) { return reply.replace(/\[n\]/gi,'').replace(/\bDATA\b/g,'dá»¯ liá»‡u').replace(/[ \t]{2,}/g,' ').trim(); }
+export function explicitWriteRequest(text:string) { return /lÆ°u|yÃªu thÃ­ch|Ä‘áº·t lá»‹ch|háº¹n xem|liÃªn há»‡|gá»i láº¡i|gáº·p chuyÃªn viÃªn|nhÃ¢n viÃªn tÆ° váº¥n/i.test(text); }
+export function explicitWriteIntent(text:string) { const normalized=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(); return /luu|yeu thich|dat lich|hen xem|lien he|goi lai|gap chuyen vien|nhan vien tu van/.test(normalized); }
 export { stripPhones } from './privacy.ts';
 import { withFormerDistrict } from './ward-label.js';
 export const GUARD_VERSION='guard.v3';

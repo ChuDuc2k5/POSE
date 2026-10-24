@@ -4,6 +4,14 @@ export type InferredSearch = { location?: string; type?: string; minPrice?: numb
 
 // `\b` does not understand Vietnamese letters, so word edges use Unicode lookarounds.
 const word = (source: string) => new RegExp(`(?<![\\p{L}])(?:${source})(?![\\p{L}])`, 'iu');
+export function inferTransactionType(text: string): 'Sale'|'Rent'|undefined {
+  const normalized=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  if (/(?:thue|trieu\/thang|\/thang|hang thang)/.test(normalized)) return 'Rent';
+  if (/(?:mua|ban)/.test(normalized) || /\d[\d.,\s]*\s*ty\b/.test(normalized)) return 'Sale';
+  if (word('thuÃª|triá»‡u/thÃ¡ng|/thÃ¡ng|hÃ ng thÃ¡ng').test(text)) return 'Rent';
+  if (word('mua|bÃ¡n').test(text) || /\d[\d.,\s]*\s*(?:tá»·|tá»‰)\b/iu.test(text)) return 'Sale';
+  return undefined;
+}
 const types: [RegExp, string][] = [
   [word('biệt thự'), 'Villa'], [word('căn hộ|chung cư|studio|penthouse|duplex'), 'Apartment'], [word('văn phòng'), 'Office'],
   [word('mặt bằng|shophouse|kiot|cửa hàng'), 'Shop'], [word('đất nền|lô đất|đất'), 'Land'], [word('nhà phố|nhà riêng|nhà'), 'House'],
