@@ -161,14 +161,12 @@ const provider=createServer(async(req,res)=>{
    const response=await fetch('http://localhost:1234/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.timeout(60000)});
    const body=await response.json();modelOutputs.push(body.choices?.[0]?.message?.content);return reply(response.status,body);
   }
-   modelCalls++;if(input.response_format?.json_schema?.name==='assistant_turn'){prompt=input;const customerText=String(input.messages?.at(-1)?.content||'');const requestText=JSON.stringify(input);if(/provider.*timeout/i.test(customerText))mode='timeout';else if(/invalid JSON/i.test(customerText))mode='invalid';else if(/empty content/i.test(customerText))mode='empty';else if(/503/i.test(customerText))mode='down';else if(/AI_API_KEY secret/i.test(requestText))mode='secret';}
-   const evalText=JSON.stringify(input);if(/provider.*timeout/i.test(evalText))mode='timeout';else if(/invalid JSON/i.test(evalText))mode='invalid';else if(/empty content/i.test(evalText))mode='empty';else if(/provider.*503/i.test(evalText))mode='down';
+   modelCalls++;if(input.response_format?.json_schema?.name==='assistant_turn'){prompt=input;if(/AI_API_KEY secret/i.test(JSON.stringify(input)))mode='secret';}
    if(mode==='down')return reply(503,{});
   if(mode==='invalid' && modelCalls>1)return reply(503,{});
    if(mode==='timeout'){await delay(6000);return reply(200,{choices:[{message:{content:''}}]});}
    if(mode==='empty')return reply(200,{choices:[{message:{content:''}}]});
    if(input.tools){
-   if(!input.messages.some(m=>m.role==='tool')){const requestText=JSON.stringify(input);if(/ngh.{0,20}l.{0,15}ch xem/i.test(requestText))mode='appointment';else if(/L.{0,20}RV-A0805/i.test(requestText))mode='favorite';else if(/chuy.{0,20}n vi.{0,20}n/i.test(requestText))mode='handoff';}
    if(!prompt)prompt=input;
    check(input.tools.length===6 && input.tools.every(t=>['search_properties','get_property_detail','list_my_appointments','save_favorite','request_handoff','propose_appointment'].includes(t.function.name)),'Native six-tool schema');
    check(input.max_tokens===600 && input.messages[0].content.length<800,'Bounded generation and compact prompt/schema');
@@ -187,15 +185,22 @@ const provider=createServer(async(req,res)=>{
     if(/chuy[^\n]{0,20}n vi[^\n]{0,20}n/i.test(dataText)&&!hasToolResult){const message={role:'assistant',tool_calls:[{id:'handoff',type:'function',function:{name:'request_handoff',arguments:JSON.stringify({summary:'Khach hang de nghi chuyen vien lien he'})}}]};return reply(200,{choices:[{message}]});}
    if(hasToolResult&&dataText.includes('requires_sign_in')){const message={role:'assistant',content:'Vui lòng đăng nhập hoặc dùng biểu mẫu tư vấn để tiếp tục.'};return reply(200,{choices:[{message}]});}
    if(mode==='extract'){const message={role:'assistant',content:'Tôi sẽ ghi nhận nhu cầu bạn vừa nêu.'};return reply(200,{choices:[{message}]});}
-   if(/xin ch/i.test(dataText)){const message={role:'assistant',content:'Xin chào! Tôi có thể hỗ trợ thông tin bất động sản công bố của TERAVA.'};return reply(200,{choices:[{message}]});}
+   if(/xin ch|cảm ơn|cám ơn/i.test(dataText)){const message={role:'assistant',content:'Xin chào! Tôi có thể hỗ trợ thông tin bất động sản công bố của TERAVA.'};return reply(200,{choices:[{message}]});}
    if(['secret','commitment','unknown-code'].includes(mode)){modelData.push({regeneration,violations:[mode]});const content='SUPABASE_SECRET_KEY: do-not-leak';return reply(200,{choices:[{message:{role:'assistant',content}}]});}
     if(mode==='changed' && !regeneration)properties[0].availability='Sold';
     const nativeMessage=redacted ? {role:'assistant',content:'Vui lòng đăng nhập hoặc dùng biểu mẫu tư vấn để chia sẻ thông tin liên hệ.'} : mode==='regenerate' ? {role:'assistant',content:regeneration?'Tôi chưa có đủ thông tin để xác nhận giá này.':'P-1 có giá 9 tỷ, đang mở bán.'} : mode==='rooms' ? {role:'assistant',content:regeneration?'Tôi chưa có thông tin xác nhận số phòng ngủ của sản phẩm.':'P-1 là căn hộ 2 phòng ngủ đang bán.'} : hasToolResult ? {role:'assistant',content:input.messages.filter(m=>m.role==='tool').map(m=>{try{return JSON.parse(m.content).join('\n')}catch{return String(m.content)}}).join('\n')} : {role:'assistant',tool_calls:[{id:'native-1',type:'function',function:{name:mode==='handoff'?'request_handoff':'search_properties',arguments:JSON.stringify(mode==='handoff'?{summary:'Khách đề nghị chuyên viên liên hệ'}:{query:'Q7',filters:{}})}}]};
    if(mode==='regenerate'||mode==='rooms')modelData.push({regeneration,violations:[mode==='rooms'?'UNSUPPORTED_ROOM_COUNT':'UNSUPPORTED_PRICE'],correction:regeneration?'Số phòng ngủ / giá chưa được xác nhận':''});
-    if(input.stream){res.writeHead(200,{'Content-Type':'text/event-stream'});const text=nativeMessage.content||'';if(text)for(const part of text.match(/.{1,18}/g)||[])res.write(`data: ${JSON.stringify({choices:[{delta:{content:part}}]})}\n\n`);res.write(`data: ${JSON.stringify({choices:[],usage:{prompt_tokens:11,completion_tokens:7,total_tokens:18}})}\n\n`);res.write('data: [DONE]\n\n');return res.end();}
+    if(input.stream){res.writeHead(200,{'Content-Type':'text/event-stream'});const text=nativeMessage.content||'';if(text)for(const part of text.match(/.{1,18}/g)||[])res.write(`data: ${JSON.stringify({choices:[{delta:{content:part}}]})}\n\n`);for(const [index,call] of (nativeMessage.tool_calls||[]).entries())res.write(`data: ${JSON.stringify({choices:[{delta:{tool_calls:[{index,id:call.id,type:'function',function:{name:call.function.name,arguments:call.function.arguments}}]}}]})}
+
+`);res.write(`data: ${JSON.stringify({choices:[],usage:{prompt_tokens:11,completion_tokens:7,total_tokens:18}})}\n\n`);res.write('data: [DONE]\n\n');return res.end();}
    modelOutputs.push({...nativeMessage,reply:nativeMessage.content||''}); return reply(200,{choices:[{message:nativeMessage}]});
   }
-  if(input.response_format?.json_schema?.name==='search_query') return reply(200,{choices:[{message:{content:JSON.stringify({standalone_question:input.messages.at(-1)?.content||'câu hỏi',filters:{transaction_type:null,property_type:null,location:null,min_price_vnd:null,max_price_vnd:null,bedrooms:null},refers_to_previous:[]})}}]});
+  if(input.response_format?.json_schema?.name==='search_query'){
+   // Simulated query model: classifies the topic the way the real query step is asked to.
+   const text=String(input.messages.at(-1)?.content||''),propertyWords=/căn|nhà|đất|phòng|giá|thuê|mua|dự án|chuyên viên|lịch xem|yêu thích|RV-|Qd/i;
+   const topic=!propertyWords.test(text)&&/code|python|bầu cử|đau đầu|thuốc|bài tập|dịch đoạn|chứng khoán|customers|khách hàng khác/i.test(text)?'out_of_scope':/^(xin chào|chào|cảm ơn|cám ơn)/i.test(text.trim())?'smalltalk':'real_estate';
+   return reply(200,{choices:[{message:{content:JSON.stringify({topic,standalone_question:text||'câu hỏi',keywords:[],filters:{transaction_type:null,property_type:null,location:null,min_price_vnd:null,max_price_vnd:null,bedrooms:null},refers_to_previous:[]})}}]});
+  }
    if(input.response_format?.json_schema?.name==='answer_meta') return reply(200,{choices:[{message:{content:JSON.stringify({grounding:'grounded',cited:[],claims:[]})}}]});
    if(input.response_format?.json_schema?.name==='needs_v1' && mode==='rooms') return reply(200,{choices:[{message:{content:JSON.stringify({needs:[{field:'timeline',value:'3to6m',evidence:'2 tháng tới'}]})}}]});
    if(input.response_format?.json_schema?.name==='needs_v1' && mode!=='invalid-needs') return reply(200,{choices:[{message:{content:JSON.stringify({needs:[{field:'budget_max_vnd',value:3000000000,evidence:'3 tỷ'},{field:'locations',value:['Hồ Chí Minh'],evidence:'Hồ Chí Minh'},{field:'property_types',value:['Apartment'],evidence:'căn hộ'},{field:'timeline',value:'lt3m',evidence:'tháng tới'},{field:'purchase_intent',value:true,evidence:'Tôi mua'},{field:'contact_ready',value:true,evidence:'sẵn sàng'},{field:'next_step',value:'appointment',evidence:'đề nghị hẹn'}]})}}]});
@@ -268,7 +273,7 @@ const provider=createServer(async(req,res)=>{
   s.property_ids=[...new Set([...s.property_ids || [],...input.p_sources.map(p=>p.id)])];
   s.message_count+=2;sessions.set(s.id,s);return reply(200,{id:s.id,message_count:s.message_count,store_transcript:s.store_transcript});
  }
- if(url.pathname.endsWith('/pose_system_log_ai_request')){lastRequestSessionId=input.p_session_id;requestLogs.push({...input});return reply(200,randomUUID());}
+ if(url.pathname.endsWith('/pose_system_log_ai_request')){lastRequestSessionId=input.p_session_id;requestLogs.push({...input,session_id:input.p_session_id,kind:input.p_kind,tools_called:input.p_tools_called||[],prompt_version:input.p_prompt_version,total_tokens:input.p_total_tokens,status:input.p_status});return reply(200,randomUUID());}
  if(url.pathname==='/fixture/ai-request-logs')return reply(200,requestLogs);
  if(url.pathname.endsWith('/pose_system_admin_ai_usage')){if(role!=='Admin')return error('42501','FORBIDDEN',403);const grouped=new Map();for(const row of requestLogs){const key=`${new Date().toISOString().slice(0,10)}:${row.p_model}`;const current=grouped.get(key)||{day:new Date().toISOString().slice(0,10),model:row.p_model,requests:0,total_tokens:0,p50_latency_ms:row.p_latency_ms,p95_latency_ms:row.p_latency_ms,fallback_rate:row.p_status==='fallback'?1:0,estimated_cost:0};current.requests++;current.total_tokens+=row.p_total_tokens||0;grouped.set(key,current);}return reply(200,[...grouped.values()]);}
  if(url.pathname.endsWith('/pose_ai_request_handoff')){

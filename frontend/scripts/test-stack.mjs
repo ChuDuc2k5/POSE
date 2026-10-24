@@ -19,8 +19,9 @@ export async function startStack(port, providerEnv, options = {}) {
   const env = { ...process.env, REDIS_PORT: '6399', NEXT_PUBLIC_API_URL: `http://127.0.0.1:${backendPort}`, ...providerEnv, FRONTEND_URL: `http://localhost:${port}`, BACKEND_URL: `http://127.0.0.1:${backendPort}`, BACKEND_PORT: String(backendPort), NODE_ENV: 'production' };
   let api, app;
   try {
+    // The backend is always rebuilt: a stale dist/ silently tests old code.
+    await run(backend, ['node_modules/@nestjs/cli/bin/nest.js', 'build'], env);
     if (options.build !== false) {
-      await run(backend, ['node_modules/@nestjs/cli/bin/nest.js', 'build'], env);
       await run(frontend, ['node_modules/next/dist/bin/next', 'build'], { ...env, BACKEND_URL: options.buildBackendUrl ?? env.BACKEND_URL });
     }
     api = spawn(process.execPath, ['dist/main.js'], { cwd: backend, env, windowsHide: true, stdio: ['ignore','pipe','pipe'] });

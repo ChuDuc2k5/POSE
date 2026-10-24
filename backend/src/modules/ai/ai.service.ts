@@ -10,7 +10,7 @@ import { uuidPattern } from '../../common/catalog.js';
 import { object } from './extraction.js';
 import { inferSearch } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
-import { correctionData, disclosure, GUARD_VERSION, safeReply, isOutOfScope, outOfScopeReply, type Evidence } from './guard.js';
+import { correctionData, disclosure, GUARD_VERSION, safeReply, isOutOfScope, scopeFromTopic, outOfScopeReply, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
@@ -111,28 +111,36 @@ export class AiService {
     // inference is deliberately only the fallback (or the no-history fast path).
     let standalone=source, queryKeywords:string[]=[], queryFilters:Record<string,unknown>=inferred || {};
     const realEstateIntent=Object.keys(queryFilters).length>0 || /căn|nhà|đất|phòng|giá|thuê|mua|bất động sản|Q\d|RV-/i.test(source);
-    // Refuse before retrieval and before constructing an agent with tools.
     const propertyHistory=history.some(turn=>realEstateWordsForHistory(turn.content)) || interestIds.length>0;
-    if (isOutOfScope(source, realEstateIntent || input.property_id ? 'real_estate' : 'unknown', propertyHistory)) {
-      const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:false,p_message:source,p_reply:outOfScopeReply,p_sources:[],p_actions:[],p_fields:{},p_score:null});
-      if(committed.error)return catalogDatabaseError(committed.error);
-      return catalogJson({session:committed.data,reply:outOfScopeReply,scope:'out_of_scope',sources:[],related:[],blocked:false,proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
-    }
     let referenceIds:string[]=[];
-    if(realEstateIntent && !(history.length===0 && Object.keys(queryFilters).length)) {
+    // Scope: the validated query step's `topic` decides; the keyword guard is only the
+    // fallback when that step is skipped (explicit property request) or fails.
+    let outOfScope=isOutOfScope(source, realEstateIntent || input.property_id ? 'real_estate' : 'unknown', propertyHistory);
+    let modelTopic:'real_estate'|'smalltalk'|'out_of_scope'|null=null;
+    if(!input.property_id && !(history.length===0 && Object.keys(queryFilters).length)) {
       try {
         const query=await querySearch(source, sanitizedHistory as never[]);
+        modelTopic=query.topic;
+        outOfScope=scopeFromTopic(query.topic, source, propertyHistory);
+        if(query.topic!=='real_estate')throw new Error('NOT_A_PROPERTY_QUERY');
         standalone=query.standalone_question;
         queryKeywords=query.keywords;
         const qf=Object.fromEntries(Object.entries(query.filters).filter(([,v])=>v!==null));
         queryFilters={location:qf.location,type:qf.property_type,minPrice:qf.min_price_vnd,maxPrice:qf.max_price_vnd,transaction_type:qf.transaction_type,bedrooms:qf.bedrooms};
         queryFilters=Object.fromEntries(Object.entries(queryFilters).filter(([,v])=>v!==null&&v!==undefined));
         referenceIds=query.refers_to_previous.map(index=>interestIds[index-1]).filter((value):value is string=>typeof value==='string');
-      } catch { log('query_step',source,'invalid_query','flagged'); }
+      } catch(error) { if(!(error instanceof Error && error.message==='NOT_A_PROPERTY_QUERY'))log('query_step',source,'invalid_query','flagged'); }
+    }
+    // Refuse before retrieval and before constructing an agent with tools.
+    if(outOfScope) {
+      log('scope',source,'OUT_OF_SCOPE','flagged');
+      const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:false,p_message:source,p_reply:outOfScopeReply,p_sources:[],p_actions:actions,p_fields:{},p_score:null});
+      if(committed.error)return catalogDatabaseError(committed.error);
+      return catalogJson({session:committed.data,reply:outOfScopeReply,scope:'out_of_scope',sources:[],related:[],blocked:false,proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
     }
     const pureReference=referenceIds.length>0 && Object.keys(queryFilters).length===0 && /\b(?:căn|can|nhà|nha|lô|lo|khu|kết quả|ket qua|đó|do|vừa|vua|thứ|thu|nào|nao|tiếp|tiep|trước|truoc|nêu|neu)\b/i.test(source);
     if(pureReference) { items=await retrieveIds(referenceIds); searchPerformed=false; }
-    else if(realEstateIntent && !searchPerformed) { items=await search(queryFilters,null,referenceIds,[standalone,...queryKeywords].join(' ')); searchPerformed=true; }
+    else if((realEstateIntent || modelTopic==='real_estate') && !searchPerformed) { items=await search(queryFilters,null,referenceIds,[standalone,...queryKeywords].join(' ')); searchPerformed=true; }
     const extracted:Record<string,unknown>={};
     const contextBlocks=items.map((item,index)=>`[${item.number || index+1}] ${item.code || ''} ${item.name || ''} ${item.location || ''} price=${item.price ?? 'unknown'} availability=${item.availability || 'unknown'}`).join('\n');
     const agentMessages=[{role:'system' as const,content:SYSTEM_PROMPT},{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({question:standalone,history:sanitizedHistory,properties:contextBlocks,customer_text:source,contact_redacted:guest && source!==input.message,injection_suspected:suspected,search_performed:searchPerformed})}\nEND_UNTRUSTED_DATA`}];
@@ -157,6 +165,11 @@ export class AiService {
     const step=streamRequested ? ((messages:Parameters<typeof streamAgentStep>[0])=>streamAgentStep(messages,text=>streamedDeltas.push(text))) as never : undefined;
     const run=async(messages:typeof agentMessages)=>runAgent(messages as never,execute,createPending,undefined,step);
     let agent=await run(agentMessages);
+    // An empty model answer is a provider failure: retry once, then fail the turn with AI_UNAVAILABLE.
+    if(!agent.text.trim() && !agent.pending.length && !agent.blocked.length){
+      agent=await run(agentMessages);
+      if(!agent.text.trim() && !agent.pending.length && !agent.blocked.length)throw new Error('AI_EMPTY_RESPONSE');
+    }
     for(const blockedReason of agent.blocked) log('agent',blockedReason,blockedReason,'flagged');
     let result={reply:agent.text || 'Hiện tôi chưa đủ dữ liệu để trả lời chính xác.',tool_calls:[] as unknown[],needs:{},flags:[] as never[]};
     result.reply=agent.text || result.reply;

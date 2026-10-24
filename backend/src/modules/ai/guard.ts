@@ -5,12 +5,17 @@ export const GUARD_VERSION='guard.v3';
 export const safeReply='Tôi chưa thể xác nhận câu trả lời an toàn từ dữ liệu hiện có. Bạn có thể yêu cầu chuyên viên tư vấn hỗ trợ.';
 export const disclosure='Tôi là trợ lý AI của TERAVA.';
 const realEstateWords=/căn|nhà|đất|phòng|giá|thuê|mua|bất động sản|dự án|khu vực|diện tích|chuyên viên|lịch xem|yêu thích|Q\d|RV-/i;
-const explicitOutOfScope=/\b(?:code|python|programming|lập trình|bài tập|học toán|math|chính trị|bầu cử|election|y tế|bác sĩ|đau đầu|thuốc|medicine|medical|chẩn đoán|luật hình sự|homework|dịch|translate|translation|đầu tư|investment|chứng khoán|stocks|customers?|leads?|politics)\b/i;
+// Fallback only: the validated query step (`topic`) decides scope. This list is used when
+// that step is unavailable. JS \b is ASCII-only, so Unicode letter lookarounds delimit words.
+const explicitOutOfScope=/(?<!\p{L})(?:code|python|lập trình|bài tập|giải toán|chính trị|bầu cử|bác sĩ|đau đầu|uống thuốc|chẩn đoán|homework|dịch sang|chứng khoán|tiền ảo|bitcoin)(?!\p{L})/iu;
 export function isOutOfScope(text:string, intent:'real_estate'|'other'|'unknown'='unknown', hasPropertyHistory=false) {
-  // The model owns intent classification. This deterministic guard only blocks an
-  // explicit non-property topic when neither the turn nor the session supplies a
-  // property signal; greetings, thanks, and contextual follow-ups stay in-chat.
+  // Blocks an explicit non-property topic only when neither the turn nor the session
+  // supplies a property signal; greetings, thanks, and contextual follow-ups stay in-chat.
   return explicitOutOfScope.test(text) && intent!=='real_estate' && !realEstateWords.test(text) && !hasPropertyHistory;
+}
+export function scopeFromTopic(topic:'real_estate'|'smalltalk'|'out_of_scope', text:string, hasPropertyHistory:boolean) {
+  // A model "out_of_scope" never overrides a clear property request or a property conversation.
+  return topic==='out_of_scope' && !realEstateWords.test(text) && !hasPropertyHistory;
 }
 export const outOfScopeReply='Tôi chỉ hỗ trợ tìm hiểu bất động sản TERAVA, xem thông tin căn hộ/dự án và kết nối chuyên viên. Bạn có thể hỏi về giá, khu vực, loại hình hoặc lịch xem nhà.';
 export function correctionData(reason:string){

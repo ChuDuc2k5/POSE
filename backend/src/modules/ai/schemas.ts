@@ -10,6 +10,7 @@ export const SearchFiltersSchema = z.object({
 }).refine(v => v.min_price_vnd === null || v.max_price_vnd === null || v.min_price_vnd <= v.max_price_vnd, 'min_price_vnd must not exceed max_price_vnd');
 
 export const SearchQuerySchema = z.object({
+  topic: z.enum(['real_estate', 'smalltalk', 'out_of_scope']),
   standalone_question: z.string().trim().min(1).max(2000),
   keywords: z.array(z.string().trim().min(1).max(80)).max(8).default([]),
   filters: SearchFiltersSchema,
