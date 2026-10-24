@@ -13,8 +13,6 @@ export default async function AiChatPageRoute() {
   const role = session?.role ?? null;
   return <>
     <SiteHeader role={role} />
-    <main className="ai-page-main">
-      <AiChatPage ownerKey={session?.user.id ?? 'guest'} signedIn={role === 'User'} />
-    </main>
+    <AiChatPage ownerKey={session?.user.id ?? 'guest'} signedIn={role === 'User'} />
   </>;
 }
