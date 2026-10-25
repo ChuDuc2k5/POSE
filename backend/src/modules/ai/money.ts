@@ -35,3 +35,15 @@ export function moneyAmounts(text: string): number[] {
   }
   return amounts;
 }
+
+/** "4,1 tỷ đồng", "10 triệu đồng/tháng": the model copies this instead of re-formatting raw numbers (it wrote "4.100 tỷ"). */
+export function priceLabel(price: number | null | undefined, monthly = false) {
+  if (price === null || price === undefined) return 'chưa công bố';
+  // At most two decimals, because moneyAmounts reads "4,125" as a thousands group.
+  const short = (value: number) => String(value).replace('.', ',');
+  const text = price >= 1e9 && price % 1e7 === 0 ? `${short(price / 1e9)} tỷ đồng`
+    : price >= 1e9 && price % 1e6 === 0 ? `${Math.floor(price / 1e9)} tỷ ${(price % 1e9) / 1e6} triệu đồng`
+    : price >= 1e6 && price < 1e9 && price % 1e4 === 0 ? `${short(price / 1e6)} triệu đồng`
+    : `${Number(price).toLocaleString('vi-VN')} đồng`;
+  return monthly ? `${text}/tháng` : text;
+}
