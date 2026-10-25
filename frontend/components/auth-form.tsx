@@ -31,7 +31,7 @@ export function AuthForm({ mode, verificationFailed = false, oauthError = '', ne
       if (!response.ok) { setError(data.message); return; }
       if (signup) { setNotice(data.message); setRegistered(true); setPassword(''); }
       else {
-        const continueInquiry = data.destination === '/customer' && new URLSearchParams(window.location.search).get('next') === '/customer/inquiries/new' && readInquiryDraft();
+        const continueInquiry = data.destination === '/' && new URLSearchParams(window.location.search).get('next') === '/customer/inquiries/new' && readInquiryDraft();
         const safeNext=next&&next.startsWith('/')&&!next.startsWith('//')?next:undefined;
         router.replace(continueInquiry ? '/customer/inquiries/new' : safeNext || data.destination || '/');
         router.refresh();

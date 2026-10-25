@@ -5,7 +5,7 @@ export const roleLabels: Record<Role, string> = {
 };
 
 export function roleHome(role: Role) {
-  return role === 'Admin' ? '/admin' : role === 'Sales' ? '/sales' : '/customer';
+  return role === 'Admin' ? '/admin' : role === 'Sales' ? '/sales' : '/';
 }
 
 // Every role starts on the shared homepage after signing in; the account menu

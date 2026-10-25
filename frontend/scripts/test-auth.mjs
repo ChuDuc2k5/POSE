@@ -129,9 +129,12 @@ try {
       check(!(await response.text()).includes('Thông tin rõ ràng.'), 'Signed-in guest entry must not render landing content');
     }
   };
-  check((await protectedPage('/')).status === 200 && (await (await protectedPage('/')).text()).includes('account-trigger'), 'Signed-in landing stays public and shows account navigation');
+  const signedInLanding = await protectedPage('/');
+  const signedInLandingHtml = await signedInLanding.text();
+  check(signedInLanding.status === 200 && signedInLandingHtml.includes('account-trigger'), 'Signed-in landing stays public and shows account navigation');
+  check(!signedInLandingHtml.includes('href="/customer"'), 'Customer account navigation has no removed customer-home link');
   await checkGuestEntryRedirects('/');
-  for (const path of ['/customer','/customer/favorites','/customer/inquiries','/customer/inquiries/new','/properties']) {
+  for (const path of ['/customer/favorites','/customer/inquiries','/customer/inquiries/new','/properties']) {
     const header = (await (await protectedPage(path)).text()).match(/<header\b[\s\S]*?<\/header>/)?.[0] || '';
     check(header.includes('Hồ sơ cá nhân') && header.includes('Đăng xuất') && !header.includes('href="/sign-in"') && !header.includes('href="/sign-up"'), `First HTML of ${path} already contains the signed-in header`);
   }
@@ -146,7 +149,8 @@ try {
   check((await fetch(`${origin}/auth/refresh?next=${encodeURIComponent(catalogNext)}`, { headers: {Cookie:'pose-refresh=expired'}, redirect:'manual' })).headers.get('location') === `${origin}${catalogNext}`, 'Invalid catalog refresh returns to the public page without a loop');
   check((await fetch(`${origin}/auth/refresh?next=${encodeURIComponent('/properties/../../evil')}`, { headers: refreshOnly, redirect:'manual' })).headers.get('location') === `${origin}/`, 'Catalog refresh rejects path traversal');
   check((await fetch(`${origin}/customer`, { redirect: 'manual' })).headers.get('location')?.endsWith('/sign-in'), 'Customer homepage requires login');
-  check((await protectedPage('/customer')).status === 200, 'Customer can open their homepage');
+  const customerHomeRedirect = await protectedPage('/customer');
+  check(customerHomeRedirect.status === 307 && customerHomeRedirect.headers.get('location')?.endsWith('/'), 'Customer route redirects to the shared homepage');
   check((await (await post('session', { access_token: 'fixture-access', refresh_token: 'fixture-refresh' })).json()).destination === '/', 'Email session callback opens the homepage');
   const verified = await fetch(`${origin}/auth/confirm?token_hash=valid-once&type=email`, { redirect: 'manual' });
   check(verified.headers.get('location') === `${origin}/`, 'Verified email opens the homepage');

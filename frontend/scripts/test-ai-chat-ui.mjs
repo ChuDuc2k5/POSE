@@ -99,7 +99,7 @@ try{
   await evaluate("document.querySelector('.ai-property-actions button[aria-pressed=\"true\"]').click()");await wait("favoriteRequests.filter(request=>request.method==='DELETE').length===1");check(await evaluate("document.querySelector('.ai-property-actions button[aria-pressed=\"true\"]')===null"),'second AI card favorite click uses DELETE');
    await evaluate("window.failFavoritePut=true;document.querySelector('.ai-favorite-control button').click()");await wait("!!document.querySelector('.favorite-error')");check(await evaluate("document.querySelector('.ai-favorite-control button[aria-pressed=\"true\"]')===null"),'failed AI card favorite PUT rolls back');await evaluate('window.failFavoritePut=false');
  await evaluate("Array.from(document.querySelectorAll('button')).find(e=>e.textContent.trim()==='Gặp chuyên viên').click()");
- await evaluate("document.querySelector('a[href=\"/customer\"]').click()");await wait("location.pathname==='/customer' && !!document.querySelector('.ai-handoff')");
+ await evaluate("document.querySelector('a[href=\"/\"]').click()");await wait("location.pathname==='/' && !!document.querySelector('.ai-handoff')");
  check(await evaluate("document.querySelectorAll('.ai-row').length===2"),'customer home shares conversation and handoff state');
  await evaluate("document.querySelector('a[href^=\"/properties/\"]').click()");await wait("location.pathname.startsWith('/properties/') && !!document.querySelector('.ai-handoff')");
  check(true,'handoff form stays open on client navigation');

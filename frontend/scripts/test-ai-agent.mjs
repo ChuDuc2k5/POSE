@@ -392,7 +392,7 @@ try{
  check((await call('/api/ai/chat',{...base,message:'x'.repeat(2001)})).status===400,'Length limit');
  check((await call('/api/ai/chat',{...base,history:Array(11).fill({role:'user',content:'test'})})).status===400,'History limit');
  check((await call('/api/ai/chat',{...base,user_id:otherId})).status===400,'Identity spoofing denied');
- for(const [path,cookie,expected] of [['/properties','','AiChatPage'],[`/properties/${properties[0].id}`,'','AiChatPage'],['/customer','pose-access=fixture-User','AiChatPage'],['/sales','pose-access=fixture-Sales','Bàn giao từ trợ lý AI'],['/admin','pose-access=fixture-Admin','AI Agent']]){
+ for(const [path,cookie,expected] of [['/properties','','AiChatPage'],[`/properties/${properties[0].id}`,'','AiChatPage'],['/','pose-access=fixture-User','AiChatPage'],['/sales','pose-access=fixture-Sales','Bàn giao từ trợ lý AI'],['/admin','pose-access=fixture-Admin','AI Agent']]){
   const page=await call(path,null,cookie);check(page.ok && (await page.text()).includes(expected),`UI mounted on ${path}`);
  }
  const ragBeforeNormal=ragCalls,catalogBeforeNormal=catalogSearchReads;

@@ -131,7 +131,7 @@ try{
     currentRole=role;
     for(const path of ['/properties',`/properties/${firstId}`]){
       const header=(await (await call(path)).text()).match(/<header\b[\s\S]*?<\/header>/)?.[0] || '';
-      const destination=role==='Admin' ? '/admin':role==='Sales' ? '/sales':'/customer';
+      const destination=role==='Admin' ? '/admin':role==='Sales' ? '/sales':'/';
       check(header.includes('Hồ sơ cá nhân') && header.includes('Đăng xuất') && header.includes(`href="${destination}"`) && !header.includes('href="/sign-in"') && !header.includes('href="/sign-up"'),`${role} public page ${path} has correct navigation in first HTML`);
     }
   }
