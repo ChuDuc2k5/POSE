@@ -131,7 +131,7 @@ const users={User:userId,Other:otherId,Sales:'f6000000-0000-4000-8000-0000000000
 const directory={Sales:'f6500000-0000-4000-8000-000000000003',Admin:'f6500000-0000-4000-8000-000000000004'};
 let mode='ok',modelCalls=0,prompt,providerOffline=false,verifiedPhone=false,searchReads=0,catalogSearchReads=0,ragCalls=0,rerankNoAnswer=false;
 const modelData=[],modelOutputs=[];
-const sessions=new Map(),messages=[],logs=[],requestLogs=[],tasks=new Map(),appointments=new Map(),leads=new Map(),customers=new Map(),preferences=new Map(),assignments=[];let lastRequestSessionId=null,unsafeSessionId=null,unsafePending=false;
+const sessions=new Map(),messages=[],logs=[],requestLogs=[],tasks=new Map(),appointments=new Map(),leads=new Map(),customers=new Map(),preferences=new Map(),assignments=[],bookingRows=[];let lastRequestSessionId=null,unsafeSessionId=null,unsafePending=false;
 const customerFor=uid=>uid ? [...customers.values()].find(c=>c.auth_user_id===uid):undefined;
 const leadFor=uid=>[...leads.values()].find(l=>l.customer_id===customerFor(uid)?.id && !l.archived && !['CONVERTED','LOST'].includes(l.status));
 const assigned=(lead,sales)=>assignments.some(a=>a.lead_id===lead && a.sales_id===sales && a.is_active);
@@ -344,6 +344,20 @@ const provider=createServer(async(req,res)=>{
   check(url.searchParams.get('select').includes('lead_score,temperature') && url.searchParams.get('select').includes('customers(full_name)'),'Workspace queries legacy score and customer name');
   return reply(200,['Admin','Sales'].includes(role) ? [...tasks.values()].filter(t=>role==='Admin' || t.assignee_id===null || t.assignee_id===directory.Sales).map(t=>({...t,leads:role==='Admin' || assigned(t.lead_id,directory.Sales) ? {...leads.get(t.lead_id),customers:{full_name:customers.get(leads.get(t.lead_id).customer_id).full_name}}:null})):[]);
  }
+ if(url.pathname.endsWith('/pose_ai_appointment_options')){
+  if(!uid||role!=='User')return error('42501','UNAUTHORIZED',401);
+  const busyStart=input.p_start&&Date.parse(input.p_start);return reply(200,{property:{id:input.p_property,code:'P-1',name:'CÄƒn há»™ Ä‘áº·t lá»‹ch',location:'Há»“ ChÃ­ Minh'},sales:[{id:'f6000000-0000-4000-8000-000000000003',full_name:'ChuyÃªn viÃªn Ä‘Æ°á»£c gÃ¡n',reason:'Phá»¥ trÃ¡ch cÄƒn nÃ y',recommended:true},...(busyStart?[{id:'f6000000-0000-4000-8000-000000000004',full_name:'ChuyÃªn viÃªn trá»‘ng',reason:'Lá»‹ch trá»‘ng nhiá»u nháº¥t tuáº§n nÃ y',recommended:false}]:[])]});
+ }
+ if(url.pathname.endsWith('/pose_ai_create_appointment')){
+  if(!uid||role!=='User')return error('42501','UNAUTHORIZED',401);
+  if(!verifiedPhone||who!=='User')return error('22023','PHONE_VERIFICATION_REQUIRED',409);
+  const existing=bookingRows.find(row=>row.key===input.p_request_key);if(existing)return reply(200,existing.result);
+  const result={appointment_id:randomUUID(),start:input.p_start,sales_name:'ChuyÃªn viÃªn Ä‘Æ°á»£c gÃ¡n'};bookingRows.push({key:input.p_request_key,result});return reply(200,result);
+ }
+ if(url.pathname.endsWith('/pose_ai_delete_session')){
+  if(!uid||role!=='User')return error('42501','UNAUTHORIZED',401);
+  const s=sessions.get(input.p_session);if(!s||s.user_id!==uid)return error('P0002','SESSION_NOT_FOUND',404);sessions.delete(input.p_session);for(let i=messages.length-1;i>=0;i--)if(messages[i].session_id===input.p_session)messages.splice(i,1);return reply(200,true);
+ }
  return reply(404,{});
 });
 await new Promise(resolve=>provider.listen(3301,'127.0.0.1',resolve));
@@ -438,11 +452,20 @@ mode='search';const search=await (await call('/api/ai/chat',base)).json();check(
  check((await call('/api/ai/handoff',{session_id:chat.session.id,summary:'Xin tư vấn',request_key:randomUUID()})).status===401,'Guest cannot handoff');
  const signed=await (await call('/api/ai/chat',{...base,store_transcript:true},'pose-access=fixture-User')).json();
  const ownSessions=await call('/api/ai/sessions?page=1',null,'pose-access=fixture-User');const ownSessionBody=await ownSessions.json();check(ownSessions.status===200&&ownSessionBody.items?.every(s=>s.id===signed.session.id),'Signed-in session list is owner-scoped');check(ownSessionBody.items?.every(s=>!String(s.title).match(/0901234567|@/)),'Session-list titles are masked');check((await call('/api/ai/sessions?page=1',null,'pose-access=fixture-Other')).status===200&&!(await (await call('/api/ai/sessions?page=1',null,'pose-access=fixture-Other')).json()).items?.some(s=>s.id===signed.session.id),'Another user session is never listed');check((await call('/api/ai/sessions')).status===401,'Guest session list is rejected');
+ check((await call('/api/ai/appointments/options?property_id='+properties[0].id)).status===401,'Guest appointment options rejected');
+ check((await call('/api/ai/appointments/options?property_id='+properties[0].id,null,'pose-access=fixture-User')).status===200,'Signed-in appointment options happy path');
+ const bookingRequest={property_id:properties[0].id,start:'2027-01-15T02:00:00.000Z',sales_id:users.Sales,request_key:randomUUID()};
+ check((await call('/api/ai/appointments',bookingRequest,'pose-access=fixture-User','POST','https://evil.test')).status===403,'Wrong Origin blocks appointment POST');
+ check((await call(`/api/ai/sessions/${signed.session.id}`,null,'pose-access=fixture-User','DELETE','https://evil.test')).status===403,'Wrong Origin blocks session DELETE');
  check((await call(`/api/ai/sessions/${signed.session.id}`,null,'pose-access=fixture-Other')).status===404,'Another user denied');
  const handoff={session_id:signed.session.id,summary:'Xin chuyên viên tư vấn',request_key:randomUUID(),preferred_start:'2027-01-15T02:00:00Z',preferred_end:'2027-01-15T03:00:00Z'};
  const unverified=await call('/api/ai/handoff',handoff,'pose-access=fixture-User');
  check(unverified.status===400 && (await unverified.json()).code==='PHONE_VERIFICATION_REQUIRED' && customers.size===0 && leads.size===0 && tasks.size===0,'Unverified account gets verification/form guidance with no writes');
  verifiedPhone=true;
+ const phoneError=await call('/api/ai/appointments',bookingRequest,'pose-access=fixture-User');const phoneErrorBody=await phoneError.json();check(phoneError.status===200&&phoneErrorBody.appointment_id,'Appointment create happy path');
+ const replayBooking=await call('/api/ai/appointments',bookingRequest,'pose-access=fixture-User');check(replayBooking.status===200&&(await replayBooking.json()).appointment_id===phoneErrorBody.appointment_id&&bookingRows.length===1,'Appointment request_key is idempotent');
+ const unverifiedBooking=await call('/api/ai/appointments',bookingRequest,'pose-access=fixture-Other');const unverifiedBookingBody=await unverifiedBooking.json();check(unverifiedBooking.status===409&&unverifiedBookingBody.code==='PHONE_VERIFICATION_REQUIRED'&&unverifiedBookingBody.message.startsWith('Vui lòng xác minh số điện thoại'),'PHONE_VERIFICATION_REQUIRED maps to 409 with guidance');
+ const deleteFixture=randomUUID();sessions.set(deleteFixture,{id:deleteFixture,user_id:userId,store_transcript:true});messages.push({session_id:deleteFixture,role:'user',content:'delete fixture'});check((await call(`/api/ai/sessions/${deleteFixture}`,null,'pose-access=fixture-Other','DELETE')).status===404,'Another user cannot delete a session');const deleted=await call(`/api/ai/sessions/${deleteFixture}`,null,'pose-access=fixture-User','DELETE');check(deleted.status===200&&!sessions.has(deleteFixture),'Owner can delete a session');
  const collisionId=randomUUID();customers.set(collisionId,{id:collisionId,full_name:'Khách cũ chưa liên kết',phone:'+84901234561',phone_verified_at:null,auth_user_id:null});
  const collision=await call('/api/ai/handoff',handoff,'pose-access=fixture-User');check(collision.status===409 && (await collision.json()).code==='NEEDS_REVIEW' && leads.size===0,'Legacy phone collision not auto-merged');customers.delete(collisionId);
  const h1=await call('/api/ai/handoff',handoff,'pose-access=fixture-User'),h2=await call('/api/ai/handoff',handoff,'pose-access=fixture-User');

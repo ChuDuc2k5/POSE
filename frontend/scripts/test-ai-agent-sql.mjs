@@ -58,7 +58,61 @@ try{
  }
  const bookingFns=(await db.query("select count(*)::int n from pg_proc where proname in ('ai_appointment_options','ai_create_appointment','ai_delete_session')")).rows[0].n;
  if(bookingFns!==3)throw new Error('AI appointment booking SQL delta was not loaded');
- console.log('PASS: M06 AI appointment booking SQL delta loaded (options, create, delete functions).');
+ // Behaviour fixtures for the M06 booking RPCs. The ownership table is an
+ // application fixture here because this suite loads the additive SQL deltas
+ // into a deliberately small database.
+ await db.exec(`
+ create table public.property_sales_owners(property_id uuid not null references public.property_products(id),sales_id uuid not null references public.users(id),primary key(property_id,sales_id));
+ insert into auth.users(id,aud,role,email,email_confirmed_at,raw_app_meta_data,phone,phone_confirmed_at) values
+ ('a0000000-0000-4000-8000-000000000001','authenticated','authenticated','verified@example.test',now(),'{"role":"User","account_status":"active"}','+84901234567',now()),
+ ('a0000000-0000-4000-8000-000000000002','authenticated','authenticated','unverified@example.test',now(),'{"role":"User","account_status":"active"}',null,null),
+ ('a0000000-0000-4000-8000-000000000003','authenticated','authenticated','sales-one@example.test',now(),'{"role":"User","account_status":"active"}',null,null),
+ ('a0000000-0000-4000-8000-000000000004','authenticated','authenticated','sales-two@example.test',now(),'{"role":"User","account_status":"active"}',null,null);
+ insert into auth.sessions(id,user_id,created_at,updated_at) values
+ ('a1000000-0000-4000-8000-000000000001','a0000000-0000-4000-8000-000000000001',now(),now()),
+ ('a1000000-0000-4000-8000-000000000002','a0000000-0000-4000-8000-000000000002',now(),now());
+ insert into public.users(id,full_name,email,auth_user_id,role,account_status) values
+ ('b0000000-0000-4000-8000-000000000001','Sales Owner','sales-one@example.test','a0000000-0000-4000-8000-000000000003','Sales','active'),
+ ('b0000000-0000-4000-8000-000000000002','Sales Ward','sales-two@example.test','a0000000-0000-4000-8000-000000000004','Sales','active');
+ insert into public.account_profiles(user_id,display_name,contact_phone) values
+ ('a0000000-0000-4000-8000-000000000001','Verified Customer','+84901234567'),
+ ('a0000000-0000-4000-8000-000000000002','Unverified Customer','');
+ insert into public.property_projects(id,code,name,location,description) values
+ ('c0000000-0000-4000-8000-000000000001','M06-P','M06 Project','Phường Long Bình, Thành phố Hồ Chí Minh','M06 booking fixture project');
+ insert into public.property_products(id,project_id,code,name,location,description,property_type,area,bedrooms,price,publication,availability)
+ values('c1000000-0000-4000-8000-000000000001','c0000000-0000-4000-8000-000000000001','M06-A1','M06 Booking Home','Phường Long Bình, Thành phố Hồ Chí Minh','M06 published booking fixture listing','Apartment',80,2,3000000000,'Published','Available');
+ insert into public.property_products(id,project_id,code,name,location,description,property_type,area,bedrooms,price,publication,availability)
+ values('c1000000-0000-4000-8000-000000000002','c0000000-0000-4000-8000-000000000001','M06-A2','M06 Ranking Home','Phường Long Bình, Thành phố Hồ Chí Minh','M06 published ranking fixture listing','Apartment',80,2,3000000000,'Published','Available');
+ insert into public.properties(id) values('c1000000-0000-4000-8000-000000000001');
+ insert into public.properties(id) values('c1000000-0000-4000-8000-000000000002');
+ insert into public.property_sales_owners values('c1000000-0000-4000-8000-000000000001','b0000000-0000-4000-8000-000000000001');
+ `);
+ const propertyId='c1000000-0000-4000-8000-000000000001',rankingPropertyId='c1000000-0000-4000-8000-000000000002',ownerSales='b0000000-0000-4000-8000-000000000001',wardSales='b0000000-0000-4000-8000-000000000002',verifiedUser='a0000000-0000-4000-8000-000000000001',verifiedSession='a1000000-0000-4000-8000-000000000001';
+ const future='2026-10-26 10:00:00+07',later='2026-10-27 10:00:00+07';
+ const options=async(start=null,property=propertyId)=>{await db.exec(`set role authenticated; set request.jwt.claims='{"sub":"${verifiedUser}","role":"authenticated","session_id":"${verifiedSession}"}'`);const result=(await db.query('select public.pose_ai_appointment_options($1,$2) data',[property,start])).rows[0].data;await db.exec('reset role');return result;};
+ const initialOptions=await options();if(initialOptions.sales[0].id!==ownerSales||initialOptions.sales[0].reason!=='Phụ trách căn này')throw new Error('booking options owner ranking/reason mismatch');
+ await db.query("insert into public.appointments(sales_id,property_id,appointment_time,ends_at,location,status,source,idempotency_key) values($1,$2,$3,$4,'Phường Long Bình, Thành phố Hồ Chí Minh','COMPLETED','AI','m06-area-history')",[wardSales,propertyId,'2026-10-20 10:00:00+07','2026-10-20 11:00:00+07']);
+ const areaOptions=await options(null,rankingPropertyId);if(areaOptions.sales.findIndex(x=>x.id===wardSales)!==0)throw new Error('booking options same-ward history ranking mismatch');
+ await db.query("insert into public.appointments(sales_id,property_id,appointment_time,ends_at,location,status,source,idempotency_key) values($1,$2,$3,$4,'Phường Long Bình, Thành phố Hồ Chí Minh','SCHEDULED','AI','m06-busy')",[wardSales,propertyId,'2026-10-26 10:00:00+07','2026-10-26 11:00:00+07']);
+ const filtered=await options(future,rankingPropertyId);if(filtered.sales.some(x=>x.id===wardSales))throw new Error('booking options did not exclude overlapping sales');
+ await db.query("delete from public.appointments where idempotency_key='m06-busy'");
+ const create=async(user,start=future,sales=ownerSales,key='m06-booking-key')=>{const session=user===verifiedUser?verifiedSession:'a1000000-0000-4000-8000-000000000002';await db.exec(`set role authenticated; set request.jwt.claims='{"sub":"${user}","role":"authenticated","session_id":"${session}"}'`);try{return {ok:true,data:(await db.query('select public.pose_ai_create_appointment($1,$2,null,$3,null,null,$4) data',[propertyId,start,sales,key])).rows[0].data};}catch(error){return {ok:false,error};}finally{await db.exec('reset role');}};
+ const firstBooking=await create(verifiedUser);if(!firstBooking.ok||!firstBooking.data.appointment_id)throw new Error('booking create did not return an id');
+ const countAfterFirst=(await db.query("select count(*)::int n from public.appointments where idempotency_key='m06-booking-key'")).rows[0].n;
+ const replay=await create(verifiedUser,future,ownerSales,'m06-booking-key');const countAfterReplay=(await db.query("select count(*)::int n from public.appointments where idempotency_key='m06-booking-key'")).rows[0].n;
+ if(replay.data.appointment_id!==firstBooking.data.appointment_id||countAfterFirst!==1||countAfterReplay!==1)throw new Error('booking idempotency mismatch');
+ const expectError=async(result,code)=>{if(result.ok||!String(result.error?.message||result.error).includes(code))throw new Error(`expected ${code}`);};
+ await expectError(await create(verifiedUser,'2026-10-25 10:00:00+07',ownerSales,'m06-past-key'),'TIME_WINDOW_INVALID');
+ await expectError(await create(verifiedUser,'2026-10-26 21:00:00+07',ownerSales,'m06-late-key'),'TIME_WINDOW_INVALID');
+ await db.query("insert into public.appointments(sales_id,property_id,appointment_time,ends_at,location,status,source,idempotency_key) values($1,$2,$3,$4,'Phường Long Bình, Thành phố Hồ Chí Minh','SCHEDULED','AI','m06-overlap')",[ownerSales,propertyId,'2026-10-27 10:00:00+07','2026-10-27 11:00:00+07']);
+ await expectError(await create(verifiedUser,later,ownerSales,'m06-overlap-key'),'APPOINTMENT_OVERLAP');
+ await expectError(await create(verifiedUser,future,'a0000000-0000-4000-8000-000000000003','m06-not-sales-key'),'SALES_NOT_AVAILABLE');
+ await expectError(await create('a0000000-0000-4000-8000-000000000002',later,ownerSales,'m06-unverified-key'),'PHONE_VERIFICATION_REQUIRED');
+ if((await db.query('select count(*)::int n from public.customers where auth_user_id=$1',[verifiedUser])).rows[0].n!==1||(await db.query('select count(*)::int n from public.leads l join public.customers c on c.id=l.customer_id where c.auth_user_id=$1',[verifiedUser])).rows[0].n!==1)throw new Error('verified booking did not create customer and lead');
+ const deleteUser='a0000000-0000-4000-8000-000000000002',deleteSession='d0000000-0000-4000-8000-000000000001';await db.query("insert into public.ai_chat_sessions(id,user_id,store_transcript,status) values($1,$2,true,'Active')",[deleteSession,verifiedUser]);await db.query("insert into public.ai_chat_messages(session_id,role,content) values($1,'user','delete me')",[deleteSession]);await db.query("insert into public.ai_action_log(session_id,tool,args_hash,decision,reason,rule_version) values($1,'save_favorite',repeat('a',64),'allowed','fixture','m06')",[deleteSession]);await db.query("insert into public.ai_pending_actions(session_id,user_id,tool,args,summary_vi,idempotency_key) values($1,$2,'save_favorite','{}','Delete fixture','m06-delete-key')",[deleteSession,verifiedUser]);
+ await db.exec(`set role authenticated; set request.jwt.claims='{"sub":"${deleteUser}","role":"authenticated","session_id":"a1000000-0000-4000-8000-000000000002"}'`);let wrongDelete=false;try{await db.query('select public.pose_ai_delete_session($1)',[deleteSession]);}catch(error){wrongDelete=String(error.message).includes('SESSION_NOT_FOUND');}await db.exec('reset role');if(!wrongDelete)throw new Error('wrong user session delete was not rejected');
+ await db.exec(`set role authenticated; set request.jwt.claims='{"sub":"${verifiedUser}","role":"authenticated","session_id":"${verifiedSession}"}'`);await db.query('select public.pose_ai_delete_session($1)',[deleteSession]);await db.exec('reset role');if((await db.query('select count(*)::int n from public.ai_chat_sessions where id=$1',[deleteSession])).rows[0].n!==0||(await db.query('select count(*)::int n from public.ai_chat_messages where session_id=$1',[deleteSession])).rows[0].n!==0||(await db.query('select count(*)::int n from public.ai_pending_actions where session_id=$1',[deleteSession])).rows[0].n!==0)throw new Error('session delete did not cascade messages and pending actions');
+ console.log('PASS: M06 AI appointment booking assertions: owner and ward ranking, overlap filtering, idempotent create, time/sales/phone guards, customer+lead creation, and owner-scoped session deletion.');
  // M06 governance: per-request log with the cost fixed at log time; API roles cannot read or write it directly.
  await db.exec('set role service_role');
  const loggedId=(await db.query("select public.pose_system_log_ai_request(null,'chat','gpt-4.1-mini','assistant','assistant@4','{search_properties}',1000,200,1200,850,'ok',null,0.00072) id")).rows[0].id;
