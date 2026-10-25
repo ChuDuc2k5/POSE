@@ -14,6 +14,16 @@ describe('priceLabel', () => {
     }
     expect(priceLabel(null)).toBe('chưa công bố');
   });
+
+  it('does not read Vietnamese words beginning with tr as triệu', () => {
+    expect(moneyAmounts('1 trệt 1 lầu')).toEqual([]);
+    expect(moneyAmounts('3 tầng 1 trệt')).toEqual([]);
+    expect(moneyAmounts('15tr')).toEqual([15000000]);
+    expect(moneyAmounts('15 tr/tháng')).toEqual([15000000]);
+    expect(moneyAmounts('7tr5')).toEqual([7500000]);
+    expect(moneyAmounts('trên 10 triệu')).toEqual([10000000]);
+    expect(moneyAmounts('5,100,000,000 VND')).toEqual([5100000000]);
+  });
 });
 
 import { outputReason } from '../src/modules/ai/guard.js';
@@ -27,5 +37,13 @@ describe('guard price echo', () => {
   it('still blocks invented ranges and prices', () => {
     expect(outputReason('Các căn tương tự có giá từ 12 đến 16 triệu đồng/tháng [1][2].', ev, q)).toBe('UNSUPPORTED_PRICE');
     expect(outputReason('Căn hộ Sunrise Riverside giá 13 triệu đồng/tháng [1].', ev, q)).toBe('UNSUPPORTED_PRICE');
+  });
+  it('allows prices from structured sources in the previous assistant turn', () => {
+    expect(outputReason('Mình có thể tìm căn rẻ hơn 11 triệu/tháng [1].', ev, 'rẻ hơn được không', { previousPrices: [11000000] })).toBeNull();
+    expect(outputReason('Căn này giá 3,2 tỷ [1].', [{ ...ev[0], price: 4980000000 }], 'mua nhà Thủ Đức', { previousPrices: [4980000000] })).toBe('UNSUPPORTED_PRICE');
+  });
+  it('allows an honest no-match reply using the effective search limit', () => {
+    expect(outputReason('Hiện chưa có căn hộ cho thuê ở Quận 7 dưới 10 triệu trong dữ liệu mình có.', [], 'rẻ hơn', { retrievalFound: false, filterAmounts: [10000000] })).toBeNull();
+    expect(outputReason('Hiện chưa có căn phù hợp; mã RVL-UNKNOWN đang mở bán.', [], 'rẻ hơn', { retrievalFound: false, filterAmounts: [10000000] })).toBe('UNSUPPORTED_PROPERTY');
   });
 });

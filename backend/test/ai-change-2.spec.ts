@@ -3,6 +3,16 @@ import { moneyAmounts } from '../src/modules/ai/money.js';
 import { explicitWriteIntent, outputReason } from '../src/modules/ai/guard.js';
 
 describe('M06 change 2', () => {
+  it('does not treat Vietnamese words beginning with tr as million units', () => {
+    expect(moneyAmounts('Nhà 75m2, 1 trệt 1 lầu')).toEqual([]);
+    expect(moneyAmounts('3 tầng 1 trệt')).toEqual([]);
+    expect(moneyAmounts('15tr')).toEqual([15000000]);
+    expect(moneyAmounts('15 tr/tháng')).toEqual([15000000]);
+    expect(moneyAmounts('7tr5')).toEqual([7500000]);
+    expect(moneyAmounts('trên 10 triệu')).toEqual([10000000]);
+    expect(moneyAmounts('5,100,000,000 VND')).toEqual([5100000000]);
+  });
+
   it('parses composite billion and million amounts', () => {
     expect(moneyAmounts('4 t\u1ef7 100 tri\u1ec7u')).toEqual([4100000000]);
     expect(moneyAmounts('4 t\u1ef7 1')).toEqual([4100000000]);

@@ -1,5 +1,5 @@
 import { object, propertyTypes } from './extraction.ts';
-import { moneyAmounts } from './money.ts';
+import { moneyAmounts, priceLabel } from './money.ts';
 export function sanitizeReply(reply:string) { return reply.replace(/\[n\]/gi,'').replace(/\bDATA\b/g,'dữ liệu').replace(/[ \t]{2,}/g,' ').trim(); }
 const word = (source:string) => new RegExp(`(?<![\\p{L}])(?:${source})(?![\\p{L}])`,'iu');
 export function explicitWriteIntent(text:string) {
@@ -11,12 +11,19 @@ const refusal=/(?:không thể|không được phép|chỉ) hỗ trợ (?:yêu c
 const abusiveWords=/(?<!\p{L})(?:địt|đụ|đéo|lồn|cặc|buồi|chịch|đĩ|đm|đmm|dmm|vcl|vkl|clm|cđm|fuck|fucking|porn|gái gọi|gái bán dâm|mại dâm|sex)(?!\p{L})/iu;
 export function isAbusive(text:string) { return abusiveWords.test(text.normalize('NFC')); }
 export const abusiveReply='Mình không thể hỗ trợ nội dung này. Nếu bạn cần tìm hiểu bất động sản, giá, khu vực hay đặt lịch xem nhà, mình sẵn sàng giúp.';
+export function normalizeCitations<T extends { number?: number; code?: string }>(reply:string, sources:T[]) {
+  const byCode = new Map(sources.filter(source => source.code && source.number != null).map(source => [source.code!.toLowerCase(), source.number!]));
+  return reply.replace(/\[([^\]\n]{2,80})\]/g, (whole, value:string) => {
+    const number = byCode.get(value.trim().toLowerCase());
+    return number == null ? whole : `[${number}]`;
+  });
+}
 export function sourcesFromCitations<T extends { number?: number; code?: string; price?: number|null }>(reply:string, sources:T[], referencedListing=false) {
   // A refusal never carries cards, even while a listing is being discussed.
   if (refusal.test(reply)) return [];
   if (referencedListing) return sources;
   const cited=[...new Set([...reply.matchAll(/\[(\d{1,3})\]/g)].map(match=>Number(match[1])))];
-  if (cited.length) return cited.map(number=>sources.find(source=>source.number===number)).filter((source):source is T=>Boolean(source));
+  if (cited.length) return cited.map(number=>sources.find(source=>source.number===number) || sources[number-1]).filter((source):source is T=>Boolean(source));
   // Some models list listings without [n]; keep the ones the reply names by code or by their exact catalogue
   // price (outputReason has already checked every price in the reply against the catalogue).
   const amounts=new Set(moneyAmounts(reply));
@@ -56,10 +63,17 @@ const links=/[\w.+-]+@[\w.-]+\.[a-z]{2,}|https?:\/\//i;
 export function groundedSummary(evidence:Evidence[]) {
   const properties=evidence.filter(e=>e.source_type!=='Faq');
   if(!properties.length)return safeReply;
-  const status:Record<string,string>={Available:'đang mở bán',Sold:'Đã bán, không còn mở bán',Reserved:'Đã giữ chỗ',Unavailable:'Tạm ngưng giao dịch'};
-  const price=(e:Evidence)=>e.price===null ? 'giá chưa công bố' : `${Number(e.price).toLocaleString('vi-VN')} VND${e.price_period==='Month' || e.transaction_type==='Rent' ? '/tháng':''}`;
-  const lines=properties.map((e,index)=>`[${e.number ?? index+1}] ${e.name} – ${withFormerDistrict(e.location)} – ${price(e)} – ${status[e.availability] || e.availability}`);
-  return `Mình tìm thấy ${properties.length} bất động sản phù hợp trong dữ liệu đã công bố (giá và tình trạng lấy trực tiếp từ hệ thống):\n${lines.join('\n')}\nBạn muốn xem chi tiết, lưu hoặc đề nghị lịch xem căn nào?`;
+  const status:Record<string,string>={Available:'đang mở bán',Sold:'đã bán, không còn mở bán',Reserved:'đã giữ chỗ',Unavailable:'tạm ngưng giao dịch'};
+  const lines=properties.map((e,index)=>{
+    const monthly=e.price_period==='Month' || e.transaction_type==='Rent';
+    const natural=priceLabel(e.price,monthly);
+    // Keep the exact VND value beside the conversational label for auditability;
+    // the label is what customers read first and prevents values such as 4,98 tỷ
+    // being rendered as an opaque integer.
+    const audit=e.price===null ? '' : ` (${Number(e.price).toLocaleString('vi-VN')} VND${monthly?'/tháng':''})`;
+    return `[${e.number ?? index+1}] ${e.name} – ${withFormerDistrict(e.location)} – ${natural}${audit} – ${status[e.availability] || e.availability}`;
+  });
+  return `Mình tìm thấy ${properties.length} căn bạn có thể tham khảo:\n${lines.join('\n')}\nBạn muốn mình lọc thêm theo phường/đường, điều chỉnh ngân sách hay hẹn chuyên viên xem căn nào?`;
 }
 export type Evidence={id:string;code:string;name:string;price:number|null;availability:string;updated_at:string;location:string;property_type:string;bedrooms?:number|null;transaction_type?:'Sale'|'Rent';price_period?:'Total'|'Month';number?:number;source_type?:'Property'|'Faq';reason?:string};
 const clauses=(text:string)=>text.split(/\n|[;!?]|(?<!\d)[.,](?!\d)/).filter(Boolean);
@@ -93,13 +107,15 @@ function moneyText(text:string,evidence:Evidence[]){
   for(const e of evidence)result=result.replace(new RegExp(`(?<![a-z0-9_-])${e.code.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?![a-z0-9_-])`,'gi'),'');
   return result;
 }
-export function outputReason(reply:string,evidence:Evidence[],customerText='',context?:{retrievalFound?:boolean;faqOnly?:boolean}) {
+export function outputReason(reply:string,evidence:Evidence[],customerText='',context?:{retrievalFound?:boolean;faqOnly?:boolean;filterAmounts?:number[];previousPrices?:number[]}) {
   const returned=new Set(evidence.map(e=>e.number).filter((n):n is number=>typeof n==='number'));
   for(const match of reply.matchAll(/\[(\d+)\]/g))if(returned.size&&!returned.has(Number(match[1])))return 'INVALID_CITATION';
   const customerAmounts=moneyAmounts(customerText);
   const ungroundedReplyAmounts=moneyAmounts(reply).filter(amount=>!customerAmounts.includes(amount));
-  const honestNoData=/chưa có (?:thông tin|dữ liệu)|chưa được cung cấp|không có dữ liệu/i.test(reply);
-  if(context?.retrievalFound===false&&!evidence.length && (/\b(?:rv[-_][a-z0-9]+|q\d+[-_][a-z0-9]+)\b/i.test(reply)||ungroundedReplyAmounts.length||(/\b(?:available|còn bán|đang mở bán|có sẵn)\b/i.test(reply))||(/\bcho thuê\b/i.test(reply)&&!honestNoData)))return 'NO_ANSWER_UNGROUNDED';
+  const honestNoData=/(?:chưa có(?:\s+căn)?|hiện chưa có căn|không có căn|chưa tìm thấy căn|chưa có .*?phù hợp|chưa có (?:thông tin|dữ liệu)|chưa được cung cấp|không có dữ liệu)/iu.test(reply);
+  const effectiveLimits=new Set([...(context?.filterAmounts || []), ...(context?.previousPrices || [])]);
+  const onlyLimits=ungroundedReplyAmounts.every(amount=>effectiveLimits.has(amount));
+  if(context?.retrievalFound===false&&!evidence.length && (/\b(?:rv[-_][a-z0-9]+|q\d+[-_][a-z0-9]+)\b/i.test(reply)||ungroundedReplyAmounts.length&&!onlyLimits||(/\b(?:available|còn bán|đang mở bán|có sẵn)\b/i.test(reply))||(/\bcho thuê\b/i.test(reply)&&!honestNoData)))return 'NO_ANSWER_UNGROUNDED';
   if(context?.faqOnly && (moneyAmounts(reply).length||/\b(?:rv[-_][a-z0-9]+|q\d+[-_][a-z0-9]+)\b/i.test(reply)))return 'FAQ_UNGROUNDED';
   // Small local models sometimes slip Chinese/Japanese/Korean words into Vietnamese replies.
   if(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(reply))return 'UNSUPPORTED_LANGUAGE';
@@ -115,7 +131,7 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
   const evidenceText=evidence.map(e=>`${e.name||''} ${e.location||''}`).join(' ').toLowerCase();
   const codes=[...withoutDates.matchAll(/(?<![\p{L}\d])[A-Z][A-Z\d]{0,5}-[A-Z\d]{1,24}(?![\p{L}\d])|(?:mã sản phẩm|mã căn hộ|mã căn|mã|code)\s*:?\s*([A-Za-z\d][A-Za-z\d_-]{1,40})/gu)];
   if(codes.some(m=>{const code=(m[1] || m[0]).toLowerCase();return !evidence.some(e=>e.code.toLowerCase()===code) && !evidenceText.includes(code);}))return 'UNSUPPORTED_PROPERTY';
-  const allowed=[...customerAmounts,...evidence.flatMap(e=>e.price===null ? []:[e.price])];
+  const allowed=[...customerAmounts,...effectiveLimits,...evidence.flatMap(e=>e.price===null ? []:[e.price])];
   if(moneyAmounts(moneyText(reply,evidence)).some(amount=>!allowed.includes(amount)))return 'UNSUPPORTED_PRICE';
   for(let clause of clauses(reply)){
     for(const room of clause.matchAll(/(\d+)\s*(?:PN|ph\u00f2ng ng\u1ee7)/giu)){
@@ -146,7 +162,7 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
     // A price stated in a clause must be a listed product price; the customer's own
     // budget figures are only allowed when the clause talks about the budget.
     // "giá dưới 15 triệu/tháng" repeats the customer's own limit, not a listing price.
-    const echoesLimit=(amount:number)=>customerAmounts.includes(amount) && /dưới|trên|tối đa|tối thiểu|không quá|khoảng|tầm|từ|đến|mức/i.test(clause);
+    const echoesLimit=(amount:number)=>(customerAmounts.includes(amount)||effectiveLimits.has(amount)) && /dưới|trên|tối đa|tối thiểu|không quá|khoảng|tầm|từ|đến|mức/i.test(clause);
     if(/giá|price/i.test(clause) && !/ngân sách|bạn (?:đề nghị|nêu|có)|theo yêu cầu/i.test(clause) && moneyAmounts(moneyText(clause,evidence)).some(amount=>!echoesLimit(amount) && !(mentioned.length ? mentioned:evidence).some(p=>p.price===amount)))return 'UNSUPPORTED_PRICE';
     const availability=[...clause.matchAll(/\bAvailable\b|còn (?:bán|hàng|để bán|cho thuê)|đang (?:mở bán|bán|cho thuê)|mở bán|chào bán|sẵn hàng|có sẵn|có thể (?:mua|thuê)|for (?:sale|rent)/gi)].filter(m=>!negated(clause,m.index!));
     if(!availability.length)continue;

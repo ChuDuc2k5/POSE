@@ -8,7 +8,8 @@ const args = new Set(process.argv.slice(2));
 const fake = args.has('--fake');
 const real = args.has('--set') && process.argv[process.argv.indexOf('--set') + 1] === 'real-questions';
 const validate = args.has('--validate');
-const base = process.env.AI_EVAL_BASE_URL || 'http://localhost:3001';
+// The API enforces the frontend origin; evaluate through the frontend proxy by default.
+const base = process.env.AI_EVAL_BASE_URL || 'http://localhost:3000';
 const snapshotPath = 'C:/Users/Admin/POSE-tasks/rag-real-snapshot.json';
 const readJson = file => JSON.parse(readFileSync(resolve(file), 'utf8'));
 const liveOverrides = fake ? {} : readJson('backend/test/fixtures/ai-eval.live.json');

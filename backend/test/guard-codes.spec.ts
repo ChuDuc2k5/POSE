@@ -25,3 +25,14 @@ describe('grounded summary when the model answer stays blocked', () => {
     expect(groundedSummary([])).toBe(safeReply);
   });
 });
+
+import { cheaperFallbackReply } from '../src/modules/ai/unsupported.js';
+describe('cheaper budget fallback', () => {
+  it('explains the area minimum and offers nearby options without the safe-fail line', () => {
+    const reply = cheaperFallbackReply([{ number: 1, name: 'Sunrise Riverside', location: 'Quận 7', price: 11000000 }], 'Quận 7', ['Quận 8', 'Nhà Bè']);
+    expect(reply).toContain('chưa tìm thấy căn nào rẻ hơn');
+    expect(reply).toContain('11 triệu');
+    expect(reply).toContain('Quận 8');
+    expect(reply).not.toContain('chưa thể xác nhận câu trả lời an toàn');
+  });
+});

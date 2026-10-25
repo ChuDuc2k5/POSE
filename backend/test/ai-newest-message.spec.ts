@@ -51,10 +51,28 @@ describe('search clarification', () => {
   });
   it('does not block an area search and adds a budget prompt', () => {
     expect(clarificationFor('Thuê căn hộ ở Quận 7', []).needed).toBe(false);
-    expect(missingBudgetQuestion('Thuê căn hộ ở Quận 7', [])).toContain('ngân sách');
+    expect(missingBudgetQuestion('Thuê căn hộ ở Quận 7', [])).toMatch(/ngân sách thuê/i);
   });
   it('does not loop after a vague clarification reply', () => {
     expect(clarificationFor('Chưa rõ, gợi ý giúp tôi', [{ role: 'assistant', content: 'Bạn muốn khu vực nào?' }]).needed).toBe(false);
+  });
+  it('moves a cheaper follow-up below the previous result range', async () => {
+    const { budgetFollowUp } = await import('../src/modules/ai/history-aware.js');
+    const result = budgetFollowUp('Có căn nào rẻ hơn không?', [
+      { role: 'user', content: 'Tôi muốn thuê chung cư Quận 7 khoảng 15 triệu' },
+      { role: 'assistant', content: 'Mình tìm thấy mức khoảng 15 triệu.', sources: [{ price: 14000000 }, { price: 16000000 }] },
+    ]);
+    expect(result?.direction).toBe('cheaper');
+    expect(result?.filters.maxPrice).toBeLessThan(14000000);
+  });
+  it('moves a higher follow-up above the previous result range', async () => {
+    const { budgetFollowUp } = await import('../src/modules/ai/history-aware.js');
+    const result = budgetFollowUp('Cao cấp hơn chút', [
+      { role: 'user', content: 'Tôi muốn thuê chung cư Quận 7 khoảng 15 triệu' },
+      { role: 'assistant', content: 'Mình tìm thấy mức khoảng 15 triệu.', sources: [{ price: 14000000 }, { price: 16000000 }] },
+    ]);
+    expect(result?.direction).toBe('higher');
+    expect(result?.filters.minPrice).toBeGreaterThan(16000000);
   });
 });
 

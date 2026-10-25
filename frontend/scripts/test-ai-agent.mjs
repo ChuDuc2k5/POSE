@@ -71,7 +71,8 @@ check(outputReason('Ngân sách 3,5 tỷ của bạn phù hợp với RV-A1201 g
 check(outputReason('Căn hộ gia đình Block A vẫn còn bán.',[open,sold])==='UNSUPPORTED_AVAILABILITY','Sold product named by its name cannot be called available');
 check(outputReason('Căn hộ gia đình Block A giá 4,1 tỷ. Căn này còn bán.',[open,sold])==='UNSUPPORTED_AVAILABILITY','Follow-up sentence inherits the product named before it');}
 check(validateModel({reply:'ok',intent:'other',score:100}).reply==='ok','Only reply and intent mandatory');
-check(JSON.stringify(TURN_SCHEMA).length<1500 && SYSTEM_PROMPT.length<800,'Compact model schema and prompt');
+// The consultant prompt intentionally grew to keep grounding and a helpful next step together.
+check(JSON.stringify(TURN_SCHEMA).length<1500 && SYSTEM_PROMPT.length<1600,'Compact model schema and prompt');
 const normalized=validateModel({reply:'Xin chào',intent:'other',needs:[{field:'budget_min_vnd',value:0,evidence:'unknown'},{field:'locations',value:['unknown'],evidence:'không có thông tin'},{field:'timeline',value:'3to6m',evidence:'2 tháng tới'},{field:'property_types',value:['House'],evidence:'căn hộ'}],tool_calls:[{name:'read_leads',arguments:{}}]},'Tôi mua căn hộ trong 2 tháng tới');
 check(normalized.reply==='Xin chào' && normalized.flags.filter(f=>f.tool==='invalid_need').length===2 && normalized.flags.some(f=>f.tool==='invalid_tool'),'Junk fields/tools flagged without losing reply');
 check(normalized.needs.timeline.value==='lt3m' && normalized.needs.property_types.value[0]==='Apartment','Quote controls timeline and Vietnamese property type');
@@ -173,7 +174,7 @@ const provider=createServer(async(req,res)=>{
    if(input.tools){
    if(!prompt)prompt=input;
    check(input.tools.length===6 && input.tools.every(t=>['search_properties','get_property_detail','list_my_appointments','save_favorite','request_handoff','propose_appointment'].includes(t.function.name)),'Native six-tool schema');
-   check(input.max_tokens===600 && input.messages[0].content.length<800,'Bounded generation and compact prompt/schema');
+   check(input.max_tokens===600 && input.messages[0].content.length<1600,'Bounded generation and compact prompt/schema');
    const hasToolResult=input.messages.some(m=>m.role==='tool');
    const redacted=input.messages.some(m=>typeof m.content==='string'&&m.content.includes('contact_redacted":true'));
     const dataText=input.messages.map(m=>typeof m.content==='string'?m.content:'').join('\n');
@@ -213,7 +214,8 @@ const provider=createServer(async(req,res)=>{
    if(input.response_format?.json_schema?.name==='needs_v1') return reply(200,{choices:[{message:{content:JSON.stringify({needs:mode==='invalid-needs' ? [{field:'timeline',value:'wrong',evidence:'tháng tới'},{field:'locations',value:['unknown'],evidence:'không có thông tin'}] : mode==='extract' ? [{field:'budget_max_vnd',value:3000000000,evidence:'3 tỷ'},{field:'locations',value:['Hồ Chí Minh'],evidence:'Hồ Chí Minh'},{field:'property_types',value:['Apartment'],evidence:'căn hộ'},{field:'timeline',value:'lt3m',evidence:'tháng tới'},{field:'purchase_intent',value:true,evidence:'Tôi mua'},{field:'contact_ready',value:true,evidence:'sẵn sàng'},{field:'next_step',value:'appointment',evidence:'đề nghị hẹn'}] : []})}}]});
    check(input.response_format.type==='json_schema' && input.response_format.json_schema.name==='assistant_turn' && input.response_format.json_schema.strict && input.response_format.json_schema.schema.additionalProperties===false,'Strict provider JSON Schema');
   check(!req.headers.authorization,'Local provider accepts empty key without Authorization');
-  check(input.max_tokens===600 && input.messages[0].content.length<800 && JSON.stringify(input.response_format.json_schema.schema).length<1500,'Bounded generation and compact prompt/schema');
+  // The consultant prompt intentionally grew to keep grounding and a helpful next step together.
+  check(input.max_tokens===600 && input.messages[0].content.length<1600 && JSON.stringify(input.response_format.json_schema.schema).length<1500,'Bounded generation and compact prompt/schema');
   const data=JSON.parse(input.messages[1].content.replace(/^BEGIN_UNTRUSTED_DATA\n|\nEND_UNTRUSTED_DATA$/g,''));modelData.push(data);
   check(data.properties.every(p=>!Object.hasOwn(p,'id') && Object.keys(p).length===7),'Provider receives minimal evidence without UUIDs');
   if(mode==='timeout'){await delay(6000);return reply(200,{choices:[{message:{content:JSON.stringify({reply:'Xin chào!',intent:'other'})}}]});}

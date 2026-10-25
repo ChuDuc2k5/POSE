@@ -51,22 +51,60 @@ export function missingBudgetQuestion(message: string, history: { role: string; 
   if (!directLocation) return null;
   const inferred = inferSearch(message) || {};
   if (inferred.minPrice !== undefined || inferred.maxPrice !== undefined) return null;
-  return 'Bạn dự kiến ngân sách khoảng bao nhiêu? Nếu thuê, bạn có thể cho biết mức thuê mỗi tháng; nếu muốn, tôi cũng có thể gợi ý thêm tuyến đường phù hợp.';
+  return /thuê/iu.test(message)
+    ? 'Ngân sách thuê của bạn khoảng bao nhiêu mỗi tháng? Có thêm tên đường hay phường mong muốn thì mình lọc sát hơn nhé.'
+    : 'Bạn dự kiến ngân sách khoảng bao nhiêu? Có thêm tên đường hay phường mong muốn thì mình lọc sát hơn nhé.';
+}
+type HistorySource = { price?: number | null };
+type HistoryTurn = { role: string; content: string; sources?: HistorySource[] };
+export type BudgetFollowUp = { filters: ReturnType<typeof inferSearch> & { location?: string; locations?: string[] }; direction: 'cheaper' | 'higher' };
+const cheaperBudget = /(?:rẻ hơn|giá thấp hơn|mềm hơn|thấp hơn|bớt tiền|tiết kiệm hơn|có căn nào rẻ hơn)/iu;
+const higherBudget = /(?:đắt hơn|cao hơn|cao cấp hơn|tăng ngân sách|ngân sách cao hơn|xịn hơn)/iu;
+const previousSearch = (history: { role: string; content: string }[]) => {
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i]?.role !== 'user') continue;
+    const inferred = inferSearch(history[i].content);
+    if (inferred) return inferred;
+  }
+  return {};
+};
+export function budgetFollowUp(message: string, history: HistoryTurn[]): BudgetFollowUp | null {
+  const explicit = inferSearch(message);
+  const cheaper = cheaperBudget.test(message);
+  const higher = higherBudget.test(message);
+  if (!cheaper && !higher && !explicit?.minPrice && !explicit?.maxPrice) return null;
+  const prior = previousSearch(history);
+  if (!Object.keys(prior).length) return null;
+  const filters = { ...prior, ...(explicit || {}) } as BudgetFollowUp['filters'];
+  // Assistant prose echoes customer budgets and contains other numbers. Only
+  // structured catalogue prices are authoritative for a budget adjustment.
+  const previousSources = [...history].reverse().find(turn => turn.role === 'assistant' && Array.isArray(turn.sources))?.sources || [];
+  const shownPrices = previousSources.map(source => source.price).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  if (cheaper) {
+    const candidates = (shownPrices.length ? shownPrices : [prior.maxPrice]).filter((value): value is number => Number.isFinite(value));
+    if (candidates.length) filters.maxPrice = Math.max(0, Math.floor(Math.min(...candidates) * 0.9));
+    delete filters.minPrice;
+  } else if (higher) {
+    const candidates = (shownPrices.length ? shownPrices : [prior.maxPrice, prior.minPrice]).filter((value): value is number => Number.isFinite(value));
+    if (candidates.length) filters.minPrice = Math.max(...candidates) + 1;
+    delete filters.maxPrice;
+  }
+  return { filters, direction: cheaper ? 'cheaper' : 'higher' };
 }
 export function clarificationFor(message: string, history: { role: string; content: string }[]): Clarification {
   // A named listing ("Đặt lịch xem căn RVL-…") or a booking/saving request is never a new search.
-  if (!searchIntent.test(message) || locationPattern.test(message) || namesPlace(message) || isFollowUp(message) || listingCodes(message).length || /(?<![\p{L}])(?:đặt\s+lịch|hẹn\s+xem|lưu\s+căn|yêu\s+thích|liên\s+hệ|chuyên\s+viên)(?![\p{L}])/iu.test(message)) return { needed: false, question: null, options: [] };
+  if (!searchIntent.test(message) || budgetFollowUp(message, history) || locationPattern.test(message) || namesPlace(message) || isFollowUp(message) || listingCodes(message).length || /(?<![\p{L}])(?:đặt\s+lịch|hẹn\s+xem|lưu\s+căn|yêu\s+thích|liên\s+hệ|chuyên\s+viên)(?![\p{L}])/iu.test(message)) return { needed: false, question: null, options: [] };
   const location = previousSearchLocation(history);
   const inferred = inferSearch(message) || {};
   const hasBudget = inferred.minPrice !== undefined || inferred.maxPrice !== undefined;
   // A new search must establish the two fields that make a catalogue search useful.
-  // Vague follow-ups are deliberately handled by the normal search path so they do not loop.
-  if (!location && !hasBudget && history.length === 0) return {
+  const previousAssistant = [...history].reverse().find(turn => turn.role === 'assistant')?.content || '';
+  const previousWasClarification = /khu vực nào|ngân sách.*(?:tháng|triệu|tỷ)|chưa rõ,? gợi ý/iu.test(previousAssistant);
+  if (!location && !hasBudget && (!history.length || !previousWasClarification)) return {
     needed: true,
-    question: 'Bạn muốn tìm ở khu vực nào và ngân sách khoảng bao nhiêu? Bạn có thể chọn khu vực phổ biến hoặc nói “Chưa rõ, gợi ý giúp tôi”.',
-    options: ['Thủ Đức', 'Quận 7', 'Chưa rõ, gợi ý giúp tôi'],
+    question: /thuê/iu.test(message) ? 'Bạn đang tìm chung cư thuê ở khu vực nào (quận, phường hay tuyến đường) và ngân sách khoảng bao nhiêu mỗi tháng ạ? Nếu chưa chắc, mình gợi ý vài khu phù hợp nhé.' : 'Bạn đang tìm mua ở khu vực nào (quận, phường hay tuyến đường) và ngân sách khoảng bao nhiêu ạ? Nếu chưa chắc, mình gợi ý vài khu phù hợp nhé.',
+    options: /thuê/iu.test(message) ? ['Dưới 10 triệu', '10–20 triệu', 'Chưa rõ, gợi ý giúp tôi'] : ['Dưới 3 tỷ', '3–6 tỷ', 'Chưa rõ, gợi ý giúp tôi'],
   };
-  if (!location && !hasBudget && history.length > 0) return { needed: false, question: null, options: [] };
   if (!location && hasBudget) return {
     needed: true,
     question: 'Bạn muốn tìm ở khu vực nào? Bạn có thể chọn khu vực phổ biến hoặc nói “Chưa rõ, gợi ý giúp tôi”.',

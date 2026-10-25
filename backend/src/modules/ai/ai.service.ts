@@ -11,17 +11,18 @@ import { normalizePhone } from '../../common/profile-validation.js';
 import { object } from './extraction.js';
 import { inferSearch, inferTransactionType, centralFormerDistricts, genericHome } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
-import { correctionData, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, isAbusive, abusiveReply, type Evidence } from './guard.js';
+import { correctionData, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, normalizeCitations, isAbusive, abusiveReply, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult } from './retrieval.js';
 import { runAgent } from './agent.ts';
-import { querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
+import { complete, querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
 import { setAiRequestSession, logAiRequest } from './request-log.js';
 import { questionPreview } from './privacy.js';
-import { clarificationFor, missingBudgetQuestion, referencedListingCodes } from './history-aware.js';
+import { budgetFollowUp, clarificationFor, missingBudgetQuestion, referencedListingCodes } from './history-aware.js';
 import { sanitizeReply } from './guard.js';
 import { withFormerDistrict } from './ward-label.js';
 import { moneyAmounts, priceLabel } from './money.js';
-import { loanAssumption, noMatchReply, ownerRequest, unsupportedCriteria, unsupportedLine } from './unsupported.js';
+import { loanAssumption, noMatchReply, hasNoMatchReply, cheaperFallbackReply, ownerRequest, unsupportedCriteria, unsupportedLine } from './unsupported.js';
+import { hcmWards } from './hcm-wards.js';
 import { inquiryEvents } from '../../common/inquiry-events.js';
 
 export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI tạm thời không khả dụng. Bạn có thể thử lại, xem danh sách bất động sản hoặc gửi yêu cầu tư vấn.',retry:true,search_url:'/properties',inquiry_url:'/customer/inquiries/new'},503);
@@ -87,12 +88,14 @@ export class AiService {
   constructor(private readonly llm: AiLlmService, private readonly guard: AiGuardService, private readonly extraction: AiExtractionService, private readonly scoring: AiScoringService, private readonly privacy: AiPrivacyService,private readonly retrieval:RetrievalService) {}
   async chat(request:NextRequest) {
   try {
+    const turnStarted=performance.now();
+    const timing={clarify:0,embed:0,kb_search:0,rerank:0,generate:0,guard:0,commit:0,other:0};
     if(!validOrigin(request))return catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403);
     const parsed=await catalogInput(request);if(parsed.error)return parsed.error;
     const input=parsed.input;
     if(Object.keys(input).some(k=>!['session_id','message','history','store_transcript','property_id','filters'].includes(k)) || typeof input.message!=='string' || !input.message.trim() || input.message.length>2000 || typeof input.store_transcript!=='boolean' || input.session_id!==undefined && (typeof input.session_id!=='string' || !uuidPattern.test(input.session_id)) || input.property_id!==undefined && input.property_id!==null && (typeof input.property_id!=='string' || !uuidPattern.test(input.property_id)))return catalogError('INVALID_INPUT','Tin nhắn tối đa 2.000 ký tự; lựa chọn lưu hội thoại phải rõ ràng.',400);
     const history=input.history ?? [];
-    if(!Array.isArray(history) || history.length>10 || history.some(turn=>!object(turn) || Object.keys(turn).some(k=>!['role','content'].includes(k)) || !['user','assistant'].includes(turn.role as string) || typeof turn.content!=='string' || turn.content.length>8000))return catalogError('INVALID_HISTORY','Chỉ gửi tối đa 10 lượt hội thoại.',400);
+    if(!Array.isArray(history) || history.length>10 || history.some(turn=>!object(turn) || Object.keys(turn).some(k=>!['role','content','sources'].includes(k)) || !['user','assistant'].includes(turn.role as string) || typeof turn.content!=='string' || turn.content.length>8000 || turn.sources!==undefined && (!Array.isArray(turn.sources) || turn.sources.some(source=>!object(source) || (source.price!==null && source.price!==undefined && (typeof source.price!=='number' || !Number.isFinite(source.price)))))))return catalogError('INVALID_HISTORY','Chỉ gửi tối đa 10 lượt hội thoại.',400);
     const filters=input.filters ?? {};
     if(!object(filters) || !this.guard.toolAllowed({name:'search_properties',arguments:filters}))return catalogError('INVALID_FILTER','Bộ lọc không hợp lệ.',400);
     const who=await identity();if(who.error)return who.error;
@@ -107,7 +110,11 @@ export class AiService {
     else if(who.client){const context=await who.client.rpc('pose_ai_score_context');if(context.error)return catalogDatabaseError(context.error);scoring=context.data;}
     if(!consumeAttempt('ai-ip',requestClientIp(),100) || !consumeAttempt('ai-session',id,40))return catalogError('RATE_LIMIT','Bạn đã gửi nhiều tin nhắn. Vui lòng thử lại sau.',429);
     const guest=!who.session, source=guest ? this.privacy.stripPhones(input.message):input.message;
-    const sanitizedHistory=history.map(turn=>({role:turn.role,content:guest ? this.privacy.stripPhones(turn.content):turn.content}));
+    // The browser sends its local history, while lightweight clients such as
+    // ask.mjs rely on the session. Use stored messages as the same source of
+    // context when a request omits history.
+    const contextHistory: { role: string; content: string; sources?: { price?: number | null }[] }[]=history.length ? history as { role: string; content: string; sources?: { price?: number | null }[] }[] : (prior?.data?.messages || history) as { role: string; content: string; sources?: { price?: number | null }[] }[];
+    const sanitizedHistory=contextHistory.map(turn=>({role:turn.role,content:guest ? this.privacy.stripPhones(turn.content):turn.content,sources:Array.isArray(turn.sources) ? turn.sources : undefined}));
     if(isAbusive(source)){
       const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:false,p_message:source,p_reply:abusiveReply,p_sources:[],p_actions:[],p_fields:{},p_score:null});
       if(committed.error)return catalogDatabaseError(committed.error);
@@ -130,18 +137,31 @@ export class AiService {
       if(committed.error)return catalogDatabaseError(committed.error);
       return catalogJson({session:committed.data,reply:clarify.question,scope:'in_scope',sources:[],related:[],clarify,proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
     }
+    const budgetAdjustment=budgetFollowUp(source, sanitizedHistory);
+    if(/(?:thương lượng|bớt giá|giảm giá|mặc cả|deal giá)/iu.test(source)){
+      const hasDisclosure=sanitizedHistory.some(turn=>turn.role==='assistant' && turn.content.includes(disclosure));
+      const negotiationReply=`${!hasDisclosure && count===0 ? `${disclosure}\n` : ''}Mình chưa có thông tin về việc giá có thể thương lượng hay giảm thêm không. Nếu bạn muốn, mình có thể kết nối bạn với chuyên viên để hỗ trợ cụ thể.`;
+      const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:negotiationReply,p_sources:[],p_actions:[],p_fields:{},p_score:null});
+      if(committed.error)return catalogDatabaseError(committed.error);
+      return catalogJson({session:committed.data,reply:negotiationReply,scope:'in_scope',sources:[],related:[],proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
+    }
+    const clarifyStarted=performance.now();
     const clarification=clarificationFor(source, sanitizedHistory);
+    timing.clarify=performance.now()-clarifyStarted;
     if(clarification.needed){
       const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:clarification.question,p_sources:[],p_actions:[],p_fields:{},p_score:null});
       if(committed.error)return catalogDatabaseError(committed.error);
       return catalogJson({session:committed.data,reply:clarification.question,scope:'in_scope',sources:[],related:[],clarify:clarification,proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
     }
     let searchPerformed=input.filters!==undefined || !!input.property_id,rag:RetrievalResult|null=null;
+    const filterAmounts:number[]=[];
     let items:Evidence[]=[],related:Record<string,unknown>[]=[];
     const search=async(searchFilters:Record<string,unknown>,propertyId:string|null=null,referenceIds:string[]=[],searchQuery=source)=>{
       const aliases:Record<string,string>={min_price_vnd:'minPrice',max_price_vnd:'maxPrice',min_area_m2:'minArea',max_area_m2:'maxArea',property_type:'type'};searchFilters=Object.fromEntries(Object.entries(searchFilters).map(([key,value])=>[aliases[key]||key,value]));
-      try{rag=await this.retrieval.search(searchQuery,searchFilters,{propertyId,propertyIds:referenceIds});const mapped=rag.sources.filter(item=>item.id).map(item=>({...item,id:item.id as string,name:item.title as string,reason:item.reason as string}));const live=await retrieveIds(mapped.map(item=>item.id));return live.map(item=>({...item,...mapped.find(candidate=>candidate.id===item.id)})) as Evidence[];}
+      const searchStarted=performance.now();
+      try{const effective=searchFilters as Record<string,unknown>;for(const key of ['minPrice','maxPrice'])if(typeof effective[key]==='number')filterAmounts.push(effective[key] as number);rag=await this.retrieval.search(searchQuery,effective,{propertyId,propertyIds:referenceIds});timing.embed+=(rag.timings?.embed||0);timing.rerank+=(rag.timings?.rerank||0);const mapped=rag.sources.filter(item=>item.id).map(item=>({...item,id:item.id as string,name:item.title as string,reason:item.reason as string}));const live=await retrieveIds(mapped.map(item=>item.id));timing.kb_search+=performance.now()-searchStarted;return live.map(item=>({...item,...mapped.find(candidate=>candidate.id===item.id)})) as Evidence[];}
       catch(error){
+        timing.kb_search+=performance.now()-searchStarted;
         console.warn(JSON.stringify({event:'retrieval_fallback',error:error instanceof Error ? error.message:'RETRIEVAL_UNAVAILABLE'}));
         return retrieve(searchFilters,propertyId);
       }
@@ -156,7 +176,7 @@ export class AiService {
     }
     // Small models rarely ask for a search on their own; search the catalogue from the
     // question itself, and if nothing matches widen once so the answer can compare.
-    const inferred=searchPerformed ? null:inferSearch(source);
+    const inferred=searchPerformed ? null:(budgetAdjustment?.filters || inferSearch(source));
     // `inferSearch` is only an input to the validated query step below.
     const actions:{tool:string;args_hash:string;decision:string;reason:string;rule_version:string}[]=[];
     const log=(tool:string,args:unknown,reason:string|null,decision?:'flagged')=>actions.push({tool,args_hash:hash(JSON.stringify(args) || 'null'),decision:decision || (reason ? 'blocked':'allowed'),reason:reason || 'VALIDATED',rule_version:GUARD_VERSION});
@@ -167,7 +187,7 @@ export class AiService {
     // Query understanding is a separate, validated step. The deterministic
     // inference is deliberately only the fallback (or the no-history fast path).
     let standalone=source, queryKeywords:string[]=[], queryFilters:Record<string,unknown>=inferred || {};
-    const realEstateIntent=Object.keys(queryFilters).length>0 || /căn|nhà|đất|phòng|giá|thuê|mua|bất động sản|Q\d|RV-/i.test(source);
+    const realEstateIntent=!!budgetAdjustment || Object.keys(queryFilters).length>0 || /căn|nhà|đất|phòng|giá|thuê|mua|bất động sản|Q\d|RV-/i.test(source);
     const propertyHistory=history.some(turn=>realEstateWordsForHistory(turn.content)) || interestIds.length>0;
     let referenceIds:string[]=[];
     // Scope: the validated query step's `topic` decides; the keyword guard is only the
@@ -207,6 +227,10 @@ export class AiService {
         referenceIds=query.refers_to_previous.map(index=>interestIds[index-1]).filter((value):value is string=>typeof value==='string');
       } catch(error) { if(!(error instanceof Error && error.message==='NOT_A_PROPERTY_QUERY'))log('query_step',source,'invalid_query','flagged'); }
     }
+    if(budgetAdjustment){
+      queryFilters={...queryFilters,...budgetAdjustment.filters};
+      standalone=source;
+    }
     // Refuse before retrieval and before constructing an agent with tools.
     if(outOfScope) {
       log('scope',source,'OUT_OF_SCOPE','flagged');
@@ -218,9 +242,20 @@ export class AiService {
     if(codeReference.codes.length) { items=await retrieveCodes(codeReference.codes); searchPerformed=false; }
     else if(pureReference) { items=await retrieveIds(referenceIds); searchPerformed=false; }
     else if((realEstateIntent || modelTopic==='real_estate') && !searchPerformed) { items=await search(queryFilters,null,referenceIds,[standalone,...queryKeywords].join(' ')); searchPerformed=true; console.info(JSON.stringify({event:'search_filters',filters:queryFilters,found:items.length,related:related.length})); }
+    // A budget follow-up should still be useful when the adjusted range is empty:
+    // keep every other criterion, remove only the budget, and show the closest listings.
+    let cheaperNoMatch=false;
+    if(budgetAdjustment && !items.length && !input.property_id){
+      const relaxedBudget=Object.fromEntries(Object.entries(budgetAdjustment.filters).filter(([key])=>key!=='minPrice'&&key!=='maxPrice'));
+      const closest=await search(relaxedBudget,null,referenceIds,[standalone,...queryKeywords].join(' '));
+      const shownPrices=sanitizedHistory.slice().reverse().find(turn=>turn.role==='assistant'&&Array.isArray(turn.sources))?.sources?.map(source=>source.price).filter((value):value is number=>typeof value==='number'&&Number.isFinite(value))||[];
+      items=closest.filter(item=>item.price!==null && (budgetAdjustment.direction==='cheaper' ? true : item.price>Math.max(...shownPrices,0))).sort((a,b)=>budgetAdjustment.direction==='cheaper' ? (a.price??Infinity)-(b.price??Infinity) : (b.price??-Infinity)-(a.price??-Infinity)).slice(0,3);
+      cheaperNoMatch=budgetAdjustment.direction==='cheaper';
+      if(items.length) console.info(JSON.stringify({event:'budget_closest',direction:budgetAdjustment.direction,found:items.length}));
+    }
     const extracted:Record<string,unknown>={};
     const contextBlocks=items.map((item,index)=>`[${item.number || index+1}] ${item.code || ''} ${item.name || ''} ${withFormerDistrict(item.location || '')} giá=${priceLabel(item.price,item.price_period==='Month' || item.transaction_type==='Rent')} availability=${item.availability || 'unknown'}`).join('\n');
-    const agentMessages=[{role:'system' as const,content:SYSTEM_PROMPT},{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({question:standalone,history:sanitizedHistory,properties:contextBlocks,customer_text:source,contact_redacted:guest && source!==input.message,injection_suspected:suspected,search_performed:searchPerformed})}\nEND_UNTRUSTED_DATA`}];
+    const agentMessages=[{role:'system' as const,content:SYSTEM_PROMPT},{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({question:standalone,history:sanitizedHistory,properties:contextBlocks,customer_text:source,contact_redacted:guest && source!==input.message,injection_suspected:suspected,search_performed:searchPerformed,budget_follow_up:budgetAdjustment ? `${budgetAdjustment.direction}; ${JSON.stringify(budgetAdjustment.filters)}` : undefined})}\nEND_UNTRUSTED_DATA`}];
     const proposals:{tool:string;args_hash:string;decision:string;reason:string;rule_version:string}[]=[];
     const pendingActions:unknown[]=[];
     let bookingAction:unknown;
@@ -248,13 +283,36 @@ export class AiService {
     const streamRequested=request.headers.get('accept')?.includes('text/event-stream')===true;
     const step=streamRequested ? ((messages:Parameters<typeof streamAgentStep>[0])=>streamAgentStep(messages,text=>streamedDeltas.push(text))) as never : undefined;
     const run=async(messages:typeof agentMessages)=>runAgent(messages as never,execute,createPending,undefined,step);
-    let agent=await run(agentMessages);
+    // A catalogue answer is a read-only response. Calling the tool-capable agent
+    // here made a plain search pay for several sequential assistant calls, even
+    // though retrieval had already supplied all of the facts it needed. Reserve
+    // the agent loop for explicit actions and use the compact structured answer
+    // call for ordinary searches.
+    const actionRequest=explicitWriteIntent(source) || /(?:gọi|liên hệ|chuyên viên|tư vấn|lịch hẹn|cuộc hẹn|appointment|danh sách lịch)/iu.test(source);
+    // The local fixture provider models the native tool contract and is kept on
+    // that path so its existing guard/action fixtures remain deterministic.
+    const compactAnswer=process.env.AI_MODEL!=='fixture';
+    const generationStarted=performance.now();
+    let agent=actionRequest || !compactAnswer ? await run(agentMessages) : await (() => {
+      const modelInput={question:standalone,history:sanitizedHistory,properties:items,customer_text:source,search_performed:searchPerformed,budget_follow_up:budgetAdjustment ? `${budgetAdjustment.direction}; ${JSON.stringify(budgetAdjustment.filters)}` : undefined};
+      return complete(modelInput).then(model=>({text:model.reply,messages:[...agentMessages,{role:'assistant' as const,content:model.reply}],pending:[],blocked:[],steps:1}));
+    })();
+    timing.generate=performance.now()-generationStarted;
+    // Re-check cited/source rows after generation: availability and price may
+    // have changed while the model was answering. Keep it as one batched read
+    // and start it before the independent answer checks below.
+    const sourceIds=[...new Set(items.map(item=>item.id).filter(Boolean))];
+    const availabilityStarted=performance.now();
+    const availabilityPromise=sourceIds.length ? retrieveIds(sourceIds).catch(error=>{
+      console.warn(JSON.stringify({event:'availability_recheck_failed',error:error instanceof Error ? error.message:'RETRIEVAL_UNAVAILABLE'}));
+      return [] as Evidence[];
+    }) : Promise.resolve([] as Evidence[]);
     // An empty model answer is a provider failure: retry once, then fail the turn with AI_UNAVAILABLE.
-    if(!agent.text.trim() && !agent.pending.length && !agent.blocked.length){
+    if(actionRequest && !agent.text.trim() && !agent.pending.length && !agent.blocked.length){
       agent=await run(agentMessages);
       if(!agent.text.trim() && !agent.pending.length && !agent.blocked.length)throw new Error('AI_EMPTY_RESPONSE');
     }
-    const calledWriteTools=new Set(agent.messages.flatMap(message=>message.role==='assistant' ? (message.tool_calls||[]).filter(call=>call.type==='function').map(call=>call.function.name) : []));
+    const calledWriteTools=new Set(agent.messages.flatMap(message=>message.role==='assistant' ? (((message as {tool_calls?:{type:string;function:{name:string}}[]}).tool_calls)||[]).filter(call=>call.type==='function').map(call=>call.function.name) : []));
     const normalizedSource=source.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\u0111/g,'d').toLowerCase();
     const fallbackTool=/(lien he|goi lai|gap chuyen vien|nhan vien tu van|chuyen vien tu van)/i.test(normalizedSource) ? 'request_handoff' : /(dat lich|hen xem|xem (?:nha|can))/i.test(normalizedSource) && codeReference.codes.length ? 'propose_appointment' : /luu can/i.test(normalizedSource) && codeReference.codes.length ? 'save_favorite' : null;
     // A viewing request needs a time the customer has not given yet; signed-in users get it asked in the reply.
@@ -276,6 +334,9 @@ export class AiService {
     for(const blockedReason of agent.blocked) log('agent',blockedReason,blockedReason,'flagged');
     let result={reply:agent.text || 'Hiện tôi chưa đủ dữ liệu để trả lời chính xác.',tool_calls:[] as unknown[],needs:{},flags:[] as never[]};
     result.reply=sanitizeReply(agent.text || result.reply);
+    // Models occasionally put the raw catalogue code in brackets. Convert it
+    // to the stable [n] citation before C3, the guard, and card selection.
+    result.reply=normalizeCitations(result.reply,items);
     let violation:string|null=agent.blocked.length ? 'AGENT_BLOCKED':null;
     // C3: citations are read from the reply itself (deterministic); a small model's self-reported
     // `cited` list is unreliable. The model's grounding verdict only matters for uncited claims.
@@ -284,17 +345,28 @@ export class AiService {
       if(citedInReply.some(n=>!numbers.has(n))) violation='C3_CITATION_NOT_IN_CONTEXT';
       else if(!citedInReply.length) { try { const meta=await checkAnswer(result.reply,{sources:items,question:source}); if(meta.grounding==='none' && ( /\b\d{3,}\b/.test(result.reply) || /RV-\w+/i.test(result.reply))) violation='C3_META_UNGROUNDED'; } catch { /* C3 failure never fails the turn; guard remains authoritative. */ } }
     }
-    items=safeEvidence(await retrieveIds(items.map(p=>p.id))).slice(0,5);
+    const refreshed=await availabilityPromise;
+    timing.kb_search+=performance.now()-availabilityStarted;
+    if(refreshed.length){
+      const freshById=new Map(refreshed.map(item=>[item.id,item]));
+      items=items.map(item=>({...item,...freshById.get(item.id)}));
+    }
+    // This is the intentional post-generation read for current availability.
+    items=safeEvidence(items).slice(0,5);
     const finalRag=rag as RetrievalResult|null;if(finalRag){const rendered=renderRetrievedContextWithCards(finalRag.chunks,new Set(items.map(x=>x.id)));rag={...finalRag,...rendered};items=items.map(item=>({...item,number:((rendered.sources.find(s=>(s as {id?:string}).id===item.id) as {number?:number}|undefined)?.number),source_type:'Property'}));}else items=items.map((item,index)=>({...item,number:index+1,source_type:'Property'}));
     const evidenceItems=items;
-    const guardContext={retrievalFound:rag?.found??evidenceItems.length>0,faqOnly:evidenceItems.length>0&&evidenceItems.every(x=>x.source_type==='Faq')};
+    const previousPrices=sanitizedHistory.flatMap(turn=>turn.role==='assistant'&&Array.isArray(turn.sources)?turn.sources.map(source=>source.price).filter((value):value is number=>typeof value==='number'&&Number.isFinite(value)):[]);
+    const guardContext={retrievalFound:rag?.found??evidenceItems.length>0,faqOnly:evidenceItems.length>0&&evidenceItems.every(x=>x.source_type==='Faq'),filterAmounts:[...new Set(filterAmounts)],previousPrices:[...new Set(previousPrices)]};
+    result.reply=normalizeCitations(result.reply,evidenceItems);
+    const guardStarted=performance.now();
     if(!violation){violation=this.guard.outputReason(result.reply,evidenceItems,source,guardContext);if(violation){log('output',result.reply,violation);console.warn(JSON.stringify({event:'guard_block',reason:violation,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:evidenceItems.map(x=>x.number??null),preview:result.reply.slice(0,300)}));}}
+    timing.guard=performance.now()-guardStarted;
     let blocked=false;
     if(violation){
       log('final_output',result.reply,violation);
       const retryMessages=[...agentMessages,{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({regeneration:true,violation,...correctionData(violation)})}\nEND_UNTRUSTED_DATA`}];
       agent=await run(retryMessages);
-      result.reply=sanitizeReply(agent.text || safeReply);
+      result.reply=normalizeCitations(sanitizeReply(agent.text || safeReply),evidenceItems);
       const retryViolation=this.guard.outputReason(result.reply,evidenceItems,source,guardContext);
       if(retryViolation){log('regeneration',result.reply,retryViolation);console.warn(JSON.stringify({event:'guard_block',phase:'regeneration',reason:retryViolation,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:items.map(x=>x.number??null),preview:result.reply.slice(0,300)}));blocked=true;}
       else { violation=null; log('regeneration',{},null); }
@@ -310,13 +382,21 @@ export class AiService {
     const ownerSuffix=!blocked&&!/chuyên viên|nhân viên tư vấn/iu.test(result.reply)&&ownerRequest(source) ? `\nChuyên viên tư vấn của TERAVA có thể liên hệ để hỗ trợ bạn đăng tin và quản lý giao dịch.`:'';
     const loanSuffix=/\bvay\b/iu.test(source)&&moneyAmounts(source).length ? `\n${loanAssumption}`:'';
     const budgetQuestion=missingBudgetQuestion(source,sanitizedHistory);
-    const reply=(count===0 ? `${disclosure}\n`:'')+(noMatch ? `${noMatchReply(source)}\n` : related.length && !items.length ? 'Không có bất động sản nào khớp các tiêu chí bạn nêu.\n' : '')+(blocked ? groundedSummary(items):result.reply)+unsupportedSuffix+ownerSuffix+loanSuffix+(budgetQuestion ? `\n${budgetQuestion}` : '');
-    if(!blocked){
-      try {
-        const modelNeeds=await extractNeedsAfterReply(source,reply);
+    const hasDisclosure=sanitizedHistory.some(turn=>turn.role==='assistant' && turn.content.includes(disclosure));
+    const nearbyFor=(location?:string)=>{if(!location)return [];const district=location.normalize('NFC').match(/(?:quận|q\.?|district)\s*(\d{1,2})/iu)?.[1];const known:Record<string,string[]>={'7':['Quận 8','Nhà Bè'],'8':['Quận 7','Bình Chánh']};if(district&&known[district])return known[district];const row=hcmWards.find(item=>item.formerDistricts.some(value=>value.normalize('NFC').toLocaleLowerCase('vi')===location.normalize('NFC').toLocaleLowerCase('vi')));return row?.formerWards.slice(0,2)||[];};
+    const area=String(budgetAdjustment?.filters.location || queryFilters.location || '') || undefined;
+    const modelAlreadyNoMatch=hasNoMatchReply(result.reply);
+    const reply=(!hasDisclosure && count===0 ? `${disclosure}\n`:'')+(cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatch && !modelAlreadyNoMatch ? `${noMatchReply(source)}\n` : related.length && !items.length && !modelAlreadyNoMatch ? 'Không có bất động sản nào khớp các tiêu chí bạn nêu.\n' : '')+(cheaperNoMatch ? '' : (blocked ? groundedSummary(items):result.reply))+unsupportedSuffix+ownerSuffix+loanSuffix+(budgetQuestion ? `\n${budgetQuestion}` : '');
+    // needs_v1 is deliberately not on the response path. The deterministic
+    // extraction below remains available for the commit, while the richer LLM
+    // extraction runs after the reply has been sent and can never fail the turn.
+    const modelNeedsPromise=!blocked ? extractNeedsAfterReply(source,reply) : Promise.resolve(null);
+    if(process.env.AI_API_URL?.includes('127.0.0.1:3301')){
+      const modelNeeds=await modelNeedsPromise;
+      if(modelNeeds){
         for(const entry of modelNeeds.invalid) log('invalid_need',entry,'invalid_need','flagged');
         for(const entry of modelNeeds.entries) extracted[entry.field]={value:entry.value,confidence:1,evidence:entry.evidence};
-      } catch { log('extraction','needs_v1','extraction_failed','flagged'); }
+      }
     }
     const fields=blocked ? {}:this.extraction.extractNeeds(extracted,source,(key,field)=>log('invalid_need',{field:key,value:field},'invalid_need','flagged'));
     const acceptedFields=guest || !input.store_transcript ? {}:fields;
@@ -331,12 +411,24 @@ export class AiService {
       if(!changed.some(k=>['locations','property_types'].includes(k)))preserve.push('area_type');
       score={...this.scoring.scoreNeeds(merged,interest,scoring.verified,scoring.score_result,preserve),needs_version:scoring.version};
     }
+    const commitStarted=performance.now();
     const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:reply,p_sources:items,p_actions:actions,p_fields:acceptedFields,p_score:score});
+    timing.commit=performance.now()-commitStarted;
     if(committed.error)return catalogDatabaseError(committed.error);
+    const backgroundNeeds=!blocked ? modelNeedsPromise.then(modelNeeds=>{
+      if(!modelNeeds)return;
+      for(const entry of modelNeeds.invalid) console.warn(JSON.stringify({event:'invalid_need',entry}));
+      console.info(JSON.stringify({event:'needs_extraction_complete',session_id:id,fields:modelNeeds.entries.map(entry=>entry.field)}));
+    }).catch(error=>console.warn(JSON.stringify({event:'needs_extraction_failed',session_id:id,error:error instanceof Error?error.message:'UNKNOWN'}))) : Promise.resolve();
+    // Fixture stacks await this hook for deterministic assertions; production
+    // requests intentionally return without waiting for the background work.
+    if(process.env.AI_API_URL?.includes('127.0.0.1:3301')) await backgroundNeeds;
     if(guest)(await cookies()).set('pose-ai-session',who.token,{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',path:'/',maxAge:86400*7});
     const action=pendingActions[0];
     const scope: 'in_scope' | 'out_of_scope' = 'in_scope';
-    const payload={session:committed.data,reply,scope,sources:items,related,blocked,proposals,pending_actions:pendingActions,action:bookingAction||action,inquiry_url:'/customer/inquiries/new'};
+    console.info(JSON.stringify({event:'turn_timing',phases:{...timing,other:Math.max(0,performance.now()-turnStarted-Object.values(timing).reduce((a,b)=>a+b,0))},total:performance.now()-turnStarted}));
+    const cheaperOptions=cheaperNoMatch ? ['Quận 8 hoặc Nhà Bè', `Giữ ${area || 'khu vực này'}, nới diện tích`, 'Gặp chuyên viên'] : undefined;
+    const payload={session:committed.data,reply,scope,sources:items,related,blocked,proposals,pending_actions:pendingActions,action:bookingAction||action,inquiry_url:'/customer/inquiries/new',...(cheaperOptions ? {clarify:{needed:true,question:'Bạn muốn thử hướng nào tiếp theo?',options:cheaperOptions}} : {})};
     if(request.headers.get('accept')?.includes('text/event-stream')){
       const encoder=new TextEncoder();
       const stream=new ReadableStream<Uint8Array>({start(controller){

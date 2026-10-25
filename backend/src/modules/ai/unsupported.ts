@@ -1,3 +1,4 @@
+import { priceLabel } from './money.js';
 const normalize = (value: string) => value.toLocaleLowerCase('vi').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
 const criteria: [string, RegExp][] = [
   ['khoảng cách / thời gian di chuyển', /(?:\bkm\b|\bphut\b|gan\s+(?:quan|q\.?|trung tam))/iu],
@@ -36,4 +37,17 @@ export function noMatchReply(text: string): string {
   const budget = original.match(/\d+(?:[.,]\d+)?\s*(?:tỷ|tỉ|triệu)(?:\s*\/\s*tháng)?/iu)?.[0];
   const criteriaText = [district && `ở ${district}`, budget && `trong khoảng ${budget}`].filter(Boolean).join(' ');
   return `Hiện chưa có căn phù hợp ${criteriaText || 'với các tiêu chí bạn nêu'} trong dữ liệu đã công bố. Bạn có thể nới ngân sách/khu vực, hoặc để chuyên viên tư vấn tìm thêm giúp bạn.`;
+}
+
+export function hasNoMatchReply(text: string): boolean {
+  return /(?:chưa\s+(?:tìm\s+thấy|có)|không\s+có\s+(?:căn|bất động sản)|không\s+tìm\s+thấy|no\s+match)/iu.test(text);
+}
+
+export function cheaperFallbackReply(items: { number?: number; name?: string; location?: string; price?: number | null }[], area?: string, nearby: string[] = []): string {
+  const label = area ? `tại ${area}` : 'trong khu vực bạn chọn';
+  if (items.length) {
+    const cards = items.slice(0, 3).map((item, index) => `[${item.number ?? index + 1}] ${item.name || 'Bất động sản phù hợp'} – ${item.location || area || 'khu vực lân cận'} – ${priceLabel(item.price, true)}`).join('\n');
+    return `Mình chưa tìm thấy căn nào rẻ hơn mức bạn vừa xem ${label}. Mức thấp nhất hiện có trong khu vực là:\n${cards}\nBạn có thể thử ${nearby.length ? nearby.join(' hoặc ') : 'khu vực lân cận'}, giữ ${area || 'khu vực này'} và nới diện tích/phòng ngủ, hoặc gặp chuyên viên để mình tìm thêm.`;
+  }
+  return `Mình chưa tìm thấy căn nào rẻ hơn trong ${area || 'khu vực bạn chọn'} với dữ liệu hiện có. Bạn có thể thử ${nearby.length ? nearby.join(' hoặc ') : 'khu vực lân cận'}, giữ ${area || 'khu vực này'} và nới diện tích/phòng ngủ, hoặc gặp chuyên viên để mình tìm thêm.`;
 }

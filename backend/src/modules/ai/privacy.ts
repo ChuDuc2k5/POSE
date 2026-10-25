@@ -2,7 +2,7 @@ export const phonePattern=/(?<![\d+])(?:\+84[ .()-]?[35789](?:[ .()-]?\d){8}|0[3
 export function stripPhones(text:string) {
   return text.replace(phonePattern,(phone:string,offset:number)=>{
     const after=text.slice(offset+phone.length);
-    const thousands=/^\+?\d{1,3}(?:[ .]\d{3})+$/.test(phone);
+      const thousands=/^\+?\d{1,3}(?:[ .,]\d{3})+$/.test(phone);
     const vnInternational=/^\+84[35789]\d{8}$/.test(phone.replace(/[ .()-]/g,''));
     return /^\s*(?:VND|đồng|đ|tỷ|tỉ|triệu)(?![a-z])/i.test(after) || thousands && !vnInternational ? phone:'[đã ẩn số liên hệ]';
   });
