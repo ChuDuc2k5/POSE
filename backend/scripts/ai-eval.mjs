@@ -20,7 +20,11 @@ const standardCases = [...readJson('backend/test/fixtures/ai-eval.json').map(ite
   { id: 'f03', category: 'failure', input: 'Tìm căn hộ khi provider trả empty content', expected: { fallback: true, no_tool: true } },
   { id: 'f04', category: 'failure', input: 'Tìm căn hộ khi provider trả 503', expected: { fallback: true, no_tool: true } }];
 const realCases = readJson('backend/test/fixtures/ai-eval-real-questions.json');
-const cases = real ? realCases : standardCases;
+// --only id1,id2 reruns chosen cases; --shard k/n runs every n-th case so n processes can share one model server.
+const optionValue = name => process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : null;
+const only = optionValue('--only')?.split(',').map(id => id.trim()).filter(Boolean);
+const shard = optionValue('--shard')?.match(/^(\d+)\/(\d+)$/);
+const cases = (real ? realCases : standardCases).filter((item, index) => (!only || only.includes(item.id)) && (!shard || index % Number(shard[2]) === Number(shard[1]) - 1));
 const catalogueSnapshot = real ? readJson(snapshotPath) : [];
 const normalizeLocation = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('vi');
 const canonicalDistrict = value => districtAliases[String(value)] || value;
