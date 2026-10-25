@@ -7,7 +7,7 @@ import { Brand, TeravaMark } from './brand';
 import { validateCredentials } from '@/lib/auth-validation';
 import { readInquiryDraft } from '@/lib/inquiry-draft';
 
-export function AuthForm({ mode, verificationFailed = false }: { mode: 'signin' | 'signup'; verificationFailed?: boolean }) {
+export function AuthForm({ mode, verificationFailed = false, next }: { mode: 'signin' | 'signup'; verificationFailed?: boolean; next?: string }) {
   const signup = mode === 'signup';
   const router = useRouter();
   const [visible, setVisible] = useState(false);
@@ -31,7 +31,8 @@ export function AuthForm({ mode, verificationFailed = false }: { mode: 'signin' 
       if (signup) { setNotice(data.message); setRegistered(true); setPassword(''); }
       else {
         const continueInquiry = data.destination === '/customer' && new URLSearchParams(window.location.search).get('next') === '/customer/inquiries/new' && readInquiryDraft();
-        router.replace(continueInquiry ? '/customer/inquiries/new' : data.destination || '/');
+        const safeNext=next&&next.startsWith('/')&&!next.startsWith('//')?next:undefined;
+        router.replace(continueInquiry ? '/customer/inquiries/new' : safeNext || data.destination || '/');
         router.refresh();
       }
     } catch { setError('Không thể kết nối. Vui lòng kiểm tra mạng và thử lại.'); }

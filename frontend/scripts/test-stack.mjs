@@ -36,7 +36,14 @@ export async function startStack(port, providerEnv, options = {}) {
     }
     if (!ready) throw new Error(`Backend did not start: ${output}`);
     const args = options.standalone ? ['.next/standalone/frontend/server.js'] : ['node_modules/next/dist/bin/next','start','--port',String(port)];
-    app = spawn(process.execPath, args, { cwd: frontend, env: { ...env, PORT: String(port), HOSTNAME: '127.0.0.1' }, windowsHide: true, stdio: ['ignore','pipe','pipe'] });
+    app = spawn(process.execPath, args, { cwd: frontend, env: { ...env, PORT: String(port), HOSTNAME: '::' }, windowsHide: true, stdio: ['ignore','pipe','pipe'] });
+    let appReady = false;
+    for (let i = 0; i < 120; i++) {
+      if (app.exitCode !== null) break;
+      try { if ((await fetch(`http://localhost:${port}/properties`)).ok) { appReady = true; break; } } catch {}
+      await delay(100);
+    }
+    if (!appReady) throw new Error(`Frontend did not start on port ${port}`);
     return { app, close: async () => { await stop(app); await stop(api); } };
   } catch (error) { await stop(app); await stop(api); throw error; }
 }
