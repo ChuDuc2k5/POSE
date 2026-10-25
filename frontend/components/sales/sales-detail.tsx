@@ -5,7 +5,7 @@ import { CheckCheck, History, LockKeyhole, Mail, Pencil, Phone, Plus, RefreshCw,
 import { catalogRequest } from '@/lib/catalog-client';
 import { leadBudget, leadDate, leadSourceLabels, leadStatusLabels, need, timelineLabels, type Lead, type LeadStatus } from '@/lib/leads';
 import { propertyTypeLabels } from '@/lib/catalog';
-import { channelLabels, salesEventLabels, type Activity, type Page, type SalesDetail } from '@/lib/sales';
+import { channelLabels, salesEventLabels, type Activity, type Page, type SalesDetailWithAppointments } from '@/lib/sales';
 import { Empty, Modal, Score, StatusBadge } from '../leads/ui';
 import { ActivityForm, CancelForm, NeedsForm, ResultForm } from './sales-forms';
 import s from './sales.module.css';
@@ -22,12 +22,12 @@ export function ActivityCards({ items, onOpen, onEdit, onCancel }: { items: Acti
   </article>)}</div> : <Empty title="Chưa có hoạt động tư vấn">Mỗi lần trao đổi với khách sẽ được lưu thành một ghi nhận riêng.</Empty>;
 }
 export function SalesDetailDialog({ id, role, initialTab = 'activities', onClose, onChanged }: { id: string; role: 'Sales' | 'Admin'; initialTab?: string; onClose: () => void; onChanged: () => void }) {
-  const [data, setData] = useState<SalesDetail | null>(null), [error, setError] = useState(''), [revision, setRevision] = useState(0);
+  const [data, setData] = useState<SalesDetailWithAppointments | null>(null), [error, setError] = useState(''), [revision, setRevision] = useState(0);
   const [tab, setTab] = useState(initialTab), [editing, setEditing] = useState<{ kind: 'create' | 'edit' | 'cancel'; activity?: Activity } | null>(null), [editingNeeds, setEditingNeeds] = useState(false);
   const [activities, setActivities] = useState<Page<Activity> | null>(null), [activityError, setActivityError] = useState(''), [page, setPage] = useState(1), [loading, setLoading] = useState(true), [activitiesLoading, setActivitiesLoading] = useState(true);
   useEffect(() => {
     const c = new AbortController();
-    catalogRequest<SalesDetail>('/api/sales/leads/' + id, { signal: c.signal }).then(d => { setData(d); setError(''); }).catch(e => { if (!c.signal.aborted) setError(e.message); }).finally(() => { if (!c.signal.aborted) setLoading(false); });
+    catalogRequest<SalesDetailWithAppointments>('/api/sales/leads/' + id, { signal: c.signal }).then(d => { setData(d); setError(''); }).catch(e => { if (!c.signal.aborted) setError(e.message); }).finally(() => { if (!c.signal.aborted) setLoading(false); });
     return () => c.abort();
   }, [id, revision]);
   useEffect(() => {
@@ -48,6 +48,7 @@ export function SalesDetailDialog({ id, role, initialTab = 'activities', onClose
     {error ? <div className={s.error} role="alert">{error}<button onClick={reload}>Thử lại</button></div> : loading ? <p role="status">Đang tải hồ sơ…</p> : lead && data && <>
       <div className={s.detailOverview}><div><div className={s.pills}><StatusBadge value={lead.status}/>{lead.archived && <span>Đã lưu trữ</span>}<span>{lead.assignment?.accepted ? 'Đã tiếp nhận' : 'Chưa ghi nhận tiếp nhận'}</span></div><h3>{leadBudget(lead)}</h3><div className={s.contact}><a href={'tel:' + lead.customer.phone}><Phone size={14}/>{lead.customer.phone}</a>{lead.customer.email && <a href={'mailto:' + lead.customer.email}><Mail size={14}/>{lead.customer.email}</a>}</div><small>Nguồn: {leadSourceLabels[lead.source] || lead.source} · Sales: {lead.assignment?.sales_name || '—'}</small></div><Score score={lead.lead_score} temperature={lead.temperature}/></div>
       {!writable && <div className={s.warning}><LockKeyhole size={17}/>{role === 'Admin' ? 'Admin chỉ xem trong không gian Sales.' : 'Lead đã kết thúc hoặc lưu trữ. Không thể bổ sung hoặc chỉnh sửa tư vấn.'}{role === 'Admin' && ['CONVERTED', 'LOST'].includes(lead.status) && <Link href="/leads">Mở Quản lý Lead để điều chỉnh</Link>}</div>}
+      <section className={s.note}><h4>Lịch hẹn</h4>{data.appointments?.length ? data.appointments.map(a => <p key={a.id}><strong>{new Date(a.appointment_time).toLocaleString('vi-VN',{timeZone:'Asia/Ho_Chi_Minh'})}</strong> · {a.property_name || 'Bất động sản'} {a.property_code && `(${a.property_code})`} · {a.status}<br/>{a.customer_name} · {a.phone}{a.note && <><br/>{a.note}</>}</p>) : <small>Chưa có lịch hẹn.</small>}</section>
       <nav className={s.tabs} aria-label="Thông tin hồ sơ">{[['activities', 'Hoạt động tư vấn'], ['needs', 'Nhu cầu khách hàng'], ['result', 'Xác nhận kết quả'], ['history', 'Lịch sử']].map(([k, v]) => <button key={k} aria-current={tab === k ? 'page' : undefined} className={tab === k ? s.activeTab : ''} onClick={() => { setTab(k); setEditing(null); setEditingNeeds(false); }}>{v}</button>)}</nav>
       {tab === 'activities' && <><div className={s.sectionTitle}><div><h3>Nhật ký tư vấn</h3><small>Ghi nhận nội dung và phản hồi qua từng lần trao đổi.</small></div>{writable && !editing && <button className={s.primary} onClick={() => setEditing({ kind: 'create' })}><Plus size={16}/>Ghi nhận tư vấn</button>}</div>
         {editing && writable ? <section className={s.editor}><div className={s.sectionTitle}><h3>{editing.kind === 'create' ? 'Ghi nhận tư vấn mới' : editing.kind === 'edit' ? 'Chỉnh sửa ghi nhận' : 'Hủy ghi nhận'}</h3><button className={s.secondary} onClick={() => setEditing(null)}>Đóng</button></div>{editing.kind === 'cancel' && editing.activity ? <CancelForm key={editing.activity.id} activity={editing.activity} mutate={mutate} onSaved={saved} onReload={reload}/> : <ActivityForm key={editing.activity?.id || 'new'} activity={editing.activity} mutate={mutate} onSaved={saved} onReload={reload}/>}</section> : activitiesLoading ? <p role="status">Đang tải nhật ký…</p> : activityError ? <p className={s.error} role="alert">{activityError}</p> : activities && <><ActivityCards items={activities.items} onEdit={a => setEditing({ kind: 'edit', activity: a })} onCancel={a => setEditing({ kind: 'cancel', activity: a })}/><Pagination page={page} size={8} total={activities.total} onChange={p => { setPage(p); setActivitiesLoading(true); }}/></>}

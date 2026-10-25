@@ -29,6 +29,14 @@ export async function options(request: WebRequest) {
   try { const a = await access(request); return 'error' in a ? a.error : rpc(a.client, 'pose_sales_options'); }
   catch { return catalogError('UNAVAILABLE', 'Chưa thể tải thông tin Sales.', 503); }
 }
+export async function appointments(request: WebRequest) {
+  try {
+    const a = await access(request); if ('error' in a) return a.error;
+    const salesId = a.role === 'Admin' ? request.nextUrl.searchParams.get('sales_id') : null;
+    if (salesId && !uuidPattern.test(salesId)) return catalogError('INVALID_INPUT', 'Sales không hợp lệ.', 400);
+    return rpc(a.client, 'pose_sales_appointments', { p_sales: salesId || null });
+  } catch { return catalogError('UNAVAILABLE', 'Chưa thể tải lịch hẹn Sales.', 503); }
+}
 export function listing(kind: 'leads' | 'properties' | 'activities') {
   return async (request: WebRequest) => {
     try {

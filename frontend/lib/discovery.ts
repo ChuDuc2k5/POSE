@@ -5,7 +5,7 @@ export type PublicProperty = CatalogItem & { transaction_type: 'Sale'|'Rent'; pr
 export type SearchResult = { items: PublicProperty[]; total: number; page: number; pageSize: number; snapshot: string; expiresAt: string };
 export type Favorite = { property_id: string; created_at: string; property: PublicProperty | null };
 export const inquiryLabels = { PendingVerification: 'Chờ xác minh số điện thoại', Received: 'Đã tiếp nhận', NeedsReview: 'Chờ kiểm tra thông tin' };
-export type Inquiry = { id: string; property_id: string | null; property_name: string | null; name: string; phone: string; email: string; channel: 'Email' | 'Phone'; preferred_time: string; message: string; status: keyof typeof inquiryLabels; phone_verified: boolean; created_at: string; consent: Record<string, boolean> };
+export type Inquiry = { id: string; property_id: string | null; property_name: string | null; name: string; phone: string; email: string; channel: 'Email' | 'Phone'; preferred_time: string; message: string; status: keyof typeof inquiryLabels; phone_verified: boolean; created_at: string; source?: string; consent: Record<string, boolean> };
 export const sortLabels = { newest: 'Mới cập nhật', priceAsc: 'Giá tăng dần', priceDesc: 'Giá giảm dần', areaAsc: 'Diện tích tăng dần', areaDesc: 'Diện tích giảm dần' };
 
 export function searchParameters(params: URLSearchParams) {

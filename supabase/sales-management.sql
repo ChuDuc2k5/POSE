@@ -209,7 +209,25 @@ begin
     and not l.archived and l.status not in ('CONVERTED','LOST'),
     'confirmation',(select jsonb_build_object('at',e.created_at,'by',u.full_name,'reason',e.reason)
       from public.lead_events e left join public.users u on u.auth_user_id=e.actor_id
-      where e.lead_id=p_lead and e.action='sales_needs_confirmed' order by e.created_at desc,e.id desc limit 1));
+      where e.lead_id=p_lead and e.action='sales_needs_confirmed' order by e.created_at desc,e.id desc limit 1),
+    'appointments',(select coalesce(jsonb_agg(jsonb_build_object('id',a.id,'appointment_time',a.appointment_time,'ends_at',a.ends_at,'property_name',p.name,'property_code',p.code,'customer_name',c.full_name,'phone',c.phone,'note',a.notes,'status',a.status) order by a.appointment_time),'[]'::jsonb)
+      from public.appointments a join public.customers c on c.id=a.customer_id left join public.property_products p on p.id=a.property_id
+      where a.lead_id=p_lead and (r='Admin' or a.sales_id=pose_private.lead_directory())));
+end $$;
+
+create or replace function pose_private.sales_appointments(p_sales uuid default null) returns jsonb
+language plpgsql stable security definer set search_path='' as $$
+declare r text:=pose_private.lead_staff(); directory uuid:=pose_private.lead_directory(); result jsonb;
+begin
+  if p_sales is not null and r<>'Admin' then raise exception 'SALES_FORBIDDEN' using errcode='42501'; end if;
+  select coalesce(jsonb_agg(jsonb_build_object('id',a.id,'appointment_time',a.appointment_time,'ends_at',a.ends_at,
+    'property_name',p.name,'property_code',p.code,'customer_name',c.full_name,'phone',c.phone,'note',a.notes,'status',a.status,'sales_name',u.full_name)
+    order by a.appointment_time,a.id),'[]'::jsonb) into result
+  from public.appointments a join public.customers c on c.id=a.customer_id left join public.property_products p on p.id=a.property_id
+    left join public.users u on u.id=a.sales_id
+  where a.appointment_time>=now() and a.status in ('SCHEDULED','CONFIRMED')
+    and (r='Admin' and (p_sales is null or a.sales_id=p_sales) or r='Sales' and a.sales_id=directory);
+  return result;
 end $$;
 
 -- Writes always serialize with M04, lock the Lead first and validate current ownership.
@@ -340,7 +358,7 @@ end $$;
 revoke all on function pose_private.sales_filters(jsonb,integer,integer),pose_private.sales_options(),
   pose_private.sales_leads(jsonb,integer,integer),pose_private.sales_property_access(uuid),pose_private.sales_properties(jsonb,integer,integer),
   pose_private.sales_property(uuid),pose_private.sales_media(uuid),pose_private.sales_activity_item(uuid),
-  pose_private.sales_activities(jsonb,integer,integer),pose_private.sales_detail(uuid),pose_private.sales_mutate(uuid,integer,text,jsonb,text)
+  pose_private.sales_activities(jsonb,integer,integer),pose_private.sales_detail(uuid),pose_private.sales_appointments(uuid),pose_private.sales_mutate(uuid,integer,text,jsonb,text)
   from public,anon,authenticated;
 
 create or replace function public.pose_sales_options() returns jsonb language sql security definer set search_path='' as $$ select pose_private.sales_options(); $$;
@@ -350,12 +368,13 @@ create or replace function public.pose_sales_property(p_property uuid) returns j
 create or replace function public.pose_sales_media(p_media uuid) returns jsonb language sql security definer set search_path='' as $$ select pose_private.sales_media(p_media); $$;
 create or replace function public.pose_sales_activities(p_filters jsonb,p_page integer,p_size integer) returns jsonb language sql security definer set search_path='' as $$ select pose_private.sales_activities(p_filters,p_page,p_size); $$;
 create or replace function public.pose_sales_detail(p_lead uuid) returns jsonb language sql security definer set search_path='' as $$ select pose_private.sales_detail(p_lead); $$;
+create or replace function public.pose_sales_appointments(p_sales uuid default null) returns jsonb language sql security definer set search_path='' as $$ select pose_private.sales_appointments(p_sales); $$;
 create or replace function public.pose_sales_mutate(p_lead uuid,p_version integer,p_action text,p_data jsonb,p_reason text) returns jsonb language sql security definer set search_path='' as $$ select pose_private.sales_mutate(p_lead,p_version,p_action,p_data,p_reason); $$;
 
 revoke all on function public.pose_sales_options(),public.pose_sales_leads(jsonb,integer,integer),
   public.pose_sales_properties(jsonb,integer,integer),public.pose_sales_property(uuid),public.pose_sales_media(uuid),
-  public.pose_sales_activities(jsonb,integer,integer),public.pose_sales_detail(uuid),public.pose_sales_mutate(uuid,integer,text,jsonb,text) from public,anon,authenticated;
+  public.pose_sales_activities(jsonb,integer,integer),public.pose_sales_detail(uuid),public.pose_sales_appointments(uuid),public.pose_sales_mutate(uuid,integer,text,jsonb,text) from public,anon,authenticated;
 grant execute on function public.pose_sales_options(),public.pose_sales_leads(jsonb,integer,integer),
   public.pose_sales_properties(jsonb,integer,integer),public.pose_sales_property(uuid),public.pose_sales_media(uuid),
-  public.pose_sales_activities(jsonb,integer,integer),public.pose_sales_detail(uuid),public.pose_sales_mutate(uuid,integer,text,jsonb,text) to authenticated;
+  public.pose_sales_activities(jsonb,integer,integer),public.pose_sales_detail(uuid),public.pose_sales_appointments(uuid),public.pose_sales_mutate(uuid,integer, text,jsonb,text) to authenticated;
 commit;

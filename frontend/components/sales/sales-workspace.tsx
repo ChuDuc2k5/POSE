@@ -1,10 +1,10 @@
 'use client';
 import { useEffect, useState, type ReactNode } from 'react';
-import { ArrowUpRight, Building2, CheckCheck, ClipboardList, MessageSquare, RefreshCw, Search, ShieldCheck, UsersRound } from 'lucide-react';
+import { ArrowUpRight, Building2, CheckCheck, ClipboardList, MessageSquare, RefreshCw, Search, ShieldCheck, UsersRound, CalendarDays } from 'lucide-react';
 import { useCrmQuery, useCrmState, useCrmWorkspace } from '../crm/crm-workspace';
 import { leadBudget, leadDate, leadStatusLabels, temperatureLabels } from '@/lib/leads';
 import { availabilityLabels, propertyTypeLabels, publicationLabels } from '@/lib/catalog';
-import { channelLabels, type Activity, type Page, type SalesLeadList, type SalesOptions, type SalesProperty } from '@/lib/sales';
+import { channelLabels, type Activity, type Page, type SalesAppointment, type SalesLeadList, type SalesOptions, type SalesProperty } from '@/lib/sales';
 import { Empty, Score, StatusBadge } from '../leads/ui';
 import { ActivityCards, Pagination, SalesDetailDialog } from './sales-detail';
 import { PropertyCards, PropertyDialog } from './sales-properties';
@@ -21,6 +21,7 @@ export function SalesWorkspace({ extra }: { extra?: ReactNode }) {
   const params = new URLSearchParams({ ...filters, ...(query ? { q: query } : {}), ...(sales ? { sales_id: sales } : {}), page: String(page), pageSize: '12' });
   const { data, loading, error, updating } = useCrmQuery<SalesLeadList | Page<SalesProperty> | Page<Activity>>('/api/sales/' + kind + '?' + params, 0, 'sales');
   const { data: options } = useCrmQuery<SalesOptions>('/api/sales/options');
+  const { data: appointments } = useCrmQuery<SalesAppointment[]>('/api/sales/appointments' + (role === 'Admin' && sales ? `?sales_id=${encodeURIComponent(sales)}` : ''), 0, 'sales');
   const refresh = () => store.invalidate();
   useEffect(() => {
     if (search.trim() === query) return;
@@ -48,6 +49,6 @@ export function SalesWorkspace({ extra }: { extra?: ReactNode }) {
           {kind === 'activities' && <ActivityCards items={(data as Page<Activity>).items} onOpen={id => setActive({ id, tab: 'activities' })}/>}
           <Pagination page={page} total={data.total} onChange={setPage}/>
         </>}
-      </section>{extra}<footer className={s.pageFooter}>TERAVA · Không gian Sales<span>{role === 'Admin' ? 'Theo dõi đội ngũ theo quyền quản trị' : 'Dữ liệu thuộc danh mục được phân công'}</span></footer>
+      </section><section className={s.panel} aria-label="Lịch hẹn sắp tới"><div className={s.sectionTitle}><div><span className={s.eyebrow}>LỊCH HẸN SẮP TỚI</span><h2><CalendarDays size={20}/> Lịch hẹn sắp tới</h2></div></div>{appointments?.length ? <div className={s.activityList}>{appointments.map(a => <article className={s.activity} key={a.id}><div className={s.activityTop}><time dateTime={a.appointment_time}>{new Date(a.appointment_time).toLocaleString('vi-VN',{timeZone:'Asia/Ho_Chi_Minh'})}</time><span className={s.cancelBadge}>{a.status}</span></div><strong>{a.property_name || 'Bất động sản'}{a.property_code && ` · ${a.property_code}`}</strong><p>{a.customer_name} · <a href={'tel:'+a.phone}>{a.phone}</a></p>{a.note && <p className={s.pre}>{a.note}</p>}{role === 'Admin' && a.sales_name && <small>Sales: {a.sales_name}</small>}</article>)}</div> : <Empty title="Chưa có lịch hẹn sắp tới">Lịch đặt từ Trợ lý AI sẽ xuất hiện tại đây.</Empty>}</section>{extra}<footer className={s.pageFooter}>TERAVA · Không gian Sales<span>{role === 'Admin' ? 'Theo dõi đội ngũ theo quyền quản trị' : 'Dữ liệu thuộc danh mục được phân công'}</span></footer>
     </div>{active && <SalesDetailDialog key={active.id} id={active.id} role={role} initialTab={active.tab} onClose={() => setActive(null)} onChanged={refresh}/>} {property && <PropertyDialog id={property} onClose={() => setProperty(null)}/>}</main>;
 }

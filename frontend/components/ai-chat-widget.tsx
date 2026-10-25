@@ -1,5 +1,5 @@
 'use client';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowUp, AudioLines, ChevronLeft, ChevronRight, Maximize2, Menu, Mic, MicOff, Minimize2, MoreHorizontal, Pin, Plus, Search, UserRound, X } from 'lucide-react';
@@ -39,7 +39,12 @@ function mergeHistory(...lists:HistoryItem[][]){
   for(const list of lists)for(const item of list){
     if(!item?.id)continue;
     const previous=merged.get(item.id);
-    merged.set(item.id,previous ? {...previous,...item,messages:item.messages?.length?item.messages:previous.messages} : item);
+    if(!previous){merged.set(item.id,item);continue;}
+    const priorMessages=previous.messages||[], nextMessages=item.messages||[];
+    const priorCompleted=priorMessages.some(message=>message.role==='assistant'&&message.content);
+    const nextCompleted=nextMessages.some(message=>message.role==='assistant'&&message.content);
+    const messages=nextMessages.length>priorMessages.length || nextCompleted&&!priorCompleted ? nextMessages : priorMessages;
+    merged.set(item.id,{...previous,...item,messages,message_count:messages.length,time:messages===priorMessages?previous.time:item.time,updated_at:messages===priorMessages?previous.updated_at:item.updated_at});
   }
   return [...merged.values()].sort((a,b)=>historyTimestamp(b)-historyTimestamp(a)||b.id.localeCompare(a.id));
 }
@@ -143,7 +148,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
     setDictating(false);setVoice(null);setHeard('');
   },[navigationKey,visible]);
 
-  useEffect(()=>{history.current=messages;sessionRef.current=session;if(activeConversation.current){const current=conversations.current.get(activeConversation.current);if(current)current.messages=messages;}},[messages,session]);
+  useEffect(()=>{history.current=messages;sessionRef.current=session;if(activeConversation.current){const current=conversations.current.get(activeConversation.current);if(current&&messages.length>=current.messages.length)current.messages=messages;}},[messages,session]);
   useEffect(()=>{if(open){if(voiceActive)panel.current?.querySelector<HTMLButtonElement>('.ai-voice-end')?.focus();else input.current?.focus();}},[open,voiceActive]);
   // The route is an external navigation state; opening the existing panel keeps its state intact.
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -161,6 +166,10 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
     const item:HistoryItem={id:key,title:maskTitle(first.content),time:new Date().toISOString(),message_count:items.length,messages:items};
     try{const current=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');const next=retainHistory([item,...(Array.isArray(current)?current:[])],pinnedIds);window.localStorage.setItem(localHistoryKey,JSON.stringify(next));setHistoryItems(existing=>retainHistory([item,...existing],pinnedIds));}catch{}
   },[pinnedIds]);
+  useLayoutEffect(()=>{
+    const key=activeConversation.current||sessionRef.current;
+    if(key&&messages.some(message=>message.role==='assistant'&&message.content))persistLocalHistory(key,messages);
+  },[messages,persistLocalHistory]);
   const ask=useCallback(async(message:string)=>{
     const content=message.trim();if(!content)return null;
     const key=historySessionRef.current||sessionRef.current||crypto.randomUUID();historySessionRef.current=key;activeConversation.current=key;
@@ -177,15 +186,20 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
       const response=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',Accept:'text/event-stream'},signal:controller.signal,body:JSON.stringify({session_id:requestSession,message:content,history:requestHistory,store_transcript:store,property_id:propertyId || null})});
 
       if(!response.ok)throw new Error((await response.json()).message);
-      if(!response.headers.get('content-type')?.includes('text/event-stream')){const result=await response.json();state.sessionId=result.session.id;state.messages=[...state.messages,{role:'assistant',content:result.reply,sources:result.sources,related:result.related,action:result.action?.tool?result.action:undefined,booking:result.action?.type==='booking_form'?result.action:undefined,options:result.clarify?.needed?result.clarify.options:undefined}];if(result.action?.type==='booking_form'&&activeConversation.current===key)setBookingProperty(result.action.property);if(activeConversation.current===key)setMessages(state.messages);return result.reply as string;}
+      if(!response.headers.get('content-type')?.includes('text/event-stream')){const result=await response.json();state.sessionId=result.session.id;state.messages=[...state.messages,{role:'assistant',content:result.reply,sources:result.sources,related:result.related,action:result.action?.tool?result.action:undefined,booking:result.action?.type==='booking_form'?result.action:undefined,options:result.clarify?.needed?result.clarify.options:undefined}];persistLocalHistory(key,state.messages);if(result.action?.type==='booking_form'&&activeConversation.current===key)setBookingProperty(result.action.property);if(activeConversation.current===key)setMessages(state.messages);return result.reply as string;}
       const reader=response.body?.getReader();if(!reader)throw new Error('Không nhận được nội dung trả lời.');let buffer='',reply='',sources:Source[]=[],related:Source[]=[],action:PendingAction|undefined,booking:BookingAction|undefined;state.messages=[...state.messages,{role:'assistant',content:''}];
-      const update=()=>{const last=state.messages.length-1;if(last>=0&&state.messages[last].role==='assistant')state.messages[last]={role:'assistant',content:reply,sources,related,action,booking};if(activeConversation.current===key)setMessages(state.messages);};
+      const update=()=>{const last=state.messages.length-1;if(last>=0&&state.messages[last].role==='assistant')state.messages[last]={role:'assistant',content:reply,sources,related,action,booking};else state.messages=[...state.messages,{role:'assistant',content:reply,sources,related,action,booking}];persistLocalHistory(key,state.messages);if(activeConversation.current===key)setMessages(state.messages);};
       while(true){const chunk=await reader.read();buffer+=new TextDecoder().decode(chunk.value||new Uint8Array(),{stream:!chunk.done});let end;while((end=buffer.indexOf('\n\n'))>=0){const block=buffer.slice(0,end);buffer=buffer.slice(end+2);const lines=block.split('\n'),line=lines.find(value=>value.startsWith('data:'));if(!line)continue;/* The SSE event name is on its own `event:` line; `type` inside data is optional. */const event={type:lines.find(value=>value.startsWith('event:'))?.slice(6).trim(),...JSON.parse(line.slice(5))};if(event.related)related=event.related;if(event.type==='meta'){state.sessionId=event.session_id;if(activeConversation.current===key){sessionRef.current=state.sessionId;setSession(state.sessionId);}sources=event.sources||[];}else if(event.type==='delta')reply+=event.text||'';else if(event.type==='action'){if(event.action?.type==='booking_form'){booking=event.action;setBookingProperty(event.action.property);}else action=event.action;}else if(event.type==='done')reply=event.message||reply;update();}if(chunk.done)break;}
-      return reply;
+      persistLocalHistory(key,state.messages);return reply;
     }catch(e){
       if(controller.signal.aborted)return null;
       state.messages=state.messages.slice(0,-1);if(activeConversation.current===key){setMessages(state.messages);setText(content);setError(e instanceof Error ? e.message:'Chưa thể gửi tin nhắn.');}else state.error=e instanceof Error ? e.message:'Chưa thể gửi tin nhắn.';return null;
-    }finally{state.controller=undefined;state.pending=false;state.unread=activeConversation.current!==key;refreshConversations();if(!state.store)persistLocalHistory(key,state.messages);if(activeConversation.current===key){pending.current=false;setBusy(false);setMessages(state.messages);}else setHistoryItems(existing=>existing.map(item=>item.id===key?{...item,messages:state.messages,message_count:state.messages.length}:item));}
+    }finally{state.controller=undefined;state.pending=false;state.unread=activeConversation.current!==key;refreshConversations();
+      // Persist after the assistant finishes as well as after the user sends. This keeps
+      // local history complete when server transcript saving is off, and supplies a
+      // complete fallback while a signed-in session is being restored.
+      persistLocalHistory(key,state.messages);
+      if(activeConversation.current===key){pending.current=false;setBusy(false);setMessages(state.messages);}else setHistoryItems(existing=>existing.map(item=>item.id===key?{...item,messages:state.messages,message_count:state.messages.length,time:new Date().toISOString()}:item));}
   },[propertyId,store,persistLocalHistory,refreshConversations]);
 
   async function send(){if(pending.current || dictating)return;const message=text;setText('');if(await ask(message))input.current?.focus();}

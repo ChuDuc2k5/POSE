@@ -46,7 +46,7 @@ export function SystemHome({ role, name }: { role: Role | null; name?: string })
           </div>
           <div className={styles.heroGallery}>
             <Link href="#du-an" className={styles.heroImage} aria-label="Khám phá dự án nổi bật">
-              <Image src="/images/home/hero.webp" alt="Tòa căn hộ cao cấp bên đường chân trời thành phố lúc hoàng hôn" width={1536} height={1024} sizes="(max-width: 760px) calc(100vw - 40px), (min-width: 1392px) 688px, 54vw" quality={90} preload/>
+              <Image src="/images/home/hero.webp" alt="Tòa căn hộ cao cấp bên đường chân trời thành phố lúc hoàng hôn" width={1536} height={1024} sizes="(max-width: 760px) calc(100vw - 40px), (min-width: 1392px) 688px, 54vw" quality={90} preload loading="eager"/>
               <span className={styles.imageBadge}>Dự án nổi bật</span>
             </Link>
             <div className={styles.categoryGrid}>

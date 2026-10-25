@@ -1,4 +1,5 @@
 import { hcmWards } from './hcm-wards.js';
+import { inferSearch } from './infer-search.js';
 
 export type Clarification = { needed: boolean; question: string | null; options: string[] };
 const listingCodePattern = /(?<![\p{L}\d])[A-Z][A-Z\d]{0,7}-[A-Z\d]{4,40}(?![\p{L}\d])/gu;
@@ -44,11 +45,39 @@ function namesPlace(message: string) {
   const text = message.normalize('NFC').toLocaleLowerCase('vi');
   return placeNames.test(message.normalize('NFC')) || hcmWards.some(row => text.includes(row.ward.normalize('NFC').toLocaleLowerCase('vi')));
 }
+export function missingBudgetQuestion(message: string, history: { role: string; content: string }[]) {
+  if (!searchIntent.test(message) || isFollowUp(message) || listingCodes(message).length) return null;
+  const directLocation = locationPattern.test(message) || namesPlace(message);
+  if (!directLocation) return null;
+  const inferred = inferSearch(message) || {};
+  if (inferred.minPrice !== undefined || inferred.maxPrice !== undefined) return null;
+  return 'Bạn dự kiến ngân sách khoảng bao nhiêu? Nếu thuê, bạn có thể cho biết mức thuê mỗi tháng; nếu muốn, tôi cũng có thể gợi ý thêm tuyến đường phù hợp.';
+}
 export function clarificationFor(message: string, history: { role: string; content: string }[]): Clarification {
   // A named listing ("Đặt lịch xem căn RVL-…") or a booking/saving request is never a new search.
   if (!searchIntent.test(message) || locationPattern.test(message) || namesPlace(message) || isFollowUp(message) || listingCodes(message).length || /(?<![\p{L}])(?:đặt\s+lịch|hẹn\s+xem|lưu\s+căn|yêu\s+thích|liên\s+hệ|chuyên\s+viên)(?![\p{L}])/iu.test(message)) return { needed: false, question: null, options: [] };
   const location = previousSearchLocation(history);
+  const inferred = inferSearch(message) || {};
+  const hasBudget = inferred.minPrice !== undefined || inferred.maxPrice !== undefined;
+  // A new search must establish the two fields that make a catalogue search useful.
+  // Vague follow-ups are deliberately handled by the normal search path so they do not loop.
+  if (!location && !hasBudget && history.length === 0) return {
+    needed: true,
+    question: 'Bạn muốn tìm ở khu vực nào và ngân sách khoảng bao nhiêu? Bạn có thể chọn khu vực phổ biến hoặc nói “Chưa rõ, gợi ý giúp tôi”.',
+    options: ['Thủ Đức', 'Quận 7', 'Chưa rõ, gợi ý giúp tôi'],
+  };
+  if (!location && !hasBudget && history.length > 0) return { needed: false, question: null, options: [] };
+  if (!location && hasBudget) return {
+    needed: true,
+    question: 'Bạn muốn tìm ở khu vực nào? Bạn có thể chọn khu vực phổ biến hoặc nói “Chưa rõ, gợi ý giúp tôi”.',
+    options: ['Thủ Đức', 'Quận 7', 'Chưa rõ, gợi ý giúp tôi'],
+  };
   if (!location) return { needed: false, question: null, options: [] };
+  if (!hasBudget && !locationPattern.test(message) && !namesPlace(message)) {
+    const action = /thuê/iu.test(message) ? 'thuê' : /mua/iu.test(message) ? 'mua' : 'tìm';
+    return { needed: true, question: `Bạn muốn ${action} ở ${location} như trước hay khu vực khác?`, options: [location, 'Khu vực khác', 'Không giới hạn khu vực'] };
+  }
+  if (!hasBudget) return { needed: false, question: null, options: [] };
   const action = /thuê/iu.test(message) ? 'thuê' : /mua/iu.test(message) ? 'mua' : 'tìm';
   return { needed: true, question: `Bạn muốn ${action} ở ${location} như trước hay khu vực khác?`, options: [location, 'Khu vực khác', 'Không giới hạn khu vực'] };
 }

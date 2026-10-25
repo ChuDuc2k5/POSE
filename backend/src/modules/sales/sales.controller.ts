@@ -8,6 +8,7 @@ import * as handlers from './sales.handlers.js';
 @Controller('sales')
 export class SalesController {
   @Get('options') options(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, handlers.options); }
+  @Get('appointments') appointments(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, handlers.appointments); }
   @Get('leads') leads(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, handlers.leads); }
   @Get('leads/:id') detail(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, handlers.detail); }
   @Patch('leads/:id') mutate(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, handlers.mutate); }

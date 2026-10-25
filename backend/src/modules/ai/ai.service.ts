@@ -17,11 +17,12 @@ import { runAgent } from './agent.ts';
 import { querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
 import { setAiRequestSession, logAiRequest } from './request-log.js';
 import { questionPreview } from './privacy.js';
-import { clarificationFor, referencedListingCodes } from './history-aware.js';
+import { clarificationFor, missingBudgetQuestion, referencedListingCodes } from './history-aware.js';
 import { sanitizeReply } from './guard.js';
 import { withFormerDistrict } from './ward-label.js';
 import { moneyAmounts, priceLabel } from './money.js';
 import { loanAssumption, noMatchReply, ownerRequest, unsupportedCriteria, unsupportedLine } from './unsupported.js';
+import { inquiryEvents } from '../../common/inquiry-events.js';
 
 export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI tạm thời không khả dụng. Bạn có thể thử lại, xem danh sách bất động sản hoặc gửi yêu cầu tư vấn.',retry:true,search_url:'/properties',inquiry_url:'/customer/inquiries/new'},503);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -308,7 +309,8 @@ export class AiService {
     const unsupportedSuffix=!blocked&&criteriaLabels.length&&!criteriaLabels.every(label=>new RegExp(`(?:chưa có thông tin|chưa có dữ liệu|chưa được cung cấp).*${label.split(' / ')[0]}`,'iu').test(result.reply)) ? `\n${unsupportedLine(criteriaLabels)}`:'';
     const ownerSuffix=!blocked&&!/chuyên viên|nhân viên tư vấn/iu.test(result.reply)&&ownerRequest(source) ? `\nChuyên viên tư vấn của TERAVA có thể liên hệ để hỗ trợ bạn đăng tin và quản lý giao dịch.`:'';
     const loanSuffix=/\bvay\b/iu.test(source)&&moneyAmounts(source).length ? `\n${loanAssumption}`:'';
-    const reply=(count===0 ? `${disclosure}\n`:'')+(noMatch ? `${noMatchReply(source)}\n` : related.length && !items.length ? 'Không có bất động sản nào khớp các tiêu chí bạn nêu.\n' : '')+(blocked ? groundedSummary(items):result.reply)+unsupportedSuffix+ownerSuffix+loanSuffix;
+    const budgetQuestion=missingBudgetQuestion(source,sanitizedHistory);
+    const reply=(count===0 ? `${disclosure}\n`:'')+(noMatch ? `${noMatchReply(source)}\n` : related.length && !items.length ? 'Không có bất động sản nào khớp các tiêu chí bạn nêu.\n' : '')+(blocked ? groundedSummary(items):result.reply)+unsupportedSuffix+ownerSuffix+loanSuffix+(budgetQuestion ? `\n${budgetQuestion}` : '');
     if(!blocked){
       try {
         const modelNeeds=await extractNeedsAfterReply(source,reply);
@@ -394,6 +396,7 @@ async createAppointment(request:NextRequest) {
     if(message.includes('PHONE_VERIFICATION_REQUIRED'))return catalogError('PHONE_VERIFICATION_REQUIRED','Vui lòng nhập số điện thoại để chuyên viên liên hệ xác nhận lịch hẹn.',409);
     if(message.includes('IDENTITY_REVIEW_REQUIRED'))return catalogError('IDENTITY_REVIEW_REQUIRED','Số điện thoại này đã gắn với một khách hàng khác. Vui lòng liên hệ TERAVA để được hỗ trợ.',409);
     if(message.includes('PROPERTY_NOT_FOUND'))return catalogError('PROPERTY_NOT_FOUND','Căn này hiện không còn nhận lịch xem.',404);
+    if(!result.error && result.data && !result.data.replayed) inquiryEvents.emit('received');
     return result.error ? catalogDatabaseError(result.error):catalogJson(result.data);
   }catch{return unavailable();}
 }

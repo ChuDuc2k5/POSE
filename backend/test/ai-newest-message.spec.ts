@@ -28,7 +28,7 @@ describe('cards without [n] citations', () => {
   });
 });
 
-import { clarificationFor, referencedListingCodes } from '../src/modules/ai/history-aware.js';
+import { clarificationFor, missingBudgetQuestion, referencedListingCodes } from '../src/modules/ai/history-aware.js';
 describe('picking a listing that was just shown', () => {
   const history = [{ role: 'user', content: 'Cho thuê căn hộ 2 phòng ngủ Quận 7' }, { role: 'assistant', content: 'Có 5 căn ở Quận 7.\nMã: CFR-AAA11111, CFR-BBB22222' }];
   const message = 'tôi quan tâm căn này\nCăn hộ 2 phòng ngủ tại CC Midtown Phú Mỹ Hưng, giá 26 triệu đồng/tháng.';
@@ -37,6 +37,24 @@ describe('picking a listing that was just shown', () => {
   });
   it('treats "quan tâm" as a reference to the listings just shown', () => {
     expect(referencedListingCodes(message, history)).toEqual({ codes: ['CFR-AAA11111', 'CFR-BBB22222'], ambiguous: true });
+  });
+});
+
+describe('search clarification', () => {
+  it('asks for area and budget before a first broad search', () => {
+    const result = clarificationFor('Tôi muốn thuê chung cư', []);
+    expect(result.needed).toBe(true);
+    expect(result.options).toContain('Chưa rõ, gợi ý giúp tôi');
+  });
+  it('asks for the area when only a budget is supplied', () => {
+    expect(clarificationFor('Tìm căn hộ dưới 3 tỷ', []).needed).toBe(true);
+  });
+  it('does not block an area search and adds a budget prompt', () => {
+    expect(clarificationFor('Thuê căn hộ ở Quận 7', []).needed).toBe(false);
+    expect(missingBudgetQuestion('Thuê căn hộ ở Quận 7', [])).toContain('ngân sách');
+  });
+  it('does not loop after a vague clarification reply', () => {
+    expect(clarificationFor('Chưa rõ, gợi ý giúp tôi', [{ role: 'assistant', content: 'Bạn muốn khu vực nào?' }]).needed).toBe(false);
   });
 });
 
