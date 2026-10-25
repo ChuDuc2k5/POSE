@@ -85,7 +85,10 @@ function moneyText(text:string,evidence:Evidence[]){
 export function outputReason(reply:string,evidence:Evidence[],customerText='',context?:{retrievalFound?:boolean;faqOnly?:boolean}) {
   const returned=new Set(evidence.map(e=>e.number).filter((n):n is number=>typeof n==='number'));
   for(const match of reply.matchAll(/\[(\d+)\]/g))if(returned.size&&!returned.has(Number(match[1])))return 'INVALID_CITATION';
-  if(context?.retrievalFound===false&&!evidence.length && (/\b(?:rv[-_][a-z0-9]+|q\d+[-_][a-z0-9]+)\b/i.test(reply)||moneyAmounts(reply).length||/\b(?:available|còn bán|đang mở bán|có sẵn|cho thuê)\b/i.test(reply)))return 'NO_ANSWER_UNGROUNDED';
+  const customerAmounts=moneyAmounts(customerText);
+  const ungroundedReplyAmounts=moneyAmounts(reply).filter(amount=>!customerAmounts.includes(amount));
+  const honestNoData=/chưa có (?:thông tin|dữ liệu)|chưa được cung cấp|không có dữ liệu/i.test(reply);
+  if(context?.retrievalFound===false&&!evidence.length && (/\b(?:rv[-_][a-z0-9]+|q\d+[-_][a-z0-9]+)\b/i.test(reply)||ungroundedReplyAmounts.length||(/\b(?:available|còn bán|đang mở bán|có sẵn)\b/i.test(reply))||(/\bcho thuê\b/i.test(reply)&&!honestNoData)))return 'NO_ANSWER_UNGROUNDED';
   if(context?.faqOnly && (moneyAmounts(reply).length||/\b(?:rv[-_][a-z0-9]+|q\d+[-_][a-z0-9]+)\b/i.test(reply)))return 'FAQ_UNGROUNDED';
   // Small local models sometimes slip Chinese/Japanese/Korean words into Vietnamese replies.
   if(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(reply))return 'UNSUPPORTED_LANGUAGE';
@@ -101,7 +104,7 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
   const evidenceText=evidence.map(e=>`${e.name||''} ${e.location||''}`).join(' ').toLowerCase();
   const codes=[...withoutDates.matchAll(/(?<![\p{L}\d])[A-Z][A-Z\d]{0,5}-[A-Z\d]{1,24}(?![\p{L}\d])|(?:mã sản phẩm|mã căn hộ|mã căn|mã|code)\s*:?\s*([A-Za-z\d][A-Za-z\d_-]{1,40})/gu)];
   if(codes.some(m=>{const code=(m[1] || m[0]).toLowerCase();return !evidence.some(e=>e.code.toLowerCase()===code) && !evidenceText.includes(code);}))return 'UNSUPPORTED_PROPERTY';
-  const customerAmounts=moneyAmounts(customerText),allowed=[...customerAmounts,...evidence.flatMap(e=>e.price===null ? []:[e.price])];
+  const allowed=[...customerAmounts,...evidence.flatMap(e=>e.price===null ? []:[e.price])];
   if(moneyAmounts(moneyText(reply,evidence)).some(amount=>!allowed.includes(amount)))return 'UNSUPPORTED_PRICE';
   for(let clause of clauses(reply)){
     for(const room of clause.matchAll(/(\d+)\s*(?:PN|ph\u00f2ng ng\u1ee7)/giu)){

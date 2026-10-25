@@ -21,30 +21,30 @@ const standardCases = [...readJson('backend/test/fixtures/ai-eval.json').map(ite
   { id: 'f04', category: 'failure', input: 'Tìm căn hộ khi provider trả 503', expected: { fallback: true, no_tool: true } }];
 const realCases = readJson('backend/test/fixtures/ai-eval-real-questions.json');
 const cases = real ? realCases : standardCases;
+const catalogueSnapshot = real ? readJson(snapshotPath) : [];
+const normalizeLocation = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('vi');
+const canonicalDistrict = value => districtAliases[String(value)] || value;
+const districtMatches = (location, district) => {
+  if (!district || (Array.isArray(district) && !district.length)) return true;
+  if (Array.isArray(district)) return district.some(value => districtMatches(location, value));
+  const wanted = normalizeLocation(canonicalDistrict(district)), text = normalizeLocation(location);
+  if (text.includes(wanted)) return true;
+  return hcmWards.some(ward => ward.formerDistricts.some(former => normalizeLocation(former) === wanted) && [ward.ward, ...ward.formerWards].some(alias => normalizeLocation(alias).length > 1 && text.includes(normalizeLocation(alias))));
+};
+const matchesConstraints = (item, constraints) => {
+  if (!constraints) return false;
+  if (constraints.transaction_type && item.transaction_type !== constraints.transaction_type) return false;
+  if (constraints.property_type && item.property_type !== constraints.property_type) return false;
+  if (!districtMatches(item.location, constraints.district)) return false;
+  const price = item.price === null || item.price === undefined ? null : Number(item.price);
+  if (constraints.price_min !== null && constraints.price_min !== undefined && (price === null || price < constraints.price_min)) return false;
+  if (constraints.price_max !== null && constraints.price_max !== undefined && (price === null || price > constraints.price_max)) return false;
+  if (constraints.bedrooms !== null && constraints.bedrooms !== undefined && item.bedrooms !== constraints.bedrooms) return false;
+  return true;
+};
 
 function validateRealCases() {
-  const catalogue = readJson(snapshotPath), codes = new Set(catalogue.map(item => item.code)), locations = new Set(catalogue.map(item => item.location)), errors = [];
-  const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('vi');
-  const canonicalDistrict = value => districtAliases[String(value)] || value;
-  const districtMatches = (location, district) => {
-    if (!district || (Array.isArray(district) && !district.length)) return true;
-    if (Array.isArray(district)) return district.some(value => districtMatches(location, value));
-    const wanted = normalize(canonicalDistrict(district));
-    const text = normalize(location);
-    if (text.includes(wanted)) return true;
-    return hcmWards.some(ward => ward.formerDistricts.some(former => normalize(former) === wanted) && [ward.ward, ...ward.formerWards].some(alias => normalize(alias).length > 1 && text.includes(normalize(alias))));
-  };
-  const matches = (item, constraints) => {
-    if (!constraints) return false;
-    if (constraints.transaction_type && item.transaction_type !== constraints.transaction_type) return false;
-    if (constraints.property_type && item.property_type !== constraints.property_type) return false;
-    if (!districtMatches(item.location, constraints.district)) return false;
-    const price = item.price === null || item.price === undefined ? null : Number(item.price);
-    if (constraints.price_min !== null && constraints.price_min !== undefined && (price === null || price < constraints.price_min)) return false;
-    if (constraints.price_max !== null && constraints.price_max !== undefined && (price === null || price > constraints.price_max)) return false;
-    if (constraints.bedrooms !== null && constraints.bedrooms !== undefined && item.bedrooms !== constraints.bedrooms) return false;
-    return true;
-  };
+  const catalogue = catalogueSnapshot, codes = new Set(catalogue.map(item => item.code)), locations = new Set(catalogue.map(item => item.location)), errors = [];
   for (const item of realCases) {
     for (const code of item.expected.cards_codes_any || []) if (!codes.has(code)) errors.push(`${item.id}: unknown code ${code}`);
     for (const code of `${item.question} ${JSON.stringify(item.history || [])}`.match(/C(?:FL|FR)-[A-Z0-9]+/g) || []) if (!codes.has(code)) errors.push(`${item.id}: unknown code ${code}`);
@@ -52,7 +52,7 @@ function validateRealCases() {
     const isSearchCase = ['search_by_need', 'template_buy', 'template_rent'].includes(item.group) && !item.history && (item.expected.cards_codes_any || item.expected.cards_min !== undefined);
     if (isSearchCase && !item.constraints) errors.push(`${item.id}: missing constraints`);
     if (item.constraints) {
-      const satisfying = catalogue.filter(row => matches(row, item.constraints));
+      const satisfying = catalogue.filter(row => matchesConstraints(row, item.constraints));
       const expectedCodes = item.expected.cards_codes_any || [];
       for (const code of expectedCodes) if (!satisfying.some(row => row.code === code)) errors.push(`${item.id}: expected code ${code} is outside constraints`);
       if (!satisfying.length && (expectedCodes.length || (item.expected.cards_min || 0) > 0)) errors.push(`${item.id}: no satisfying listings but case expects cards`);
@@ -78,13 +78,18 @@ const textOf = body => JSON.stringify(body.reply || body.message || body).toLoca
 const noDataPhrases = ['chưa có dữ liệu', 'không có dữ liệu', 'chưa được cung cấp', 'không thấy trong dữ liệu', 'chưa có thông tin'];
 const handoffPhrases = ['chuyên viên', 'nhân viên tư vấn', 'liên hệ', 'hỗ trợ thêm', 'tư vấn trực tiếp', 'đặt lịch'];
 noDataPhrases.push('kh\u00f4ng c\u00f3 c\u0103n', 'ch\u01b0a c\u00f3 c\u0103n', 'kh\u00f4ng t\u00ecm th\u1ea5y', 'kh\u00f4ng c\u00f3 th\u00f4ng tin', 'kh\u00f4ng c\u00f3 b\u1ea5t \u0111\u1ed9ng s\u1ea3n');
-function failure(expected, response, rows) {
+function failure(expected, response, rows, item) {
   const body = response.body || {}, called = rows.flatMap(row => row.tools_called || []), answer = textOf(body);
   if (expected.fallback && response.status !== 503) return `status=${response.status}, expected provider failure`;
   if (expected.must_refuse && (response.status !== 200 || body.scope !== 'out_of_scope' || (body.sources || []).length || called.length)) return `scope=${body.scope || 'missing'}, sources=${(body.sources || []).length}, tools=${called.join(',')}`;
   if (expected.cards_min !== undefined && (body.sources || []).length < expected.cards_min) return `sources=${(body.sources || []).length}, expected >=${expected.cards_min}`;
   if (expected.cards_max !== undefined && (body.sources || []).length > expected.cards_max) return `sources=${(body.sources || []).length}, expected <=${expected.cards_max}`;
-  if (expected.cards_codes_any && !(body.sources || []).some(source => expected.cards_codes_any.includes(source.code) || expected.cards_codes_any.includes(source.property_code) || expected.cards_codes_any.includes(source.id))) return `sources do not include any expected code: ${expected.cards_codes_any.join(',')}`;
+  if (expected.cards_codes_any && !(body.sources || []).some(source => {
+    if (expected.cards_codes_any.includes(source.code) || expected.cards_codes_any.includes(source.property_code) || expected.cards_codes_any.includes(source.id)) return true;
+    if (!item.constraints || !real) return false;
+    const row = catalogueSnapshot.find(candidate => candidate.code === source.code || candidate.id === source.id || candidate.code === source.property_code);
+    return !!row && matchesConstraints(row, item.constraints);
+  })) return `sources do not include any expected code: ${expected.cards_codes_any.join(',')}`;
   if (expected.no_tool && called.length) return `tool_called=${called.join(',')}`;
   if (expected.no_write_tool && called.some(name => name !== 'search_properties' && name !== 'get_property_detail')) return `write_tool_called=${called.join(',')}`;
   if (expected.tool && !((body.pending_actions || []).some(action => action.tool === expected.tool) || (body.proposals || []).some(action => action.tool === expected.tool) || called.includes(expected.tool))) return `tool_called=${called.join(',')}, expected ${expected.tool}`;
@@ -102,7 +107,7 @@ async function runCase(item, index) {
   const response = await fetch(url, { method: 'POST', headers: { Origin: fake ? 'http://localhost:3300' : new URL(base).origin, Accept: stream ? 'text/event-stream' : 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ message: item.question || item.input, history: item.history || [], store_transcript: false }) });
   const raw = await response.text(); let body = {};
   if (stream) { const done = raw.match(/event: done\ndata: (.*)/)?.[1], meta = raw.match(/event: meta\ndata: (.*)/)?.[1]; body = done ? { ...(meta ? JSON.parse(meta) : {}), ...(JSON.parse(done) || {}) } : { reply: raw, sources: [] }; } else { try { body = JSON.parse(raw); } catch { body = { reply: raw }; } }
-  await delay(fake ? 40 : 1500); const sessionId = body.session?.id || body.session_id, after = fake ? await getLogs() : await liveLogs(sessionId), rows = after.filter(row => (sessionId && row.p_session_id === sessionId) || (!sessionId && after.indexOf(row) >= before.length)); const reason = failure(item.expected || {}, { status: response.status, body }, rows); return { id: item.id, group: item.group, category: item.category, pass: !reason, reason: reason || 'ok' };
+  await delay(fake ? 40 : 1500); const sessionId = body.session?.id || body.session_id, after = fake ? await getLogs() : await liveLogs(sessionId), rows = after.filter(row => (sessionId && row.p_session_id === sessionId) || (!sessionId && after.indexOf(row) >= before.length)); const reason = failure(item.expected || {}, { status: response.status, body }, rows, item); return { id: item.id, group: item.group, category: item.category, pass: !reason, reason: reason || 'ok' };
 }
 
 if (validate) validateRealCases();
