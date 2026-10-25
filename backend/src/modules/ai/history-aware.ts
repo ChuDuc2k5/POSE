@@ -39,7 +39,8 @@ export function referencedListingCodes(message: string, history: { role: string;
   return { codes: [] as string[], ambiguous: false };
 }
 export function clarificationFor(message: string, history: { role: string; content: string }[]): Clarification {
-  if (!searchIntent.test(message) || locationPattern.test(message) || isFollowUp(message)) return { needed: false, question: null, options: [] };
+  // A named listing ("Đặt lịch xem căn RVL-…") or a booking/saving request is never a new search.
+  if (!searchIntent.test(message) || locationPattern.test(message) || isFollowUp(message) || listingCodes(message).length || /(?<![\p{L}])(?:đặt\s+lịch|hẹn\s+xem|lưu\s+căn|yêu\s+thích|liên\s+hệ|chuyên\s+viên)(?![\p{L}])/iu.test(message)) return { needed: false, question: null, options: [] };
   const location = previousSearchLocation(history);
   if (!location) return { needed: false, question: null, options: [] };
   const action = /thuê/iu.test(message) ? 'thuê' : /mua/iu.test(message) ? 'mua' : 'tìm';

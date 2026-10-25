@@ -54,3 +54,11 @@ describe('abusive messages and refusals', () => {
     expect(sourcesFromCitations('Căn này giá 7 tỷ, chưa có thông tin về sổ hồng.', card, true)).toEqual(card);
   });
 });
+
+describe('booking a named listing', () => {
+  it('never asks for the area again', () => {
+    const history = [{ role: 'user', content: 'thuê nhà ở Quận 9' }, { role: 'assistant', content: 'Có 1 căn ở Quận 9.' }];
+    expect(clarificationFor('Đặt lịch xem căn RVL-69B7C6BB8461439E', history).needed).toBe(false);
+    expect(clarificationFor('Tôi muốn đặt lịch xem nhà', history).needed).toBe(false);
+  });
+});
