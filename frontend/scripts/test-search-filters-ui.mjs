@@ -9,7 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 export async function runSearchFiltersUI(origin){
   const screenshots=join(tmpdir(),'pose-search-filters-ui');await mkdir(screenshots,{recursive:true});
   const profile=await mkdtemp(join(tmpdir(),'pose-search-chrome-'));
-  const chrome=spawn(process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--remote-debugging-port=3510',`--user-data-dir=${profile}`,'about:blank'],{windowsHide:true,stdio:['ignore','ignore','pipe']});
+  const chrome=spawn(process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--no-sandbox','--disable-gpu','--no-first-run','--no-default-browser-check','--remote-debugging-port=3510',`--user-data-dir=${profile}`,'about:blank'],{windowsHide:true,stdio:['ignore','ignore','pipe']});
   let chromeOutput='';chrome.stderr.on('data',chunk=>{chromeOutput+=chunk;});
   let ws,checks=0,id=0;const pending=new Map();
   const check=(condition,message)=>{assert.ok(condition,message);checks++;};

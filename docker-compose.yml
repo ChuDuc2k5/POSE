@@ -16,8 +16,11 @@ services:
     depends_on: [redis]
     networks: [pose]
   frontend:
-    build: ./frontend
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
     environment:
+      PORT: 3000
       BACKEND_URL: http://backend:3001
     ports: ["3000:3000"]
     depends_on: [backend]

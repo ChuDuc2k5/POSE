@@ -1,0 +1,8 @@
+{
+  "assistant": { "file": "assistant.system.md", "version": "assistant@7" },
+  "query": { "file": "query.system.md", "version": "query@3" },
+  "answer-meta": { "file": "answer-meta.system.md", "version": "answer-meta@2" },
+  "needs": { "file": "needs.system.md", "version": "needs@2" },
+  "rerank.system": { "file": "rerank.system.md", "version": "rerank.system@2" },
+  "rerank.user": { "file": "rerank.user.md", "version": "rerank.user@3" }
+}
