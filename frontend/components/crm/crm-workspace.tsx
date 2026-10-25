@@ -5,6 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, us
 import { LoaderCircle } from 'lucide-react';
 import { catalogRequest } from '@/lib/catalog-client';
 import { CrmStore, emptyCrmSnapshot } from '@/lib/crm-store';
+import { AccountDropdown } from '../account-dropdown';
 import s from './crm.module.css';
 
 type Identity = { userId: string; role: 'Admin' | 'Sales'; name: string };
@@ -50,9 +51,9 @@ function NavigationStatus() {
 function Header() {
   const { role, name, store } = useCrmWorkspace(), pathname = usePathname();
   return <header className={s.header} data-crm-header><div className={s.headerInner}>
-    <Link href={role === 'Admin' ? '/admin' : '/sales'} className={s.brand} prefetch={role === 'Sales'} aria-label={role === 'Admin' ? 'TERAVA — Trang chủ quản trị' : 'TERAVA — Không gian Sales'}><span>T</span><div><strong>TERAVA</strong><small>Kết nối bất động sản & khách hàng</small></div></Link>
-    <nav aria-label="Điều hướng Lead và Sales">{[['/leads', 'Quản lý Lead', 'leads'], ['/sales', 'Không gian Sales', 'sales']].map(([href, label, module]) => <Link key={href} href={href} prefetch className={pathname === href ? s.active : ''} aria-current={pathname === href ? 'page' : undefined} onPointerEnter={() => { void store.prefetch(module as 'leads' | 'sales'); }} onFocus={() => { void store.prefetch(module as 'leads' | 'sales'); }}>{label}<NavigationStatus/></Link>)}</nav>
-    <Link href="/account" className={s.account}><span>{name.slice(0, 1).toUpperCase()}</span><div><strong>{name}</strong><small>{role === 'Admin' ? 'Quản trị viên' : 'Nhân viên tư vấn'}</small></div></Link>
+    <Link href="/" className={s.brand} aria-label="TERAVA — Trang chủ"><span>T</span><div><strong>TERAVA</strong><small>Kết nối bất động sản & khách hàng</small></div></Link>
+    <nav aria-label="Điều hướng Lead và Sales"><Link href="/">Trang chủ</Link>{[['/leads', 'Quản lý Lead', 'leads'], ['/sales', 'Không gian Sales', 'sales']].map(([href, label, module]) => <Link key={href} href={href} prefetch className={pathname === href ? s.active : ''} aria-current={pathname === href ? 'page' : undefined} onPointerEnter={() => { void store.prefetch(module as 'leads' | 'sales'); }} onFocus={() => { void store.prefetch(module as 'leads' | 'sales'); }}>{label}<NavigationStatus/></Link>)}</nav>
+    <div className={s.accountMenu}><AccountDropdown role={role} name={name}/></div>
   </div></header>;
 }
 // `embedded` drops the CRM header when the admin shell already provides navigation.

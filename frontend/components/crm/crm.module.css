@@ -10,3 +10,5 @@
 @media(prefers-reduced-motion:reduce){.spinner,.loadingTitle,.loadingText,.loadingMetrics>span,.loadingPanel{animation:none}}
 
 .embedded{color:#202b39;color-scheme:light}
+.accountMenu{display:flex;align-items:center;padding-left:24px;border-left:1px solid #e8ebe4;flex-shrink:0}
+@media(max-width:600px){.accountMenu{margin-left:auto;border:0;padding:0}}
