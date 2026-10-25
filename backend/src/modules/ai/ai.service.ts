@@ -8,7 +8,7 @@ import { systemClient } from '../supabase/supabase.service.js';
 import { catalogDatabaseError, catalogError, catalogInput, catalogJson } from '../catalog/catalog.service.js';
 import { uuidPattern } from '../../common/catalog.js';
 import { object } from './extraction.js';
-import { inferSearch, inferTransactionType, centralFormerDistricts } from './infer-search.js';
+import { inferSearch, inferTransactionType, centralFormerDistricts, genericHome } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
 import { correctionData, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult } from './retrieval.js';
@@ -180,6 +180,15 @@ export class AiService {
         if(inferredFilters?.maxArea!==undefined && queryFilters.maxArea===undefined)queryFilters.maxArea=inferredFilters.maxArea;
         if(/(?<![\p{L}])vay(?![\p{L}])/iu.test(source) && inferredFilters?.maxPrice!==undefined){queryFilters.maxPrice=inferredFilters.maxPrice;delete queryFilters.minPrice;}
         if (!queryFilters.location && /gần\s+(?:Quận\s*1|trung tâm)|đi\s+làm\s+(?:Quận\s*1|trung tâm)/iu.test(source)) queryFilters.locations=centralFormerDistricts;
+        // The newest message wins: what it states explicitly replaces the model's reading of earlier turns,
+        // and a price from an earlier turn is never carried into a message that names none.
+        if(inferredFilters){
+          for(const key of ['location','locations','type','transaction_type','minPrice','maxPrice'] as const)if(inferredFilters[key]!==undefined)queryFilters[key]=inferredFilters[key];
+          if(inferredFilters.location)delete queryFilters.locations;
+          if(inferredFilters.locations)delete queryFilters.location;
+        }
+        if(!moneyAmounts(source).length){delete queryFilters.minPrice;delete queryFilters.maxPrice;}
+        if(genericHome(source))delete queryFilters.type;
         referenceIds=query.refers_to_previous.map(index=>interestIds[index-1]).filter((value):value is string=>typeof value==='string');
       } catch(error) { if(!(error instanceof Error && error.message==='NOT_A_PROPERTY_QUERY'))log('query_step',source,'invalid_query','flagged'); }
     }
@@ -193,7 +202,7 @@ export class AiService {
     const pureReference=referenceIds.length>0 && Object.keys(queryFilters).length===0 && /\b(?:căn|can|nhà|nha|lô|lo|khu|kết quả|ket qua|đó|do|vừa|vua|thứ|thu|nào|nao|tiếp|tiep|trước|truoc|nêu|neu)\b/i.test(source);
     if(codeReference.codes.length) { items=await retrieveCodes(codeReference.codes); searchPerformed=false; }
     else if(pureReference) { items=await retrieveIds(referenceIds); searchPerformed=false; }
-    else if((realEstateIntent || modelTopic==='real_estate') && !searchPerformed) { items=await search(queryFilters,null,referenceIds,[standalone,...queryKeywords].join(' ')); searchPerformed=true; }
+    else if((realEstateIntent || modelTopic==='real_estate') && !searchPerformed) { items=await search(queryFilters,null,referenceIds,[standalone,...queryKeywords].join(' ')); searchPerformed=true; console.info(JSON.stringify({event:'search_filters',filters:queryFilters,found:items.length,related:related.length})); }
     const extracted:Record<string,unknown>={};
     const contextBlocks=items.map((item,index)=>`[${item.number || index+1}] ${item.code || ''} ${item.name || ''} ${withFormerDistrict(item.location || '')} giá=${priceLabel(item.price,item.price_period==='Month' || item.transaction_type==='Rent')} availability=${item.availability || 'unknown'}`).join('\n');
     const agentMessages=[{role:'system' as const,content:SYSTEM_PROMPT},{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({question:standalone,history:sanitizedHistory,properties:contextBlocks,customer_text:source,contact_redacted:guest && source!==input.message,injection_suspected:suspected,search_performed:searchPerformed})}\nEND_UNTRUSTED_DATA`}];
