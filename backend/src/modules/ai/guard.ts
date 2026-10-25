@@ -131,7 +131,9 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
     }
     // A price stated in a clause must be a listed product price; the customer's own
     // budget figures are only allowed when the clause talks about the budget.
-    if(/giá|price/i.test(clause) && !/ngân sách|bạn (?:đề nghị|nêu|có)|theo yêu cầu/i.test(clause) && moneyAmounts(moneyText(clause,evidence)).some(amount=>!(mentioned.length ? mentioned:evidence).some(p=>p.price===amount)))return 'UNSUPPORTED_PRICE';
+    // "giá dưới 15 triệu/tháng" repeats the customer's own limit, not a listing price.
+    const echoesLimit=(amount:number)=>customerAmounts.includes(amount) && /dưới|trên|tối đa|tối thiểu|không quá|khoảng|tầm|từ|đến|mức/i.test(clause);
+    if(/giá|price/i.test(clause) && !/ngân sách|bạn (?:đề nghị|nêu|có)|theo yêu cầu/i.test(clause) && moneyAmounts(moneyText(clause,evidence)).some(amount=>!echoesLimit(amount) && !(mentioned.length ? mentioned:evidence).some(p=>p.price===amount)))return 'UNSUPPORTED_PRICE';
     const availability=[...clause.matchAll(/\bAvailable\b|còn (?:bán|hàng|để bán|cho thuê)|đang (?:mở bán|bán|cho thuê)|mở bán|chào bán|sẵn hàng|có sẵn|có thể (?:mua|thuê)|for (?:sale|rent)/gi)].filter(m=>!negated(clause,m.index!));
     if(!availability.length)continue;
     if(related.some(e=>e.availability!=='Available'))return 'UNSUPPORTED_AVAILABILITY';
