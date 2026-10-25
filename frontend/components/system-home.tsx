@@ -4,6 +4,7 @@ import { Clock3, ShieldCheck, Star } from 'lucide-react';
 import { HomeConsultation, HomeNavigation, HomePropertySearch, FeaturedProperties } from './home-sections';
 import styles from './system-home.module.css';
 import { Brand } from './brand';
+import type { Role } from '@/lib/roles';
 
 const categories = [
   { type: 'Apartment', label: 'Căn hộ', image: 'apartment', alt: 'Căn hộ với phòng khách rộng, ngập ánh sáng tự nhiên' },
@@ -23,9 +24,9 @@ const priorities = [
   { quote: 'Một địa điểm phù hợp để doanh nghiệp phát triển và tạo nên những kết nối mới.', initial: 'D', name: 'Khách hàng doanh nghiệp', detail: 'Không gian cho sự phát triển' },
 ];
 
-export function SystemHome() {
+export function SystemHome({ role, name }: { role: Role | null; name?: string }) {
   return <div className={styles.page} id="trang-chu">
-    <HomeNavigation/>
+    <HomeNavigation role={role} name={name}/>
     <main>
       <section className={styles.hero} aria-labelledby="home-heading">
         <div className={`${styles.container} ${styles.heroGrid}`}>

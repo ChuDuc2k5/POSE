@@ -21,3 +21,48 @@ html{scroll-behavior:smooth;scroll-padding-top:100px}body{font-family:var(--font
 
 .header-role { font-size:11px; color:var(--nx-muted); background:var(--nx-primary-soft); border:1px solid var(--nx-line); border-radius:999px; padding:6px 10px; white-space:nowrap; }
 .site-header nav .button.secondary { font-size:12px; padding:9px 13px; min-height:38px; }
+.header-inner nav { gap: 30px; font-size: 15px; font-weight: 600; min-height: 44px; }
+.header-inner nav > a, .property-menu-trigger, .support-menu-trigger { color: var(--nx-ink); font-weight: 600; }
+.header-inner nav > a { min-height: 44px; display: inline-flex; align-items: center; text-decoration: none; }
+.header-inner nav > a[aria-current] { border-bottom: 2px solid var(--nx-primary); }
+.header-inner nav .property-menu[aria-current="page"] .property-menu-trigger { border-bottom: 2px solid var(--nx-primary); }
+.header-inner nav > a:hover, .property-menu-trigger:hover, .support-menu-trigger:hover { color: var(--nx-primary); background: var(--nx-primary-soft); border-radius: 999px; padding-inline: 10px; }
+.property-menu-trigger, .support-menu-trigger { min-height: 44px; border: 0; background: transparent; font: inherit; display: inline-flex; align-items: center; gap: 6px; padding-inline: 0; }
+.property-menu-panel, .support-menu-panel { min-width: 270px; padding: 8px; border: 1px solid var(--nx-line); border-radius: 12px; background: #fff; box-shadow: 0 16px 40px #202b3920; }
+.property-menu-panel a, .support-menu-panel a { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; white-space: normal; color: var(--nx-ink); }
+.property-menu-panel a:hover, .support-menu-panel a:hover { background: var(--nx-primary-soft); color: var(--nx-primary); }
+.property-menu-panel span, .support-menu-panel span { display: grid; gap: 3px; }
+.property-menu-panel strong, .support-menu-panel strong { font-size: 13px; font-weight: 600; }
+.property-menu-panel small, .support-menu-panel small { color: var(--nx-muted); font-size: 11px; line-height: 1.35; }
+.support-menu { position: relative; }
+.support-menu-panel { position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 40; }
+.account-trigger { min-height: 44px; border: 0; background: var(--nx-primary); color: #fff; font-weight: 600; }
+.account-trigger:hover { background: var(--nx-primary-hover); }
+.account-avatar-small { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; background: var(--nx-primary-soft); color: var(--nx-primary); font-size: 12px; font-weight: 700; }
+.account-role { display: grid; gap: 3px; }
+.account-role strong { color: var(--nx-ink); font-size: 13px; }
+.account-role small { color: var(--nx-muted); font-size: 11px; }
+.account-menu-server-hint { display: none !important; }
+@media (max-width: 900px) {
+  .header-inner nav { top: 76px; gap: 4px; padding: 14px 16px 20px; }
+  .header-inner nav > a, .property-menu-trigger, .support-menu-trigger { width: 100%; justify-content: space-between; padding: 11px 10px; }
+  .support-menu { width: 100%; }
+  .property-menu-panel, .support-menu-panel { position: static; transform: none; width: 100%; min-width: 0; box-shadow: none; border-radius: 8px; margin: 3px 0 4px; }
+  .header-inner nav .account-dropdown { margin-top: 8px; }
+}
+
+/* Account menu: a navy identity band on top, icon rows below, sign-out separated in red. */
+.account-menu { padding: 0 0 8px; overflow: hidden; min-width: 260px; border-radius: 14px; border: 1px solid var(--nx-line); box-shadow: 0 18px 40px #202b3926; background: var(--nx-surface); }
+.account-menu .account-role { display: flex; align-items: center; gap: 12px; padding: 16px 18px; margin: 0 0 6px; background: var(--nx-primary); border: 0; }
+.account-menu .account-role > span:last-child { display: grid; gap: 4px; }
+.account-menu .account-role strong { color: #fff; font-size: 14px; }
+.account-menu .account-role small { justify-self: start; color: var(--nx-primary); background: var(--nx-primary-soft); border-radius: 999px; padding: 2px 9px; font-size: 11px; font-weight: 600; }
+.account-avatar-large { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: var(--nx-primary-soft); color: var(--nx-primary); font-weight: 700; font-size: 15px; flex-shrink: 0; }
+.account-menu > a, .account-menu .account-menu-item { display: flex; align-items: center; gap: 11px; margin: 0 8px; padding: 10px 12px; border-radius: 9px; color: var(--nx-ink); font-weight: 500; text-decoration: none; }
+.account-menu > a svg { color: var(--nx-primary); }
+.account-menu > a:hover, .account-menu > a:focus-visible { background: var(--nx-primary-soft); color: var(--nx-primary); }
+.account-menu .account-logout { width: calc(100% - 16px); margin-top: 6px; border: 0; border-top: 1px solid var(--nx-line); border-radius: 0 0 9px 9px; background: transparent; color: #b33f3f; text-align: left; cursor: pointer; }
+.account-menu .account-logout:hover { background: #fbecec; }
+/* Dropdown triggers match the plain nav links: same size, weight and colour. */
+.property-menu-trigger, .support-menu-trigger { font-size: 15px !important; font-weight: 600 !important; color: var(--nx-ink) !important; padding: 10px 12px !important; border-radius: 10px; }
+.property-menu-trigger:hover, .support-menu-trigger:hover, .property-menu-trigger[aria-expanded="true"], .support-menu-trigger[aria-expanded="true"] { background: var(--nx-primary-soft); color: var(--nx-primary) !important; }

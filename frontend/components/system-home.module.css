@@ -333,3 +333,17 @@
 @media (prefers-reduced-motion: reduce) {
   .page *, .page *::before, .page *::after { scroll-behavior: auto; transition: none; animation: none; }
 }
+.navLinks > a, .navLinks .property-menu-trigger, .navLinks .support-menu-trigger { color: var(--nx-ink); font-size: 15px; font-weight: 600; min-height: 44px; }
+.navLinks > a[aria-current] { border-bottom: 2px solid var(--nx-primary); }
+.navLinks .support-menu { position: relative; }
+.navLinks .support-menu-panel { position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 40; }
+@media (max-width: 900px) {
+  .navLinks { display: none; position: absolute; top: 100%; left: 0; right: 0; padding: 14px 16px 20px; background: #fff; box-shadow: 0 15px 25px #202b3914; }
+  .navOpen { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+  .navLinks > a, .navLinks .property-menu-trigger, .navLinks .support-menu-trigger { width: 100%; justify-content: space-between; padding: 11px 10px; }
+  .navLinks .property-menu-panel, .navLinks .support-menu-panel { position: static; transform: none; width: 100%; min-width: 0; box-shadow: none; border-radius: 8px; }
+  .navLinks .support-menu { width: 100%; }
+  .navAccount { margin-left: auto; }
+}
+/* On phones the account lives in the drawer only, so the bar shows just the logo and the menu button. */
+@media (max-width: 760px) { .navAccount { display: none; } }

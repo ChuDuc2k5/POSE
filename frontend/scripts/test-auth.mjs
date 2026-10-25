@@ -111,12 +111,13 @@ try {
   check(me.headers.get('cache-control') === 'no-store', 'Profile must not be cached');
   const protectedPage = path => fetch(`${origin}${path}`, { headers: { Cookie: cookie }, redirect: 'manual' });
   const checkGuestEntryRedirects = async destination => {
-    for (const path of ['/', '/sign-in', '/sign-up']) {
+    for (const path of ['/sign-in', '/sign-up']) {
       const response = await protectedPage(path);
       check(response.status === 307 && response.headers.get('location') === destination, `Signed-in ${accessRole} entering ${path} opens ${destination}`);
       check(!(await response.text()).includes('Thông tin rõ ràng.'), 'Signed-in guest entry must not render landing content');
     }
   };
+  check((await protectedPage('/')).status === 200 && (await (await protectedPage('/')).text()).includes('account-trigger'), 'Signed-in landing stays public and shows account navigation');
   await checkGuestEntryRedirects('/customer');
   for (const path of ['/customer','/customer/favorites','/customer/inquiries','/customer/inquiries/new','/properties']) {
     const header = (await (await protectedPage(path)).text()).match(/<header\b[\s\S]*?<\/header>/)?.[0] || '';
@@ -143,7 +144,7 @@ try {
   check((await fetch(`${origin}/api/workspace/admin`, { headers: { Cookie: cookie } })).status === 403, 'User must not access admin BFF');
   check((await fetch(`${origin}/api/workspace/sales`)).status === 401, 'Anonymous workspace API must be denied');
   user.user_metadata.role = 'Admin';
-  check((await protectedPage('/')).headers.get('location') === '/customer', 'Guest entry ignores forged user metadata role');
+  check((await protectedPage('/')).status === 200 && (await (await protectedPage('/')).text()).includes('account-trigger'), 'Landing ignores forged user metadata role and shows the account trigger');
   check((await protectedPage('/admin')).headers.get('location')?.endsWith('/forbidden'), 'Editable metadata must not grant Admin');
   accessRole = 'Sales';
   await checkGuestEntryRedirects('/sales');

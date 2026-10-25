@@ -10,9 +10,12 @@ import type { SearchResult } from '@/lib/discovery';
 import { saveInquiryDraft } from '@/lib/inquiry-draft';
 import { Brand } from './brand';
 import { PropertyNavigation } from './property-navigation';
+import { SupportNavigation } from './support-navigation';
+import { AccountDropdown } from './account-dropdown';
+import type { Role } from '@/lib/roles';
 import styles from './system-home.module.css';
 
-export function HomeNavigation() {
+function LegacyHomeNavigation() {
   const [open, setOpen] = useState(false);
   return <header className={styles.navigation}>
     <div className={styles.navigationInner}>
@@ -29,6 +32,15 @@ export function HomeNavigation() {
 }
 
 const typeChips = [['Apartment', 'Căn hộ'], ['Villa', 'Biệt thự'], ['Land', 'Đất nền'], ['Office', 'Văn phòng']];
+export function HomeNavigation({ role, name }: { role: Role | null; name?: string }) {
+  const [open, setOpen] = useState(false);
+  const close = () => setOpen(false);
+  return <header className={styles.navigation}><div className={styles.navigationInner}><Brand light={false} compactOnMobile/><button type="button" className={styles.menuToggle} onClick={() => setOpen(value => !value)} aria-expanded={open} aria-controls="home-navigation" aria-label={open ? 'Đóng menu' : 'Mở menu'}>{open ? <X size={23}/> : <Menu size={23}/>}</button><nav id="home-navigation" aria-label="Điều hướng chính" className={`${styles.navLinks} ${open ? styles.navOpen : ''}`}>
+    <a href="/" aria-current="page" onClick={close}>Trang chủ</a><PropertyNavigation/><SupportNavigation onNavigate={close}/><a href="/#ve-nexcall" onClick={close}>Về TERAVA</a>
+    <div className={styles.drawerAccount}>{role ? <AccountDropdown role={role} name={name}/> : <><Link href="/sign-in" onClick={close}>Đăng nhập</Link><Link href="/sign-up" className={styles.primaryButton} onClick={close}>Đăng ký</Link></>}</div>
+  </nav><div className={styles.navAccount}>{role ? <AccountDropdown role={role} name={name}/> : <><Link href="/sign-in" className={styles.smallButton}>Đăng nhập</Link><Link href="/sign-up" className={styles.primaryButton}>Đăng ký</Link></>}</div></div></header>;
+}
+
 const budgets = [
   { value: 'under5', label: 'Dưới 5 tỷ', min: '', max: '5000000000' },
   { value: '5to10', label: '5–10 tỷ', min: '5000000000', max: '10000000000' },

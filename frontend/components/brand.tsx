@@ -13,7 +13,7 @@ export function Brand({ light = true, href = '/', iconVariant = 'navy', compactO
     <span className={styles.lockup}>
       {light ? <><TeravaMark size={48} variant={iconVariant}/><Image src="/brand/terava-wordmark.svg" alt="" aria-hidden="true" width={624} height={145} className={styles.lightWordmark} unoptimized/></> : <Image src="/brand/terava-horizontal.svg" alt="" aria-hidden="true" width={420} height={110} className={styles.horizontal} unoptimized/>}
     </span>
-    {compactOnMobile && <span className={styles.compact}><TeravaMark size={42} variant="white"/></span>}
+    {compactOnMobile && <span className={styles.compact}><TeravaMark size={42} variant={light ? 'white' : 'navy'}/></span>}
   </Link>;
 }
 
