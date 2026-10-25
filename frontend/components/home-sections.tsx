@@ -84,7 +84,7 @@ const examples = [
   { name: 'TERAVA Central Plaza', image: 'office', type: 'Office', description: 'Văn phòng hiện đại với mặt bằng thông thoáng, kết nối thuận tiện cho doanh nghiệp.', location: 'Kết nối trung tâm, đón đầu cơ hội', price: 'Văn phòng hiện đại' },
 ];
 
-type HomeProperty = { id: string; name: string; type: string; image: string; description: string; location: string; price: string; href: string };
+type HomeProperty = { id: string; name: string; type: string; image: string; cover_id?: string | null; description: string; location: string; price: string; href: string };
 
 function PropertyPhoto({ item }: { item: HomeProperty }) {
   const [failed, setFailed] = useState(false);
@@ -97,11 +97,11 @@ export function FeaturedProperties() {
   const [items, setItems] = useState<HomeProperty[] | null>(null);
   useEffect(() => {
     const controller = new AbortController();
-    fetch('/api/catalog/search?availability=Available&pageSize=3', { signal: controller.signal, cache: 'no-store' })
+    fetch('/api/catalog/search?availability=Available&pageSize=12', { signal: controller.signal, cache: 'no-store' })
       .then(async response => {
         if (!response.ok) throw new Error('CATALOG_UNAVAILABLE');
         const result: SearchResult = await response.json();
-        setItems(result.items.map(item => ({ id: item.id, name: item.name, type: item.property_type || 'Apartment', image: item.cover_id ? `/api/catalog/media/${item.cover_id}?public=true` : '', description: item.description, location: item.location, price: priceLabel(item.price) + (item.price != null && item.price_period === 'Month' ? '/tháng' : ''), href: `/properties/${item.id}` })));
+        setItems(result.items.map(item => ({ id: item.id, name: item.name, type: item.property_type || 'Apartment', cover_id: item.cover_id, image: item.cover_id ? `/api/catalog/media/${item.cover_id}?public=true` : '', description: item.description, location: item.location, price: priceLabel(item.price) + (item.price != null && item.price_period === 'Month' ? '/tháng' : ''), href: `/properties/${item.id}` })));
       })
       .catch(() => { /* Keep the explicitly labelled inspiration cards available offline. */ });
     return () => controller.abort();

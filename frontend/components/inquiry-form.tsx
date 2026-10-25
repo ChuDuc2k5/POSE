@@ -8,7 +8,7 @@ import { inquiryLabels } from '@/lib/discovery';
 import { readInquiryDraft, clearInquiryDraft } from '@/lib/inquiry-draft';
 
 type Draft={name:string;phone:string;country:string;email:string;channel:string;preferredTime:string;message:string;createdAt:number};
-export function InquiryForm({propertyId=null,propertyName}:{propertyId?:string|null;propertyName?:string}) {
+export function InquiryForm({propertyId=null,propertyName,guest=false}:{propertyId?:string|null;propertyName?:string;guest?:boolean}) {
   const [identity,setIdentity]=useState<'loading'|'customer'|'guest'|'staff'|'error'>('loading');
   const [name,setName]=useState(''),[phone,setPhone]=useState(''),[country,setCountry]=useState(''),[email,setEmail]=useState('');
   const [channel,setChannel]=useState('Email'),[preferredTime,setPreferredTime]=useState(''),[message,setMessage]=useState('');
@@ -30,6 +30,8 @@ export function InquiryForm({propertyId=null,propertyName}:{propertyId?:string|n
       setCountry(text(draft?.country,homeDraft ? 'VN':''));setEmail(accountEmail || text(draft?.email));
       setChannel(draft?.channel==='Phone' ? 'Phone':'Email');setPreferredTime(text(draft?.preferredTime));setMessage(text(draft?.message,homeDraft?.message || ''));
     };
+    // The server already knows a visitor is signed out; skip the identity call that would only answer 401.
+    if(guest){apply();setIdentity('guest');return()=>controller.abort();}
     fetch('/api/auth/me',{cache:'no-store',signal:controller.signal}).then(async response=>{
       if(response.status===401){apply();setIdentity('guest');return;}
       if(!response.ok)throw new Error();
@@ -38,7 +40,7 @@ export function InquiryForm({propertyId=null,propertyName}:{propertyId?:string|n
       apply(data.profile,me.user.email);setIdentity('customer');
     }).catch(()=>{if(!controller.signal.aborted)setIdentity('error');});
     return()=>controller.abort();
-  },[propertyId,draftKey,attempt]);
+  },[propertyId,draftKey,attempt,guest]);
   useEffect(()=>{
     if(!['guest','customer'].includes(identity)||result)return;
     try{sessionStorage.setItem(draftKey,JSON.stringify({name,phone,country,email,channel,preferredTime,message,createdAt:Date.now()}));}catch{/* The form works without draft storage. */}

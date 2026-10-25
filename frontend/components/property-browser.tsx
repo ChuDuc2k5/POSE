@@ -18,7 +18,7 @@ export function PropertyBrowser({ initialQuery, role }: { initialQuery:string; r
   const [projects,setProjects]=useState<{id:string;name:string}[]>([]),[projectError,setProjectError]=useState(false);
   const [result,setResult]=useState<SearchResult|null>(null),[error,setError]=useState(''),[fields,setFields]=useState<Record<string,string>>({}),[busy,setBusy]=useState(true);
   const snapshot=useRef<string|null>(new URLSearchParams(initialQuery).get('snapshot'));
-  const favorites=useFavoriteStatus(result?.items.map(item=>item.id) || []);
+  const favorites=useFavoriteStatus(result?.items.map(item=>item.id) || [],role!==null);
   useEffect(()=>{const controller=new AbortController();catalogRequest<{items:typeof projects}>('/api/catalog/projects',{signal:controller.signal}).then(data=>setProjects(data.items)).catch(()=>{if(!controller.signal.aborted)setProjectError(true);});return()=>controller.abort();},[]);
   useEffect(()=>{
     const controller=new AbortController(),params=new URLSearchParams(query);params.set('page',String(page));params.set('pageSize','12');

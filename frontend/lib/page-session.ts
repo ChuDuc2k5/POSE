@@ -1,14 +1,19 @@
 import 'server-only';
+import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { backendFetch } from './backend';
 import { allowsRole, roleHome, type Role } from './roles';
 export const ACCESS_COOKIE = 'pose-access';
 export const REFRESH_COOKIE = 'pose-refresh';
-export async function authenticatedSession({ writable = false }: { writable?: boolean } = {}) {
+// One backend session lookup per request, shared by layouts and pages.
+const sessionLookup = cache(async (writable: boolean) => {
   const response = await backendFetch(`/api/auth/session?writable=${writable}`);
   if (!response.ok) throw new Error('AUTH_UNAVAILABLE');
   return await response.json() as { user: { id: string; email?: string }; role: Role } | null;
+});
+export async function authenticatedSession({ writable = false }: { writable?: boolean } = {}) {
+  return sessionLookup(writable);
 }
 export async function requirePageSession(path: string, roles?: readonly Role[]) {
   const session = await authenticatedSession({ writable: false });

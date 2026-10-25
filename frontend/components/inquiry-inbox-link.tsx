@@ -1,9 +1,9 @@
 'use client';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Bell } from 'lucide-react';
+import { ArrowRight, Bell } from 'lucide-react';
 import { io } from 'socket.io-client';
-export function InquiryInboxLink(){
+export function InquiryInboxLink({ active = false, onNavigate }: { active?: boolean; onNavigate?: () => void }){
   const [unread,setUnread]=useState<number|null>(null);
   useEffect(()=>{
     let live=true;
@@ -12,5 +12,5 @@ export function InquiryInboxLink(){
     const timer=setInterval(()=>{if(document.visibilityState==='visible')reload();},30000);
     return()=>{live=false;clearInterval(timer);connection.disconnect();};
   },[]);
-  return <Link className="button secondary" href="/admin/inquiries"><Bell size={17}/> Yêu cầu tư vấn{unread!==null && unread>0 ? ` (${unread})`:''}</Link>;
+  return <Link className={active ? 'active' : undefined} aria-current={active ? 'page' : undefined} href="/admin/inquiries" onClick={onNavigate}><Bell size={19}/>Yêu cầu tư vấn{unread!==null && unread>0 ? <span className="admin-unread-badge">{unread}</span>:null}<ArrowRight size={15}/></Link>;
 }

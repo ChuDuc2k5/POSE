@@ -22,7 +22,7 @@ export function useFavoriteStatus(ids: string[], enabled=true) {
     }).catch(()=>{if(!controller.signal.aborted)setStatus({key,ids:[],customer:true,error:'Chưa thể tải yêu thích. Hãy tải lại trang.'});});
     return()=>controller.abort();
   },[key,enabled]);
-  return { ...status,ready:status.key===key,has:(id:string)=>status.ids.includes(id) };
+  return { ...status,ready:!enabled || status.key===key,has:(id:string)=>status.ids.includes(id) };
 }
 export function FavoriteButton({ id,saved,customer,ready=true,onChange }: { id:string;saved:boolean;customer:boolean;ready?:boolean;onChange?:()=>void }) {
   const [value,setValue]=useState<{saved:boolean}|null>(null);

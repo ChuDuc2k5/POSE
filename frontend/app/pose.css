@@ -66,3 +66,27 @@ html{scroll-behavior:smooth;scroll-padding-top:100px}body{font-family:var(--font
 /* Dropdown triggers match the plain nav links: same size, weight and colour. */
 .property-menu-trigger, .support-menu-trigger { font-size: 15px !important; font-weight: 600 !important; color: var(--nx-ink) !important; padding: 10px 12px !important; border-radius: 10px; }
 .property-menu-trigger:hover, .support-menu-trigger:hover, .property-menu-trigger[aria-expanded="true"], .support-menu-trigger[aria-expanded="true"] { background: var(--nx-primary-soft); color: var(--nx-primary) !important; }
+
+/* Route loading skeletons, used by the loading.tsx route files. */
+.route-skeleton { width:min(1180px, calc(100% - 32px)); margin:32px auto; display:grid; gap:24px; }
+.route-skeleton i { display:block; border-radius:12px; background:linear-gradient(90deg, var(--nx-surface-soft) 0%, var(--nx-line) 50%, var(--nx-surface-soft) 100%); background-size:200% 100%; animation:route-skeleton-shimmer 1.2s ease-in-out infinite; }
+.route-skeleton-title { display:grid; gap:10px; }
+.route-skeleton-title i:first-child { width:min(420px, 70%); height:34px; }
+.route-skeleton-title i:last-child { width:min(620px, 90%); height:16px; }
+.route-skeleton-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:24px; }
+.route-skeleton-card { display:grid; gap:10px; padding:12px; border:1px solid var(--nx-line); border-radius:16px; background:var(--nx-surface); }
+.route-skeleton-card i:first-child { aspect-ratio:3/2; }
+.route-skeleton-card i:nth-child(2) { height:18px; width:80%; }
+.route-skeleton-card i:last-child { height:14px; width:50%; }
+.route-skeleton-detail { display:grid; grid-template-columns:minmax(0, 3fr) minmax(0, 2fr); gap:24px; }
+.route-skeleton-detail > i { aspect-ratio:4/3; }
+.route-skeleton-detail > div { display:grid; gap:14px; align-content:start; }
+.route-skeleton-detail > div i { height:22px; }
+.route-skeleton-panel { display:grid; gap:16px; }
+.route-skeleton-stats { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:16px; }
+.route-skeleton-stats i { height:110px; }
+.route-skeleton-panel > i { height:52px; }
+@keyframes route-skeleton-shimmer { from { background-position:100% 0; } to { background-position:-100% 0; } }
+@media (max-width:900px) { .route-skeleton-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); } .route-skeleton-detail { grid-template-columns:1fr; } .route-skeleton-stats { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+@media (max-width:600px) { .route-skeleton-grid { grid-template-columns:1fr; } }
+@media (prefers-reduced-motion:reduce) { .route-skeleton i { animation:none; } }

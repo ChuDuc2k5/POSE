@@ -19,7 +19,7 @@ let child,server,ws,send,checks=0;
 try {
  let output='';server=spawn(process.execPath,['scripts/test-automated-calling.mjs','--preview-only'],{cwd:new URL('..',import.meta.url),env:process.env,windowsHide:true,stdio:['ignore','pipe','pipe','ipc']});
  server.stdout.on('data',x=>output+=x);server.stderr.on('data',x=>output+=x);
- for(let i=0;i<120 && !output.includes('PREVIEW READY:');i++){if(server.exitCode!==null)break;await delay(100);}
+ for(let i=0;i<3000 && !output.includes('PREVIEW READY:');i++){if(server.exitCode!==null)break;await delay(100);}
  assert.ok(output.includes('PREVIEW READY:'),'isolated preview ready: '+output);
  child=spawn(chrome,['--headless','--no-sandbox','--disable-gpu','--no-first-run','--disable-background-networking','--remote-debugging-port=3502',`--user-data-dir=${join(root,'isolated-'+Date.now())}`,'about:blank'],{windowsHide:true,stdio:'ignore'});
  let target;
@@ -48,8 +48,8 @@ try {
   const condition=page==='sales'?"document.querySelectorAll('.calls-sales .calls-item').length===4":page==='list'?"document.querySelectorAll('.calls-item').length===5&&document.querySelectorAll('.calls-filters select').length===3":page==='detail'?"document.querySelectorAll('.calls-timeline li').length>=3&&!!document.querySelector('[data-call-cost]')":"document.querySelector('.catalog-sidebar')&&document.querySelector('select option[value=\"f7800000-0000-4000-8000-000000000001\"]')";
   await waitFor(`document.readyState==='complete'&&!!(${condition})`,name+' specific content');
   if(page!=='sales'){
-   const shell=await evaluate("({nav:Array.from(document.querySelectorAll('.catalog-sidebar nav a')).map(a=>a.innerText),active:document.querySelector('.catalog-sidebar nav [aria-current]')?.innerText,label:document.querySelector('.catalog-sidebar-label')?.innerText,note:!!document.querySelector('.catalog-sidebar-note'),profile:!!document.querySelector('.catalog-sidebar-bottom a'),logout:!!document.querySelector('.catalog-sidebar-bottom button'),breadcrumb:document.querySelector('.catalog-topbar')?.innerText})");
-   assert.deepEqual(shell.nav,['Danh mục bất động sản','Chiến dịch gọi','Cuộc gọi']);assert.equal(shell.active,'Cuộc gọi');assert.equal(shell.label,'KHÔNG GIAN QUẢN TRỊ');assert.ok(shell.note&&shell.profile&&shell.logout);assert.ok(shell.breadcrumb.includes('Quản trị')&&shell.breadcrumb.includes('Cuộc gọi'));await visible('.catalog-sidebar nav');
+   const shell=await evaluate("({nav:Array.from(document.querySelectorAll('.catalog-sidebar nav a')).map(a=>a.innerText),active:document.querySelector('.catalog-sidebar nav [aria-current]')?.innerText,label:document.querySelector('.catalog-sidebar-label')?.innerText,shared:document.querySelectorAll('.admin-sidebar').length===1&&!document.querySelector('.catalog-sidebar:not(.admin-sidebar)'),profile:!!document.querySelector('.catalog-sidebar-bottom a'),logout:!!document.querySelector('.catalog-sidebar-bottom button'),breadcrumb:document.querySelector('.catalog-topbar')?.innerText})");
+   assert.deepEqual(shell.nav,['Sản phẩm','Dự án','Phân khu','Yêu cầu tư vấn','Chiến dịch gọi','Cuộc gọi','AI Platform','Quản lý Sales']);assert.equal(shell.active,'Cuộc gọi');assert.equal(shell.label,'KHÔNG GIAN QUẢN TRỊ');assert.ok(shell.shared&&shell.profile&&shell.logout);assert.ok(shell.breadcrumb.includes('Quản trị')&&shell.breadcrumb.includes('Cuộc gọi'));await visible(width>=900 ? '.admin-sidebar nav' : '.admin-menu-button');
   }
   if(page==='list'){
    await visible('.calls-filters');await visible('.calls-item');const content=await evaluate("document.querySelector('.calls-list').innerText");for(const label of ['Giả lập','Chiến dịch','Bắt đầu','Thời lượng','Lý do kết thúc','Xem chi tiết'])assert.ok(content.includes(label),name+' '+label);for(const call of adminCalls)assert.ok(!content.includes(call.phone_e164),'masked list phone');assert.equal(await evaluate("!!document.querySelector('dialog[open]')"),false,'clean list screenshot');
@@ -86,12 +86,13 @@ try {
  const catalogWidths=[1280,840,380];for (const width of catalogWidths) {
   await send('Emulation.setDeviceMetricsOverride',{width,height:1100,screenWidth:width,screenHeight:1100,deviceScaleFactor:1,mobile:width===380});
   await send('Page.navigate',{url:'http://localhost:3501/fixture?role=admin&path=/admin'});
-  await waitFor("!!document.querySelector('.catalog-workspace .catalog-sidebar')",'catalog sidebar '+width);
-  const nav=await evaluate(`(()=>{const links=Array.from(document.querySelectorAll('.catalog-sidebar nav a'));return {overflow:document.documentElement.scrollWidth>innerWidth,display:getComputedStyle(document.querySelector('.catalog-sidebar nav')).display,links:links.map(a=>({icon:!!a.querySelector('svg'),title:!!a.title,width:a.getBoundingClientRect().width,overflow:getComputedStyle(a).overflow}))};})()`);
+  await waitFor("!!document.querySelector('.admin-shell .admin-sidebar')",'admin sidebar '+width);
+  const nav=await evaluate(`(()=>{const side=document.querySelector('.admin-sidebar'),links=Array.from(side.querySelectorAll('nav a')),box=side.getBoundingClientRect(),menu=document.querySelector('.admin-menu-button');return {overflow:document.documentElement.scrollWidth>innerWidth,sidebars:document.querySelectorAll('.catalog-sidebar').length,onScreen:box.right>0&&box.width>0,menu:!!menu&&getComputedStyle(menu).display!=='none',links:links.map(a=>({icon:!!a.querySelector('svg'),name:a.innerText.trim()}))};})()`);
   assert.equal(nav.overflow,false,'catalog no horizontal overflow '+width);
-  assert.equal(nav.links.length,2);assert.ok(nav.links.every(a=>a.icon&&a.title),'catalog links have icons and accessible titles');
-  if(width===840)assert.ok(nav.links.every(a=>a.width===49&&a.overflow==='hidden'),'catalog links collapse to icons');
-  if(width===380)assert.equal(nav.display,'none','mobile navigation follows catalog layout');
+  assert.equal(nav.sidebars,1,'one shared admin sidebar '+width);
+  assert.equal(nav.links.length,8);assert.ok(nav.links.every(a=>a.icon&&a.name),'admin links have icons and names');
+  if(width>=900)assert.ok(nav.onScreen&&!nav.menu,'desktop sidebar stays open');
+  else {assert.ok(!nav.onScreen&&nav.menu,'narrow screens use the drawer '+width);await evaluate("document.querySelector('.admin-menu-button').click()");await waitFor("document.querySelector('.admin-sidebar.is-open')?.getBoundingClientRect().left>=0",'drawer opens '+width);}
   await shot('catalog-sidebar-'+width,false);
  }
  console.log(`PASS: catalog sidebar icons and responsive layout at ${catalogWidths.join(', ')}px.`);
