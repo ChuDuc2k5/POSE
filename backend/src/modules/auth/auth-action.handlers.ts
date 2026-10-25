@@ -17,7 +17,8 @@ export async function GET(_request: WebRequest, context: Context) {
     if (action === 'reset-password') return json({ ready: Boolean(await recoverySession()) });
     const session = await authenticatedSession();
     if (!session) return json({ message: 'Vui lòng đăng nhập để tiếp tục.' }, 401);
-    return json({ user: { id: session.user.id, email: session.user.email, name: (await readProfile(session.access)).name, verified: true, role: session.role }, destination: roleHome(session.role) });
+    const providers = [...new Set(session.user.identities?.map(identity => identity.provider) || [])];
+    return json({ user: { id: session.user.id, email: session.user.email, name: (await readProfile(session.access)).name, verified: true, role: session.role, providers }, destination: roleHome(session.role) });
   } catch {
     return json({ message: 'Dịch vụ tài khoản chưa khả dụng. Vui lòng thử lại sau.' }, 503);
   }

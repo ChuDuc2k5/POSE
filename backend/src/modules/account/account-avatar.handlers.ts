@@ -17,7 +17,7 @@ export async function POST(request: WebRequest) {
     if ([...form.keys()].some(key => !['file','version'].includes(key))) return json({ message: 'Dữ liệu không hợp lệ.' }, 400);
     const file = form.get('file');
     const version = Number(form.get('version'));
-    if (!(file instanceof File) || !file.size || file.size > 2097152 || !['image/jpeg','image/png','image/webp'].includes(file.type) || !Number.isSafeInteger(version) || version < 0) return json({ message: 'Chọn ảnh JPG, PNG hoặc WebP, tối đa 2 MB.' }, 400);
+    if (!form.has('version') || !(file instanceof File) || !file.size || file.size > 2097152 || !['image/jpeg','image/png','image/webp'].includes(file.type) || !Number.isSafeInteger(version) || version < 0) return json({ message: 'Chọn ảnh JPG, PNG hoặc WebP, tối đa 2 MB; phiên bản hồ sơ phải hợp lệ.' }, 400);
     let image: Buffer;
     try {
       const source = sharp(Buffer.from(await file.arrayBuffer()), { limitInputPixels: 16000000 });

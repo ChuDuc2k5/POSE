@@ -36,6 +36,10 @@ export function clientIp(request: ExpressRequest) {
   const forwarded = request.headers['x-forwarded-for'];
   return trustedProxy(request.socket?.remoteAddress) && typeof forwarded === 'string' ? forwarded.split(',').at(-1)!.trim() : request.socket?.remoteAddress || 'unknown';
 }
+export function currentClientIp() {
+  const request = context.getStore()?.request;
+  return request ? clientIp(request) : 'unknown';
+}
 type Handler<P> = (request: WebRequest, context: { params: Promise<P> }) => Promise<Response | undefined>;
 export async function dispatch<P>(request: ExpressRequest, response: ExpressResponse, handler: Handler<P>) {
   await withCookieContext(request, response, async () => {
