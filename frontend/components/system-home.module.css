@@ -71,16 +71,19 @@
 .categoryImage .imageBadge { top: 3%; left: 3%; min-width: 65px; padding: 7px 10px; font-size: 11px; }
 
 .navigation { position: sticky; top: 0; z-index: 20; border-bottom: 1px solid var(--home-line); background: #fffffffa; backdrop-filter: blur(14px); }
-.navigationInner { min-height: 92px; display: flex; align-items: center; justify-content: space-between; gap: 24px; position: relative; }
+.navigationInner { width: 100%; min-height: 92px; padding-inline: 24px; display: flex; align-items: center; justify-content: space-between; gap: 24px; position: relative; }
 .navLinks { display: flex; align-items: center; gap: 29px; font-size: 13px; }
 .navLinks > a { color: #73767c; padding-block: 12px; transition: color .18s; }
 .navLinks > a:hover, .navLinks > a[aria-current] { color: var(--home-ink); }
 .navLinks > a[aria-current] { font-weight: 700; }
+.navLinks > a[href="#du-an"] { display: none; }
 .navLinks .supportLink { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; color: var(--home-ink); background: var(--home-surface); border-radius: 999px; font-size: 12px; font-weight: 650; }
 .supportLink svg { color: #858992; }
 .navAccount { display: flex; align-items: center; gap: 10px; }
+.drawerAccount { display: none; }
 .navAccount .primaryButton { min-height: 38px; padding: 9px 18px; font-size: 12px; }
 .menuToggle { display: none; color: var(--home-ink); background: transparent; border: 0; padding: 8px; border-radius: 8px; }
+.navigationInner > .property-menu { order: 3; }
 
 .discovery { padding: 26px 0 46px; background: var(--home-surface); }
 .searchPanel { padding: 24px; border: 1px solid var(--home-line); border-radius: 24px; background: #fff; }
@@ -255,10 +258,11 @@
   .heroImage .imageBadge { min-width: 112px; }
   .categoryImage .imageBadge { min-width: 62px; font-size: 11px; }
   .menuToggle { display: grid; place-items: center; order: 3; }
-  .navigationInner { min-height: 76px; gap: 10px; }
+  .navigationInner { min-height: 76px; gap: 10px; padding-inline: 16px; }
   .navAccount { margin-left: auto; }
   .navLinks { display: none; position: absolute; top: 100%; left: -20px; right: -20px; background: #fff; padding: 12px 20px 20px; border-bottom: 1px solid var(--home-line); box-shadow: 0 12px 20px #1e26320a; }
   .navOpen { display: flex; flex-direction: column; align-items: stretch; gap: 0; }
+  .drawerAccount { display: flex; flex-direction: column; gap: 8px; padding-top: 14px; margin-top: 8px; border-top: 1px solid var(--home-line); }
   .navLinks > a { padding: 13px 10px; font-size: 14px; }
   .navLinks .supportLink { display: inline-flex; margin-top: 6px; align-self: flex-start; }
   .searchHeading h2 { font-size: 24px; }

@@ -25,6 +25,7 @@ const priorities = [
 
 export function SystemHome() {
   return <div className={styles.page} id="trang-chu">
+    <HomeNavigation/>
     <main>
       <section className={styles.hero} aria-labelledby="home-heading">
         <div className={`${styles.container} ${styles.heroGrid}`}>
@@ -56,8 +57,6 @@ export function SystemHome() {
           </div>
         </div>
       </section>
-
-      <HomeNavigation/>
 
       <section className={styles.discovery} aria-label="Khám phá bất động sản">
         <div className={styles.container}>
