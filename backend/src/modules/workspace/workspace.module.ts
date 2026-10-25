@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
 import { WorkspaceController } from './workspace.controller.js';
-@Module({ controllers: [WorkspaceController] })
+import { AdminSalesController } from './admin-sales.controller.js';
+@Module({ controllers: [WorkspaceController, AdminSalesController] })
 export class WorkspaceModule {}
