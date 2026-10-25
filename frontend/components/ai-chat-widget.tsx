@@ -312,6 +312,8 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   }
   function scrollToLatest(){const element=log.current;if(!element)return;atBottom.current=true;element.scrollTo({top:element.scrollHeight,behavior:'smooth'});setShowLatest(false);}
 
+  // Hooks must run before the early return below.
+  useEffect(()=>{if(!bookingProperty)return;requestAnimationFrame(()=>{const container=log.current;const target=container?.querySelector<HTMLElement>('[data-booking-row^="booking-form"]');if(container&&target)container.scrollTo({top:Math.max(0,target.offsetTop-container.clientHeight+target.offsetHeight),behavior:'smooth'});});},[bookingProperty]);
   if(!visible || !restored)return null;
   const pageSuggestions=fullPage?['Thuê chung cư Thủ Đức','Mua căn hộ Quận 7','Thuê nhà phố Bình Thạnh','Mua nhà phố Quận 10']:suggestions;
   void conversationVersion;
@@ -321,7 +323,6 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   void historyGroups;
   const bookingInMessages=!!bookingAnchor&&messages.some(message=>message.sources?.some(source=>source.id===bookingAnchor));
   const bookingRow=(key:string,content:ReactNode)=><div className="ai-row ai-row-assistant ai-booking-row" data-booking-row={key} key={key}><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><div className="ai-answer">{content}</div></div>;
-  useEffect(()=>{if(!bookingProperty)return;requestAnimationFrame(()=>{const container=log.current;const target=container?.querySelector<HTMLElement>('[data-booking-row^="booking-form"]');if(container&&target)container.scrollTo({top:Math.max(0,target.offsetTop-container.clientHeight+target.offsetHeight),behavior:'smooth'});});},[bookingProperty]);
   return <aside className={`ai-chat${fullPage?' ai-chat-full':''}`}>
     {open && <section ref={panel} id="ai-chat-panel" className="ai-panel" role="dialog" aria-label="Trợ lý AI TERAVA" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close();}if(e.key==='Tab'){const nodes=panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],textarea:not(:disabled),input:not(:disabled)');if(nodes?.length){const first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}}}}>
       {fullPage && <aside className={`ai-history${historyOpen?' is-open':''}${historyCollapsed?' is-collapsed':''}`} aria-label="Lịch sử trò chuyện">
