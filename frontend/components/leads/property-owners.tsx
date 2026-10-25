@@ -2,24 +2,22 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Building2, ChevronLeft, ChevronRight, Pencil, Search, UserCheck } from 'lucide-react';
 import { catalogRequest, CatalogRequestError } from '@/lib/catalog-client';
+import { useCrmQuery, useCrmState } from '../crm/crm-workspace';
 import { availabilityLabels, publicationLabels, propertyTypeLabels } from '@/lib/catalog';
 import type { OwnerList, OwnerProperty, SalesOption } from '@/lib/leads';
 import { Empty, Modal } from './ui';
 import s from './leads.module.css';
 
 export function PropertyOwners({ sales, revision, onSaved }: { sales: SalesOption[]; revision: number; onSaved: () => void }) {
-  const [search, setSearch] = useState(''), [query, setQuery] = useState(''), [page, setPage] = useState(1);
-  const [data, setData] = useState<OwnerList | null>(null), [loadedKey, setLoadedKey] = useState(''), [error, setError] = useState('');
+  const [search, setSearch] = useCrmState('leads.owners.search', ''), [query, setQuery] = useCrmState('leads.owners.query', ''), [page, setPage] = useCrmState('leads.owners.page', 1);
   const [editing, setEditing] = useState<OwnerProperty | null>(null);
-  const key = JSON.stringify([query, page, revision]), loading = key !== loadedKey;
-  useEffect(() => { const timer = setTimeout(() => { setQuery(search.trim()); setPage(1); }, 300); return () => clearTimeout(timer); }, [search]);
+  const result = useCrmQuery<OwnerList>('/api/leads/property-owners?' + new URLSearchParams({ q: query, page: String(page), pageSize: '15' }), revision);
+  const { data, error } = result, loading = result.loading || result.updating;
   useEffect(() => {
-    const controller = new AbortController();
-    catalogRequest<OwnerList>('/api/leads/property-owners?' + new URLSearchParams({ q: query, page: String(page), pageSize: '15' }), { signal: controller.signal })
-      .then(result => { setData(result); setError(''); }).catch(e => { if (!controller.signal.aborted) setError(e.message); })
-      .finally(() => { if (!controller.signal.aborted) setLoadedKey(key); });
-    return () => controller.abort();
-  }, [key, query, page]);
+    if (search.trim() === query) return;
+    const timer = setTimeout(() => { setQuery(search.trim()); setPage(1); }, 300);
+    return () => clearTimeout(timer);
+  }, [search, query, setQuery, setPage]);
   return <section className={s.panel}><div className={s.panelHeader}><div><span className={s.eyebrow}>ĐỘI NGŨ & DANH MỤC</span><h2>Sales phụ trách bất động sản <span className={s.count}>{data?.total ?? '—'}</span></h2><p>Mỗi sản phẩm có một Sales chính. Phân công được dùng để kết nối Lead phù hợp.</p></div><span className={s.softIcon}><UserCheck size={23}/></span></div>
     <div className={s.toolbar}><label className={s.searchInput}><Search size={18}/><input aria-label="Tìm BĐS để phân công" value={search} onChange={e => setSearch(e.target.value)} maxLength={120} placeholder="Tìm theo mã, tên hoặc khu vực…"/></label></div>
     {error && <div className={s.error} role="alert">{error}<button className={s.textButton} onClick={onSaved}>Thử lại</button></div>}

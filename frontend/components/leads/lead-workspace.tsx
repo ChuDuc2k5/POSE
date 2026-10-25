@@ -1,8 +1,8 @@
 'use client';
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ArrowDownLeft, ArrowRight, ArrowUpRight, Building2, ChevronLeft, ChevronRight, CircleCheck, Flame, LayoutGrid, MessageSquare, RefreshCw, Search, ShieldCheck, SlidersHorizontal, UserRound, UsersRound, X } from 'lucide-react';
 import { catalogRequest } from '@/lib/catalog-client';
+import { useCrmQuery, useCrmState, useCrmWorkspace } from '../crm/crm-workspace';
 import { leadBudget, leadDate, leadSourceLabels, leadStatusLabels, need, routingLabels, type Lead, type LeadList, type SalesOption } from '@/lib/leads';
 import { propertyTypeLabels } from '@/lib/catalog';
 import { LeadDetailDialog } from './lead-detail';
@@ -10,53 +10,41 @@ import { PropertyOwners } from './property-owners';
 import { Empty, Score, StatusBadge, TemperatureBadge } from './ui';
 import s from './leads.module.css';
 
-export function LeadWorkspace({ role, name }: { role: 'Admin' | 'Sales'; name: string }) {
-  const [view, setView] = useState<'leads' | 'owners'>('leads');
-  const [search, setSearch] = useState(''), [query, setQuery] = useState('');
-  const [temperature, setTemperature] = useState(''), [status, setStatus] = useState('');
-  const [assignment, setAssignment] = useState(''), [salesId, setSalesId] = useState(''), [archived, setArchived] = useState(false);
-  const [page, setPage] = useState(1), [revision, setRevision] = useState(0);
-  const [data, setData] = useState<LeadList | null>(null), [loadedKey, setLoadedKey] = useState('');
-  const [error, setError] = useState(''), [notice, setNotice] = useState(''), [running, setRunning] = useState(false);
-  const [sales, setSales] = useState<SalesOption[]>([]), [active, setActive] = useState<Lead | null>(null);
-  const key = JSON.stringify([query, temperature, status, assignment, salesId, archived, page, revision]);
-  const loading = key !== loadedKey;
-  useEffect(() => { const timer = setTimeout(() => { setQuery(search.trim()); setPage(1); }, 300); return () => clearTimeout(timer); }, [search]);
+export function LeadWorkspace() {
+  const { role, store } = useCrmWorkspace();
+  const [view, setView] = useCrmState<'leads' | 'owners'>('leads.view', 'leads');
+  const [search, setSearch] = useCrmState('leads.search', ''), [query, setQuery] = useCrmState('leads.query', '');
+  const [temperature, setTemperature] = useCrmState('leads.temperature', ''), [status, setStatus] = useCrmState('leads.status', '');
+  const [assignment, setAssignment] = useCrmState('leads.assignment', ''), [salesId, setSalesId] = useCrmState('leads.sales', ''), [archived, setArchived] = useCrmState('leads.archived', false);
+  const [page, setPage] = useCrmState('leads.page', 1), [revision, setRevision] = useState(0);
+  const [operationError, setOperationError] = useState(''), [notice, setNotice] = useState(''), [running, setRunning] = useState(false);
+  const [active, setActive] = useState<Lead | null>(null);
+  const params = new URLSearchParams({ page: String(page), pageSize: '12', archived: String(archived), ...(query ? { q: query } : {}), ...(temperature ? { temperature } : {}), ...(status ? { status } : {}), ...(assignment ? { assignment } : {}), ...(salesId ? { sales_id: salesId } : {}) });
+  const result = useCrmQuery<LeadList>('/api/leads?' + params, revision, 'leads', 30000);
+  const { data } = result, loading = result.loading || result.updating, error = operationError || result.error;
+  const options = useCrmQuery<{ sales: SalesOption[] }>('/api/leads/options');
+  const sales = options.data?.sales || [];
   useEffect(() => {
-    const controller = new AbortController();
-    const params = new URLSearchParams({ page: String(page), pageSize: '12', archived: String(archived), ...(query ? { q: query } : {}), ...(temperature ? { temperature } : {}), ...(status ? { status } : {}), ...(assignment ? { assignment } : {}), ...(salesId ? { sales_id: salesId } : {}) });
-    catalogRequest<LeadList>('/api/leads?' + params, { signal: controller.signal })
-      .then(result => { setData(result); setError(''); })
-      .catch(e => { if (!controller.signal.aborted) setError(e.message || 'Chưa thể tải danh sách Lead.'); })
-      .finally(() => { if (!controller.signal.aborted) setLoadedKey(key); });
-    return () => controller.abort();
-  }, [key, query, temperature, status, assignment, salesId, archived, page]);
-  useEffect(() => {
-    const controller = new AbortController();
-    catalogRequest<{ sales: SalesOption[] }>('/api/leads/options', { signal: controller.signal }).then(d => setSales(d.sales)).catch(() => {});
-    const timer = setInterval(() => setRevision(n => n + 1), 30000);
-    return () => { controller.abort(); clearInterval(timer); };
-  }, []);
-  const refresh = () => setRevision(n => n + 1);
+    if (search.trim() === query) return;
+    const timer = setTimeout(() => { setQuery(search.trim()); setPage(1); }, 300);
+    return () => clearTimeout(timer);
+  }, [search, query, setQuery, setPage]);
+  const refresh = () => { setOperationError(''); store.invalidate(); setRevision(n => n + 1); };
   const filter = (setter: (v: string) => void, value: string) => { setter(value); setPage(1); };
   const reset = () => { setSearch(''); setQuery(''); setStatus(''); setTemperature(''); setAssignment(''); setSalesId(''); setPage(1); };
   async function recheck() {
-    setRunning(true); setNotice(''); setError('');
+    setRunning(true); setNotice(''); setOperationError('');
     try {
       const result = await catalogRequest<{ queued: number }>('/api/leads/recheck', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       setNotice('Đã đưa ' + result.queued + ' Lead vào lượt xét phân công. Kết quả sẽ tự cập nhật.');
       refresh();
-    } catch (e) { setError(e instanceof Error ? e.message : 'Chưa thể xét phân công.'); }
+    } catch (e) { setOperationError(e instanceof Error ? e.message : 'Chưa thể xét phân công.'); }
     finally { setRunning(false); }
   }
   const stats = data?.stats;
   return <main className={s.workspace}>
-    <header className={s.header}><div className={s.headerInner}>
-      <Link href={role === 'Admin' ? '/admin' : '/sales'} className={s.brand}><span>T</span><div><strong>TERAVA</strong><small>Kết nối bất động sản & khách hàng</small></div></Link>
-      <nav aria-label="Điều hướng quản lý"><Link href={role === 'Admin' ? '/admin' : '/sales'}>Không gian làm việc</Link><button className={view === 'leads' ? s.navActive : ''} onClick={() => setView('leads')}>Quản lý Lead</button>{role === 'Admin' && <button className={view === 'owners' ? s.navActive : ''} onClick={() => setView('owners')}>BĐS & Sales</button>}</nav>
-      <Link href="/account" className={s.account}><span>{name.slice(0, 1).toUpperCase()}</span><div><strong>{name}</strong><small>{role === 'Admin' ? 'Quản trị viên' : 'Nhân viên tư vấn'}</small></div></Link>
-    </div></header>
     <div className={s.container}>
+      {role === 'Admin' && <nav className={s.moduleTabs} aria-label="Chức năng Quản lý Lead"><button className={view === 'leads' ? s.moduleTabActive : ''} aria-pressed={view === 'leads'} onClick={() => setView('leads')}>Danh sách Lead</button><button className={view === 'owners' ? s.moduleTabActive : ''} aria-pressed={view === 'owners'} onClick={() => setView('owners')}>BĐS & Sales</button></nav>}
       <section className={s.hero}><div><span className={s.eyebrow}><span/> KHÔNG GIAN QUẢN LÝ KHÁCH HÀNG</span><h1>{view === 'owners' ? <>Đúng sản phẩm.<br/><em>Đúng người phụ trách.</em></> : <>Mỗi nhu cầu.<br/><em>Một kết nối đúng.</em></>}</h1><p>{view === 'owners' ? 'Thiết lập Sales phụ trách từng bất động sản để kết nối nhu cầu khách hàng với đội ngũ tư vấn phù hợp.' : 'Hiểu nhu cầu, theo dõi tiềm năng và kết nối khách hàng với Sales phù hợp trong một không gian thống nhất.'}</p><div className={s.heroActions}>{role === 'Admin' && view === 'leads' && <button className={s.primary} onClick={recheck} disabled={running}><RefreshCw size={16} className={running ? s.spin : ''}/> Xét phân công</button>}<button className={s.secondary} onClick={refresh}><RefreshCw size={16}/> Làm mới dữ liệu</button></div></div>
         <aside className={s.heroCard}><div className={s.heroCardTop}><span className={s.softIcon}><UsersRound size={21}/></span><span>CHĂM SÓC CÓ ĐỊNH HƯỚNG</span><ArrowUpRight size={18}/></div><h2>Từ nhu cầu đến<br/>cuộc tư vấn phù hợp.</h2><div className={s.steps}><span><MessageSquare size={16}/> Hiểu nhu cầu</span><ArrowRight size={15}/><span><Building2 size={16}/> Khớp BĐS</span><ArrowRight size={15}/><span><UserRound size={16}/> Kết nối Sales</span></div><p><ShieldCheck size={14}/> Hồ sơ và lịch sử theo đúng quyền truy cập</p></aside>
       </section>

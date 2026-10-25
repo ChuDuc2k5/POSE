@@ -14,8 +14,9 @@ import { WorkspaceModule } from './modules/workspace/workspace.module.js';
 import { QueueModule } from './modules/queue/queue.module.js';
 import { HealthController } from './modules/queue/health.controller.js';
 import { LeadsModule } from './modules/leads/leads.module.js';
+import { SalesModule } from './modules/sales/sales.module.js';
 @Module({
-  imports: [SupabaseModule, AuthModule, AccountModule, CatalogModule, CustomerModule, WorkspaceModule, QueueModule, LeadsModule],
+  imports: [SupabaseModule, AuthModule, AccountModule, CatalogModule, CustomerModule, WorkspaceModule, QueueModule, LeadsModule, SalesModule],
   controllers: [AppController, AccessController, HealthController],
   providers: [AppService, { provide: APP_GUARD, useClass: AuthGuard }, GatewayGateway],
 })
