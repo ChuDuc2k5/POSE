@@ -7,12 +7,12 @@ import type { PublicProperty } from '@/lib/discovery';
 
 export const dynamic='force-dynamic';
 export const metadata={title:'Chi tiết bất động sản | TERAVA'};
-export default async function PropertyPage({params}:{params:Promise<{id:string}>}){
+export default async function PropertyPage({params,searchParams}:{params:Promise<{id:string}>;searchParams:Promise<Record<string,string|string[]|undefined>>}){
   const {id}=await params;if(!uuidPattern.test(id))notFound();
   const response = await backendFetch(`/api/catalog/properties/${id}`);
   if (response.status === 404) notFound();
   if (!response.ok) throw new Error('Chưa thể tải chi tiết sản phẩm.');
   const { item, media } = await response.json();
   const role = await publicPageRole(`/properties/${id}`);
-  return <PropertyDetail item={item as PublicProperty} media={media} role={role}/>;
+  return <PropertyDetail returnTo={(await searchParams).returnTo as string | undefined} item={item as PublicProperty} media={media} role={role}/>;
 }

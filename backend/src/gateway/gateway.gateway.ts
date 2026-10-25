@@ -3,11 +3,24 @@ import { Server, Socket } from 'socket.io';
 import type { Request } from 'express';
 import { authenticatedSession } from '../modules/auth/session.js';
 import { frontendOrigins, withCookieContext } from '../common/http.js';
+import { inquiryEvents } from '../common/inquiry-events.js';
 @WebSocketGateway({ path: '/socket.io', addTrailingSlash: false, cors: { origin: frontendOrigins(), credentials: true } })
 export class GatewayGateway {
   @WebSocketServer()
   server: Server;
+  private readonly notify=()=>{void this.notifyAdmins().catch(()=>{});};
+  private async notifyAdmins(){
+    for(const client of await this.server.in('role:Admin').fetchSockets()){
+      try{
+        const session=await withCookieContext({headers:client.data.sessionHeaders} as Request,undefined,()=>authenticatedSession({writable:false}));
+        if(session?.role==='Admin')client.emit('inquiry:received',{refresh:true});
+        else client.disconnect(true);
+      }catch{client.disconnect(true);}
+    }
+  }
+  onModuleDestroy(){inquiryEvents.off('received',this.notify);}
   afterInit(server: Server) {
+    inquiryEvents.on('received',this.notify);
     server.use(async (client, next) => {
       try {
         const token: unknown = client.handshake.auth.token;
@@ -15,7 +28,6 @@ export class GatewayGateway {
         if (headers.origin && !frontendOrigins().includes(headers.origin)) throw new Error('INVALID_ORIGIN');
         const session = await withCookieContext({ headers } as Request, undefined, () => authenticatedSession({ writable: false }));
         if (!session) throw new Error('UNAUTHORIZED');
-        client.data.sessionHeaders = headers;
         client.data.sessionHeaders = headers;
         client.data.principal = { id: session.user.id, role: session.role };
         next();

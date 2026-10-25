@@ -34,9 +34,9 @@ export function searchParameters(params: URLSearchParams) {
   return { filters,page,pageSize,snapshot,fields };
 }
 
-export function inquiryInput(input: Record<string,unknown>) {
+export function inquiryInput(input: Record<string,unknown>, guest=false) {
   const fields: Record<string,string> = {};
-  const allowed=['property_id','name','phone','country','channel','preferred_time','message','consent','request_key'];
+  const allowed=['property_id','name','phone','country','channel','preferred_time','message','consent','request_key',...(guest ? ['email']:[])];
   if (Object.keys(input).some(key=>!allowed.includes(key))) fields.form='Dữ liệu chứa trường không được phép.';
   if (typeof input.request_key!=='string' || !uuidPattern.test(input.request_key)) fields.form='Mã yêu cầu không hợp lệ.';
   if (input.property_id!==null && (typeof input.property_id!=='string' || !uuidPattern.test(input.property_id))) fields.property_id='Sản phẩm không hợp lệ.';
@@ -52,6 +52,8 @@ export function inquiryInput(input: Record<string,unknown>) {
   if (!consent || typeof consent!=='object' || Array.isArray(consent) || Object.keys(consent).length!==5 || ['contact','call','ai','transcript','recording'].some(key=>typeof consent[key]!=='boolean')) fields.consent='Chọn rõ các mục đồng ý sử dụng dữ liệu.';
   else if (!consent.contact) fields.consent='Cần đồng ý sử dụng thông tin để tiếp nhận yêu cầu tư vấn.';
   else if (input.channel==='Phone' && !consent.call) fields.channel='Để chọn điện thoại, hãy đồng ý nhận cuộc gọi; bạn cũng có thể chọn email.';
-  const data={ property_id:input.property_id,name:typeof input.name==='string' ? input.name.trim():'',phone,country,channel:input.channel,preferred_time:input.preferred_time,message:typeof input.message==='string' ? input.message.trim():'',consent };
+  const email=typeof input.email==='string' ? input.email.trim().toLowerCase():'';
+  if (guest && ((input.channel==='Email' && !email) || email && (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length>254))) fields.email='Nhập email hợp lệ để đội ngũ liên hệ.';
+  const data={ property_id:input.property_id,name:typeof input.name==='string' ? input.name.trim():'',phone,country,channel:input.channel,preferred_time:input.preferred_time,message:typeof input.message==='string' ? input.message.trim():'',consent,...(guest ? {email}:{}) };
   return { data,key:input.request_key,fields };
 }

@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { io } from 'socket.io-client';
 import { startStack } from './test-stack.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import sharp from 'sharp';
 
-// Isolated HTTP contract fixture. Authoritative SQL/RLS checks live in
-// supabase/test-property-discovery.sql and roll back on the real database.
+// Isolated HTTP contract fixture. SQL/RLS checks run in an in-memory PostgreSQL
+// through backend/test/discovery-database.spec.ts, without writing to Supabase.
 const projectId='fe100000-0000-4000-8000-000000000001';
 const firstId='fe200000-0000-4000-8000-000000000001',hiddenId='fe200000-0000-4000-8000-000000000099';
 const publicImageId='fe300000-0000-4000-8000-000000000001',publicDocumentId='fe300000-0000-4000-8000-000000000002',internalDocumentId='fe300000-0000-4000-8000-000000000003';
@@ -24,18 +25,18 @@ function seed(){
   favorites=[];inquiries=[];snapshots=new Map();leadCount=0;verified=false;currentRole='User';active=true;offline=false;
 }
 seed();
-const visible=p=>p.publication==='Published';
+const visible=p=>p.publication==='Published' && !p.deleted_at;
 const provider=createServer(async(req,res)=>{
   let raw='';for await(const chunk of req)raw+=chunk;
   const input=raw && req.headers['content-type']?.includes('application/json') ? JSON.parse(raw):{};
   const url=new URL(req.url,'http://localhost'),token=req.headers.authorization?.replace('Bearer ',''),n=token==='fixture-user2' ? 2:1;
-  const signed=['fixture-user1','fixture-user2'].includes(token);
+  const signed=['fixture-user1','fixture-user2','fixture-admin'].includes(token),role=token==='fixture-admin' ? 'Admin':currentRole;
   const reply=(status,body)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(body));};
   if(offline)return reply(503,{message:'Unavailable'});
   if(url.pathname.endsWith('/token'))return reply(200,{access_token:'fixture-user1',refresh_token:'fixture-refresh',token_type:'bearer',expires_in:3600,user:user(1)});
   if(url.pathname.endsWith('/user'))return signed ? reply(200,user(n)):reply(401,{msg:'Invalid token'});
   if(url.pathname.endsWith('/logout')){res.writeHead(204);return res.end();}
-  if(url.pathname.endsWith('/rpc/pose_access_context'))return reply(200,{user_id:uid(n),role:currentRole,active,session_valid:true});
+  if(url.pathname.endsWith('/rpc/pose_access_context'))return reply(200,{user_id:uid(n),role,active,session_valid:true});
   if(url.pathname.endsWith('/rpc/pose_read_profile'))return reply(200,{...profiles[n],phoneVerified:verified});
   if(url.pathname.endsWith('/rpc/pose_search_properties')){
     const f=input.p_filters;let snap;
@@ -53,8 +54,31 @@ const provider=createServer(async(req,res)=>{
     }
     return reply(200,{items:snap.ids.slice((input.p_page-1)*input.p_size,input.p_page*input.p_size).map(id=>products.find(p=>p.id===id)),total:snap.ids.length,page:input.p_page,pageSize:input.p_size,snapshot:snap.id,expiresAt:'2026-10-05T08:00:00Z'});
   }
+  if(url.pathname.endsWith('/rpc/pose_admin_inquiries')){
+    if(!signed || role!=='Admin')return reply(403,{code:'42501',message:'ADMIN_REQUIRED'});
+    const rows=inquiries.filter(row=>!input.p_unread || !row.read_at);
+    return reply(200,{items:rows.slice((input.p_page-1)*12,input.p_page*12),total:rows.length,unread:inquiries.filter(row=>!row.read_at).length});
+  }
+  if(url.pathname.endsWith('/rpc/pose_read_admin_inquiry')){
+    if(!signed || role!=='Admin')return reply(403,{code:'42501',message:'ADMIN_REQUIRED'});
+    const row=inquiries.find(row=>row.id===input.p_id);if(!row)return reply(404,{code:'P0002',message:'NOT_FOUND'});
+    row.read_at ||= new Date().toISOString();return reply(200,{id:row.id,read:true});
+  }
+  if(url.pathname.endsWith('/rpc/pose_submit_browser_inquiry')){
+    if(token!=='fixture-service-key')return reply(403,{code:'42501',message:'SERVER_REQUIRED'});
+    const old=inquiries.find(row=>row.browser_session_hash===input.p_session_hash && row.request_key===input.p_key);
+    if(old){if(JSON.stringify(old.payload)!==JSON.stringify(input.p_data))return reply(409,{code:'40001',message:'IDEMPOTENCY_CONFLICT'});return reply(200,{id:old.id,status:old.status,phone_verified:false,replayed:true});}
+    if(input.p_data.property_id && !products.some(p=>p.id===input.p_data.property_id && visible(p)))return reply(404,{code:'P0002',message:'NOT_FOUND'});
+    const row={...input.p_data,id:randomUUID(),user_id:null,browser_session_hash:input.p_session_hash,request_key:input.p_key,payload:input.p_data,phone_verified:false,status:'Received',property_name:products.find(p=>p.id===input.p_data.property_id)?.name || null,created_at:new Date().toISOString(),read_at:null};inquiries.unshift(row);
+    return reply(200,{id:row.id,status:row.status,phone_verified:false,replayed:false});
+  }
+  if(url.pathname.endsWith('/rpc/pose_read_browser_inquiries')){
+    if(token!=='fixture-service-key')return reply(403,{code:'42501',message:'SERVER_REQUIRED'});
+    const rows=inquiries.filter(row=>row.browser_session_hash===input.p_session_hash);
+    return reply(200,{items:rows.map(row=>Object.fromEntries(Object.entries(row).filter(([key])=>!['browser_session_hash','payload','request_key'].includes(key)))),total:rows.length});
+  }
   if(url.pathname.includes('/rpc/pose_') && /favorite|inquir/.test(url.pathname)){
-    if(!signed || !active || currentRole!=='User')return reply(403,{code:'42501',message:'CUSTOMER_REQUIRED'});
+    if(!signed || !active || role!=='User')return reply(403,{code:'42501',message:'CUSTOMER_REQUIRED'});
     const mine=row=>row.user_id===uid(n);
     if(url.pathname.endsWith('/pose_set_favorite')){
       if(input.p_saved && !products.some(p=>p.id===input.p_property && visible(p)))return reply(404,{code:'P0002',message:'NOT_FOUND'});
@@ -69,12 +93,12 @@ const provider=createServer(async(req,res)=>{
       const data=input.p_data,old=inquiries.find(row=>mine(row) && row.request_key===input.p_key);
       if(old){if(JSON.stringify(old.payload)!==JSON.stringify(data))return reply(409,{code:'40001',message:'IDEMPOTENCY_CONFLICT'});return reply(200,{id:old.id,status:old.status,phone_verified:old.phone_verified,replayed:true});}
       if(data.property_id && !products.some(p=>p.id===data.property_id && visible(p)))return reply(404,{code:'P0002',message:'NOT_FOUND'});
-      const row={...data,id:randomUUID(),user_id:uid(n),request_key:input.p_key,payload:data,email:user(n).email,property_name:products.find(p=>p.id===data.property_id)?.name || null,phone_verified:verified,status:verified ? 'Received':'PendingVerification',created_at:new Date().toISOString()};inquiries.unshift(row);if(verified)leadCount ||=1;
+      const row={...data,id:randomUUID(),user_id:uid(n),request_key:input.p_key,payload:data,email:user(n).email,property_name:products.find(p=>p.id===data.property_id)?.name || null,phone_verified:verified,status:'Received',read_at:null,created_at:new Date().toISOString()};inquiries.unshift(row);if(verified)leadCount ||=1;
       return reply(200,{id:row.id,status:row.status,phone_verified:row.phone_verified,replayed:false});
     }
   }
   if(url.pathname.startsWith('/rest/v1/')){
-    const table=url.pathname.split('/').pop();let rows=table==='property_public_catalog' ? products.filter(visible):table==='property_projects' ? [{id:projectId,name:'TERAVA Riverside',archived:false}]:table==='property_media' ? media.filter(m=>m.visible && !m.removed && products.some(p=>p.id===m.property_id && visible(p)) && (signed && currentRole==='Admin' || m.visibility==='Public')):table==='customer_property_favorites' ? favorites.filter(row=>signed && currentRole==='User' && row.user_id===uid(n)):[];
+    const table=url.pathname.split('/').pop();let rows=table==='property_public_catalog' ? products.filter(visible):table==='property_projects' ? [{id:projectId,name:'TERAVA Riverside',archived:false}]:table==='property_media' ? media.filter(m=>m.visible && !m.removed && products.some(p=>p.id===m.property_id && visible(p)) && (signed && role==='Admin' || m.visibility==='Public')):table==='customer_property_favorites' ? favorites.filter(row=>signed && currentRole==='User' && row.user_id===uid(n)):[];
     for(const [key,value] of url.searchParams){if(value.startsWith('eq.'))rows=rows.filter(row=>String(row[key])===value.slice(3));if(value.startsWith('in.')){const ids=value.slice(3).replace(/^\(|\)$/g,'').split(',');rows=rows.filter(row=>ids.includes(row[key]));}}
     if(url.searchParams.get('order'))rows.sort((a,b)=>{for(const entry of url.searchParams.get('order').split(',')){const [key,direction]=entry.split('.');const c=a[key]>b[key] ? 1:a[key]<b[key] ? -1:0;if(c)return direction==='desc' ? -c:c;}return 0;});
     const selected=url.searchParams.get('select');if(selected && selected!=='*')rows=rows.map(row=>Object.fromEntries(selected.split(',').map(key=>[key,row[key]])));
@@ -83,7 +107,7 @@ const provider=createServer(async(req,res)=>{
     return reply(200,rows);
   }
   if(url.pathname.includes('/storage/v1/object/')){
-    if(token!=='fixture-storage-key' && !(signed && currentRole==='Admin'))return reply(403,{message:'Forbidden'});
+    if(token!=='fixture-storage-key' && !(signed && role==='Admin'))return reply(403,{message:'Forbidden'});
     const file=media.find(m=>url.pathname.endsWith(m.object_key));if(!file)return reply(404,{});
     res.writeHead(200,{'Content-Type':file.mime_type});return res.end(file.media_type==='Image' ? image:pdf);
   }
@@ -91,7 +115,7 @@ const provider=createServer(async(req,res)=>{
 });
 await new Promise(resolve=>provider.listen(3231,'127.0.0.1',resolve));
 let stack;
-try { stack = await startStack(3230, {"SUPABASE_URL": "http://127.0.0.1:3231", "SUPABASE_PUBLISHABLE_KEY": "fixture-public-key", "SUPABASE_STORAGE_SECRET_KEY": "fixture-storage-key"}); } catch (error) { provider.close(); throw error; }
+try { stack = await startStack(3230, {"SUPABASE_URL": "http://127.0.0.1:3231", "SUPABASE_PUBLISHABLE_KEY": "fixture-public-key", "SUPABASE_STORAGE_SECRET_KEY": "fixture-storage-key", "SUPABASE_SECRET_KEY":"fixture-service-key"},{build:!process.argv.includes("--no-build")}); } catch (error) { provider.close(); throw error; }
 const { app } = stack;
 let output='';app.stdout.on('data',chunk=>{output+=chunk;});app.stderr.on('data',chunk=>{output+=chunk;});
 const origin='http://localhost:3230',cookie='pose-access=fixture-user1',other='pose-access=fixture-user2';let checks=0;
@@ -147,14 +171,14 @@ try{
   check((await call('/api/customer/inquiries','POST',{...payload,consent:{...payload.consent,recording:'true'}})).status===400,'Consent values must be booleans');
   check((await call('/api/customer/inquiries','POST',{...payload,property_id:hiddenId})).status===404,'Inquiry cannot target hidden property');
   const submitted=await call('/api/customer/inquiries','POST',payload),inquiry=await submitted.json();
-  check(submitted.status===201 && inquiry.status==='PendingVerification' && leadCount===0,'Unverified number remains pending and cannot create eligible Lead');
+  check(submitted.status===201 && inquiry.status==='Received' && !inquiry.phone_verified && leadCount===0,'Unverified number is accepted without an eligible Lead');
   check(inquiries[0].phone==='+84912345678' && inquiries[0].name==='Minh Anh' && !inquiries[0].consent.call && !inquiries[0].consent.recording,'Phone normalized and declined purposes preserved');
   check((await call('/api/customer/inquiries','POST',payload)).status===200 && inquiries.length===1,'Retry returns same inquiry');
   check((await call('/api/customer/inquiries','POST',{...payload,message:'Nội dung khác cùng mã'})).status===409,'Idempotency key cannot change payload');
   check((await (await call('/api/customer/inquiries','GET',undefined,other)).json()).total===0,'Other customer cannot read inquiries');
   check((await call(`/api/customer/inquiries/${inquiry.id}/confirm`,'POST',undefined,other)).status===404,'Other customer cannot confirm inquiry');
   verified=true;const promoted=await (await call(`/api/customer/inquiries/${inquiry.id}/confirm`,'POST')).json();
-  check(promoted.status==='Received' && promoted.phone_verified && leadCount===1 && inquiries.length===1,'Verification promotes same inquiry');
+  check(promoted.status==='Received' && !promoted.phone_verified && leadCount===0 && inquiries.length===1,'Existing accepted inquiry does not fabricate phone evidence');
   await call('/api/customer/inquiries','POST',{...payload,request_key:randomUUID(),message:'Nhu cầu mới của cùng khách hàng.'});check(leadCount===1,'Additional request reuses open Lead');
   products[0].publication='Hidden';products[0].version++;
   check((await (await call('/api/customer/favorites')).json()).items[0].property===null,'Hidden favorite redacted but retained');
@@ -170,7 +194,39 @@ try{
   check((await call(`/api/catalog/search?transaction=Sale&snapshot=${rentSearch.snapshot}`)).status===409,'Transaction participates in snapshot identity');
   const rentDetail=await (await call(`/api/catalog/properties/${products[8].id}`)).json();check(rentDetail.item.transaction_type==='Rent' && rentDetail.item.price_period==='Month','Detail returns monthly rental metadata');
   const bedrooms=await (await call('/api/catalog/search?bedrooms=3')).json();check(bedrooms.total===1 && bedrooms.items[0].bedrooms===4,'Bedroom minimum includes larger homes');
+  const adminCookie='pose-access=fixture-admin';
+  check((await call('/consultation','GET',undefined,null)).status===200,'Guest consultation page renders');
+  check((await call('/guest/inquiries','GET',undefined,null)).status===200,'Guest tracking page renders');
+  const returnRefresh=await call('/auth/refresh?next=/consultation');check(returnRefresh.status===307 && returnRefresh.headers.get('location').endsWith('/consultation'),'Refreshed session returns to public consultation');
+  const guestRefresh=await call('/auth/refresh?next=/guest/inquiries','GET',undefined,null);check(guestRefresh.status===307 && guestRefresh.headers.get('location').endsWith('/guest/inquiries'),'Guest refresh retains browser tracking destination');
+  check((await call('/api/admin/inquiries')).status===403,'Customer denied staff inbox');
+  check((await call('/api/admin/inquiries','GET',undefined,null)).status===401,'Guest denied staff inbox');
+  const guestPayload={...payload,email:'guest@example.test',request_key:randomUUID()};
+  check((await call('/api/guest/inquiries','POST',guestPayload,null,'https://evil.example')).status===403,'Guest intake checks Origin');
+  check((await call('/api/guest/inquiries','POST',{...guestPayload,email:''},null)).status===400,'Guest email required for Email channel');
+  check((await call('/api/guest/inquiries','POST',{...guestPayload,phone_verified:true},null)).status===400,'Guest cannot forge verification');
+  check((await call('/api/guest/inquiries','POST',guestPayload)).status===403,'Logged-in customer cannot impersonate Guest');
+  const socket=io(origin,{autoConnect:false,addTrailingSlash:false,transports:['polling'],extraHeaders:{Cookie:adminCookie,Origin:origin},reconnection:false,timeout:5000});
+  try{
+    await new Promise((resolve,reject)=>{socket.once('connect',resolve);socket.once('connect_error',reject);socket.connect();});
+    const event=new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Missing inquiry notification')),5000);socket.once('inquiry:received',value=>{clearTimeout(timer);resolve(value);});});
+    const receiptResponse=await call('/api/guest/inquiries','POST',guestPayload,null);const receipt=await receiptResponse.json();
+    check(receiptResponse.status===201 && receipt.status==='Received' && !receipt.phone_verified,'Guest request accepted without OTP');
+    const notification=await event;check(notification.refresh===true && !JSON.stringify(notification).includes('guest@example.test'),'Admin receives realtime invalidation without contact data');
+    const setCookie=receiptResponse.headers.getSetCookie().find(value=>value.startsWith('pose-guest-inquiries='));check(setCookie && setCookie.includes('HttpOnly') && setCookie.includes('SameSite=lax'),'Guest receipt cookie is HttpOnly and SameSite');
+    const guestCookie=setCookie.split(';')[0];
+    const mine=await (await call('/api/guest/inquiries','GET',undefined,guestCookie)).json();
+    check(mine.total===1 && mine.items[0].id===receipt.id,'Guest sees own receipt');
+    check(!(JSON.stringify(mine).includes('browser_session_hash')),'Guest tracking does not expose token hashes');
+    check((await (await call('/api/guest/inquiries','GET',undefined,null)).json()).total===0,'Different browser cannot read Guest receipt');
+    const replay=await call('/api/guest/inquiries','POST',guestPayload,guestCookie);check(replay.status===200 && (await replay.json()).id===receipt.id,'Guest retry is idempotent');
+    check((await call('/api/guest/inquiries','POST',{...guestPayload,message:'Thay đổi nội dung'},guestCookie)).status===409,'Guest retry key cannot change content');
+    check((await call('/api/admin/inquiries','GET',undefined,adminCookie)).status===200,'Admin inbox reads persisted requests');
+    check((await call(`/api/admin/inquiries/${receipt.id}/read`,'POST',undefined,adminCookie,'https://evil.example')).status===403,'Read notification checks Origin');
+    check((await call(`/api/admin/inquiries/${receipt.id}/read`,'POST',undefined,adminCookie)).status===200,'Admin marks notification read');
+    check((await call(`/api/admin/inquiries/${receipt.id}/read`,'POST',undefined,adminCookie)).status===200,'Mark read is idempotent');
+  }finally{socket.disconnect();}
   console.log(`PASS: ${checks} M03 HTTP checks; no real account, email or SMS created.`);
   if(process.argv.includes('--ui')){seed();products.slice(8).forEach((p,i)=>p.price=5000000+i*5000000);const {runSearchFiltersUI}=await import('./test-search-filters-ui.mjs');await runSearchFiltersUI(origin);}
-  if(process.argv.includes('--preview')){seed();console.log(`PREVIEW READY: ${origin}; minhanh@example.test / safe-password-123 (fake User only).`);await new Promise(resolve=>{process.once('SIGINT',resolve);process.once('SIGTERM',resolve);});}
+  if(process.argv.includes('--preview')){if(process.argv.includes('--preview-admin'))currentRole='Admin';else seed();console.log(`PREVIEW READY: ${origin}; minhanh@example.test / safe-password-123 (fake provider only; ${currentRole}).`);await new Promise(resolve=>{process.once('SIGINT',resolve);process.once('SIGTERM',resolve);});}
 }finally{await stack.close();provider.close();}
