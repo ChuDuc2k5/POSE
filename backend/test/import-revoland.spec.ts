@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 // @ts-expect-error Standalone CLI scripts are JavaScript modules.
-import { prepareRevoland, summarizeRevoland, transposeColumns } from '../scripts/import-revoland.mjs';
+import { dedupeRevoland, prepareRevoland, summarizeRevoland, transposeColumns } from '../scripts/import-revoland.mjs';
 // @ts-expect-error Standalone CLI scripts are JavaScript modules.
 import { importListingImage } from '../scripts/listing-media.mjs';
 import sharp from 'sharp';
@@ -33,6 +33,16 @@ describe('Revoland import', () => {
     expect(summarizeRevoland(prepared)).toMatchObject({ rowsChangedByScrubbing: 1, rowsWithDetectorHits: 0 });
   });
 
+  it('prepares an array using only the allowed flat columns', () => {
+    const rows = prepareRevoland([{
+      _id: { $oid: '000000000000000000000001' }, title: 'Nhà đẹp', description: 'Mô tả', type: 'House', transactionType: 'ForSale',
+      location: { ward: 'Ward A', city: 'HCMC', address: '1 Main' }, propertyDetails: { landArea: 40 }, priceDetails: { salePrice: 100 },
+      contactPhone: '0900000000', status: 'ARCHIVED', adminNote: 'private',
+    }], now);
+    expect(rows[0].row).toMatchObject({ source_external_id: '000000000000000000000001', area: 40, price: 100 });
+    expect(JSON.stringify(rows)).not.toContain('0900000000');
+  });
+
   it('transposes sparse column indices and skips only deleted rows', () => {
     const input = fixture([{}, { isDeleted: true }, { isDeleted: false }]);
     input['propertyDetails.usableArea'] = { 2: 80 };
@@ -44,11 +54,42 @@ describe('Revoland import', () => {
   it.each([
     ['House', 'House'], ['Townhouse', 'House'], ['Motel', 'House'], ['Apartment', 'Apartment'],
     ['MiniServiceApartment', 'Apartment'], ['LandPlot', 'Land'], ['Factory', 'Shop'],
-    ['Warehouse', 'Shop'], ['Other', 'House'],
+    ['Warehouse', 'Shop'], ['Other', 'House'], ['SocialHousing', 'Apartment'], ['ProjectLand', 'Land'], ['Office', 'Office'],
   ])('maps %s to %s', (type, expected) => {
     const [{ row }] = prepareRevoland(fixture([{ type }]), now);
     expect(row.property_type).toBe(expected);
     expect(row.quality_notes.includes('Loại gốc: Other')).toBe(type === 'Other');
+  });
+
+  it('appends orientation and furnished text', () => {
+    const [{ row }] = prepareRevoland(fixture([{ 'propertyDetails.apartmentOrientation': 'SouthEast', 'propertyDetails.furnished': true }]), now);
+    expect(row.description).toContain('Hướng Đông Nam.');
+    expect(row.description).toContain('Có nội thất.');
+  });
+
+  it.each([
+    ['a', { source_external_id: 'same' }, { source_external_id: 'same', code: 'OLD-A' }],
+    ['b', { name: 'Same Title', source_external_id: 'new' }, { name: 'same title', code: 'OLD-B' }],
+    ['c', { name: 'Nhà hẻm 61 Trần Đồng', description: 'Nhà 1 trệt 1 lầu hẻm 61 Trần Đồng sổ hồng riêng', transaction_type: 'Sale', price: 100, area: 50.04, location: 'Ward A, City', source_external_id: 'new' }, { name: 'NHÀ 1 TRỆT 1 LẦU HẺM 61 TRẦN ĐỒNG', description: 'Nhà 1 trệt 1 lầu hẻm 61 Trần Đồng sổ hồng riêng', transaction_type: 'Sale', price: 100, area: 50.01, location: 'Ward A, City', code: 'OLD-C' }],
+  ])('deduplicates existing rule %s', (reason, row, existing) => {
+    const result = dedupeRevoland([{ row } as any], [existing]);
+    expect(result.counts[reason as 'a' | 'b' | 'c']).toBe(1);
+    expect(result.skipped[0]).toMatchObject({ reason, matchedCode: existing.code });
+  });
+
+  it('keeps different units of one project that share price, area and ward', () => {
+    const base = { transaction_type: 'Rent', price: 9000000, area: 61, location: 'Phường Long Bình, Thành phố Hồ Chí Minh' };
+    const first = { ...base, name: 'Mã căn: BS tầng 16', description: 'Mã căn: BS tầng 16 Loại căn: 2PN2WC Loại hđ: 1 năm Nội thất bếp rèm', source_external_id: 'one' };
+    const second = { ...base, name: 'Origami S10 tầng 26', description: 'Mã căn: Origami S10 tầng 26 Loại căn: 2PN2WC Loại hđ: 1 năm Nội thất bếp rèm', source_external_id: 'two' };
+    expect(dedupeRevoland([{ row: first } as any, { row: second } as any], [{ ...base, name: 'RB S3 tầng 33', description: 'Mã căn: RB S3 tầng 33 Loại căn: 2PN1WC Loại hđ: 1 năm', code: 'OLD' }]).kept).toHaveLength(2);
+  });
+
+  it('deduplicates earlier records in the input under rule d', () => {
+    const row = { name: 'Same Title', source_external_id: 'new', transaction_type: 'Sale', price: 100, area: 50, location: 'Ward A, City' };
+    const result = dedupeRevoland([{ row } as any, { row: { ...row, source_external_id: 'later' } }], []);
+    expect(result.kept).toHaveLength(1);
+    expect(result.counts.d).toBe(1);
+    expect(result.skipped[0]).toMatchObject({ oid: 'later', reason: 'd' });
   });
 
   it('uses the correct sale/rent price and supports extended numeric values', () => {
