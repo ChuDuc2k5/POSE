@@ -90,3 +90,6 @@ html{scroll-behavior:smooth;scroll-padding-top:100px}body{font-family:var(--font
 @media (max-width:900px) { .route-skeleton-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); } .route-skeleton-detail { grid-template-columns:1fr; } .route-skeleton-stats { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
 @media (max-width:600px) { .route-skeleton-grid { grid-template-columns:1fr; } }
 @media (prefers-reduced-motion:reduce) { .route-skeleton i { animation:none; } }
+
+/* Invisible bridge over the gap between a nav trigger and its panel keeps hover alive. */
+@media (min-width: 801px) { .property-menu-panel::before, .support-menu-panel::before { content: ''; position: absolute; left: 0; right: 0; top: -14px; height: 14px; } }

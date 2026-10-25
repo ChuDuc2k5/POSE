@@ -46,6 +46,17 @@ try{
  const landing=await evaluate(`[...document.querySelectorAll('[class*="propertyCard"]')].map(card=>!!card.querySelector('img'))`);
  check(landing.length===12,`Landing shows 12 listings (got ${landing.length})`);
  check(landing.some(Boolean),'Landing listing with a cover shows its photo');
+ await wait(`!!document.querySelector('.ai-launcher, .ai-panel')`,'landing AI chat');
+ check(true,'Landing shows the small AI chat');
+ // Hover menus: travelling from the trigger across the gap into the panel keeps it open.
+ const move=async(x,y)=>send('Input.dispatchMouseEvent',{type:'mouseMoved',x,y});
+ const box=await evaluate(`(()=>{const t=document.querySelector('.property-menu-trigger').getBoundingClientRect();return {x:t.left+t.width/2,top:t.top,bottom:t.bottom};})()`);
+ await move(box.x,(box.top+box.bottom)/2);await wait(`!!document.querySelector('.property-menu-panel')`,'property menu opens on hover');
+ const panel=await evaluate(`(()=>{const p=document.querySelector('.property-menu-panel').getBoundingClientRect();return {top:p.top};})()`);
+ await move(box.x,(box.bottom+panel.top)/2);await delay(120);await move(box.x,panel.top+20);await delay(400);
+ check(await evaluate(`!!document.querySelector('.property-menu-panel')`),'Property menu stays open while the pointer crosses the gap');
+ await move(5,600);await delay(500);
+ check(await evaluate(`!document.querySelector('.property-menu-panel')`),'Property menu closes after the pointer leaves');
  for(const path of ['/properties/fe200000-0000-4000-8000-000000000001','/tro-ly-ai','/sign-in','/consultation']){await open(path);await delay(1500);}
  await open('/properties');await wait(`document.querySelectorAll('.discovery-card').length>0`,'search cards');
  const found=await evaluate(`document.querySelectorAll('.discovery-card').length`);
@@ -53,6 +64,11 @@ try{
 
  const signed=await evaluate(`fetch('/api/auth/signin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:'minhanh@example.test',password:'safe-password-123'})}).then(r=>r.status)`);
  check(signed===200,`Admin fixture signs in (${signed})`);
+ await open('/');await wait(`!!document.querySelector('.account-trigger')`,'account menu on the homepage');
+ await evaluate(`document.querySelector('.account-trigger').click()`);await wait(`!!document.querySelector('.account-menu')`,'account menu opens');
+ const menu=await evaluate(`[...document.querySelectorAll('.account-menu [role=menuitem]')].map(a=>a.textContent.trim()+'>'+(a.getAttribute('href')||''))`);
+ check(menu.includes('Admin dashboard>/admin')&&!menu.some(item=>item.startsWith('Quản lý Lead')),`Admin account menu links to the dashboard (${menu.join(', ')})`);
+ check(!(await evaluate(`document.querySelector('.account-trigger').textContent`)).includes('Tài khoản'),'Account menu shows the user name');
  for(const route of routes){
   await open(route);await wait(`!!document.querySelector('.admin-sidebar')`,route+' sidebar');
   const shape=await evaluate(`({sidebars:document.querySelectorAll('.admin-sidebar').length,legacy:document.querySelectorAll('.catalog-sidebar:not(.admin-sidebar)').length,topbars:document.querySelectorAll('.catalog-topbar').length,items:[...document.querySelectorAll('.admin-sidebar nav a')].map(a=>a.textContent.replace(/\\d+/g,'').trim()),active:[...document.querySelectorAll('.admin-sidebar nav a[aria-current="page"]')].map(a=>a.getAttribute('href'))})`);

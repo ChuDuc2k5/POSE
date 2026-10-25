@@ -112,7 +112,7 @@ describe('M01 Google OAuth through NestJS', () => {
   it('verifies the JWT identity and creates the missing profile without trusting provider role metadata', async () => {
     const { cookie } = await begin();
     const result = await callback(cookie).expect(303);
-    expect(result.headers.location).toBe(`${origin}/customer`);
+    expect(result.headers.location).toBe(`${origin}/`);
     expect(profileWrites).toBe(1); expect(profileName).toBe('Khách Google');
     const credentials = (result.headers['set-cookie'] as unknown as string[]).filter(value => /^pose-(access|refresh)=google/.test(value));
     expect(credentials).toHaveLength(2); expect(credentials.every(value => /HttpOnly/.test(value) && /Secure/.test(value))).toBe(true);
@@ -133,11 +133,11 @@ describe('M01 Google OAuth through NestJS', () => {
     expect((await callback(first.cookie)).headers.location).toBe(`${origin}/customer/inquiries/new`);
     usedCodes.clear(); role = 'Sales';
     const second = await begin('/customer/inquiries/new');
-    expect((await callback(second.cookie)).headers.location).toBe(`${origin}/sales`);
+    expect((await callback(second.cookie)).headers.location).toBe(`${origin}/`);
   });
   it('uses the current server-managed role for Admin', async () => {
     role = 'Admin'; const { cookie } = await begin();
-    expect((await callback(cookie)).headers.location).toBe(`${origin}/admin`);
+    expect((await callback(cookie)).headers.location).toBe(`${origin}/`);
   });
   it('rejects a callback without a transaction and a tampered or expired transaction', async () => {
     const { cookie } = await begin();
@@ -171,7 +171,7 @@ describe('M01 Google OAuth through NestJS', () => {
   });
   it('keeps an existing signed-in user on their own role home without changing identity', async () => {
     const result = await request(app.getHttpServer()).post('/api/auth/google').set('Origin', origin).set('Cookie', 'pose-access=google-access').send({ acceptTerms: true }).expect(200);
-    expect(result.body.url).toBe('/customer'); expect(result.headers['set-cookie']).toBeUndefined();
+    expect(result.body.url).toBe('/'); expect(result.headers['set-cookie']).toBeUndefined();
   });
   it('limits repeated Google starts from the same client address', async () => {
     let limited = false;

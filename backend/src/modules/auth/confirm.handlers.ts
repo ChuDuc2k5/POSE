@@ -1,6 +1,6 @@
 import { WebRequest, WebResponse } from '../../common/http.js';
 import { authClient, authenticatedSession, saveSession } from './session.js';
-import { roleHome } from '../../common/roles.js';
+import { signedInHome } from '../../common/roles.js';
 import { beginRecovery } from '../account/account.service.js';
 
 export async function GET(request: WebRequest) {
@@ -12,7 +12,7 @@ export async function GET(request: WebRequest) {
       if (!error && data.session && data.user?.email_confirmed_at) {
         if (type === 'recovery') await beginRecovery(data.session); else await saveSession(data.session);
         const session=type==='recovery' ? null:await authenticatedSession();
-        const response = WebResponse.redirect(new URL(type === 'recovery' ? '/reset-password' : session ? roleHome(session.role):'/sign-in', request.url));
+        const response = WebResponse.redirect(new URL(type === 'recovery' ? '/reset-password' : session ? signedInHome:'/sign-in', request.url));
         response.headers.set('Cache-Control', 'no-store');
         response.headers.set('Referrer-Policy', 'no-referrer');
         return response;

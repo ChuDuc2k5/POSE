@@ -113,7 +113,7 @@ try {
   check((await post('resend', { email: valid.email })).status === 200, 'Resend must work without revealing account existence');
   const signin = await post('signin', valid);
   check(signin.status === 200, 'Valid credentials must sign in');
-  check((await signin.json()).destination === '/customer', 'Customer login returns to the homepage');
+  check((await signin.json()).destination === '/', 'Customer login returns to the homepage');
   const setCookies = signin.headers.getSetCookie();
   const sessionCookies = setCookies.filter(c => /^pose-(access|refresh)=fixture/.test(c));
   check(sessionCookies.length === 2 && sessionCookies.every(c => /HttpOnly/i.test(c) && /SameSite=lax/i.test(c)), 'Session cookies must be HttpOnly and SameSite');
@@ -130,26 +130,26 @@ try {
     }
   };
   check((await protectedPage('/')).status === 200 && (await (await protectedPage('/')).text()).includes('account-trigger'), 'Signed-in landing stays public and shows account navigation');
-  await checkGuestEntryRedirects('/customer');
+  await checkGuestEntryRedirects('/');
   for (const path of ['/customer','/customer/favorites','/customer/inquiries','/customer/inquiries/new','/properties']) {
     const header = (await (await protectedPage(path)).text()).match(/<header\b[\s\S]*?<\/header>/)?.[0] || '';
     check(header.includes('Hồ sơ cá nhân') && header.includes('Đăng xuất') && !header.includes('href="/sign-in"') && !header.includes('href="/sign-up"'), `First HTML of ${path} already contains the signed-in header`);
   }
   const refreshOnly = { Cookie: 'pose-refresh=fixture-refresh' };
   check((await fetch(origin, { headers: refreshOnly, redirect: 'manual' })).headers.get('location') === '/auth/refresh?next=%2F', 'Expired access on landing renews through the writable handler');
-  for (const path of ['/', '/sign-in', '/sign-up']) check((await fetch(`${origin}/auth/refresh?next=${encodeURIComponent(path)}`, { headers: refreshOnly, redirect: 'manual' })).headers.get('location') === `${origin}/customer`, 'Refreshed guest entry opens role home directly');
+  for (const path of ['/', '/sign-in', '/sign-up']) check((await fetch(`${origin}/auth/refresh?next=${encodeURIComponent(path)}`, { headers: refreshOnly, redirect: 'manual' })).headers.get('location') === `${origin}/`, 'Refreshed guest entry opens the homepage directly');
   const invalidRefresh = await fetch(`${origin}/auth/refresh?next=%2F`, { headers: { Cookie: 'pose-refresh=expired' }, redirect: 'manual' });
   check(invalidRefresh.headers.get('location') === `${origin}/` && invalidRefresh.headers.getSetCookie().some(c=>c.startsWith('pose-refresh=;')), 'Invalid refresh returns to guest landing and clears the stale cookie');
-  check((await fetch(`${origin}/auth/refresh?next=https://evil.example`, { headers: refreshOnly, redirect: 'manual' })).headers.get('location') === `${origin}/customer`, 'Refresh cannot redirect to an external destination');
+  check((await fetch(`${origin}/auth/refresh?next=https://evil.example`, { headers: refreshOnly, redirect: 'manual' })).headers.get('location') === `${origin}/`, 'Refresh cannot redirect to an external destination');
   const catalogNext = '/properties?type=Apartment&minPrice=3000000000';
   check((await fetch(`${origin}/auth/refresh?next=${encodeURIComponent(catalogNext)}`, { headers: refreshOnly, redirect: 'manual' })).headers.get('location') === `${origin}${catalogNext}`, 'Catalog refresh preserves the active filters');
   check((await fetch(`${origin}/auth/refresh?next=${encodeURIComponent(catalogNext)}`, { headers: {Cookie:'pose-refresh=expired'}, redirect:'manual' })).headers.get('location') === `${origin}${catalogNext}`, 'Invalid catalog refresh returns to the public page without a loop');
-  check((await fetch(`${origin}/auth/refresh?next=${encodeURIComponent('/properties/../../evil')}`, { headers: refreshOnly, redirect:'manual' })).headers.get('location') === `${origin}/customer`, 'Catalog refresh rejects path traversal');
+  check((await fetch(`${origin}/auth/refresh?next=${encodeURIComponent('/properties/../../evil')}`, { headers: refreshOnly, redirect:'manual' })).headers.get('location') === `${origin}/`, 'Catalog refresh rejects path traversal');
   check((await fetch(`${origin}/customer`, { redirect: 'manual' })).headers.get('location')?.endsWith('/sign-in'), 'Customer homepage requires login');
   check((await protectedPage('/customer')).status === 200, 'Customer can open their homepage');
-  check((await (await post('session', { access_token: 'fixture-access', refresh_token: 'fixture-refresh' })).json()).destination === '/customer', 'Email session callback opens customer homepage');
+  check((await (await post('session', { access_token: 'fixture-access', refresh_token: 'fixture-refresh' })).json()).destination === '/', 'Email session callback opens the homepage');
   const verified = await fetch(`${origin}/auth/confirm?token_hash=valid-once&type=email`, { redirect: 'manual' });
-  check(verified.headers.get('location') === `${origin}/customer`, 'Verified email opens customer homepage');
+  check(verified.headers.get('location') === `${origin}/`, 'Verified email opens the homepage');
   check((await fetch(`${origin}/account`, { redirect: 'manual' })).status === 307, 'Account page must be protected on the server');
   check((await protectedPage('/admin')).headers.get('location')?.endsWith('/forbidden'), 'User must not open admin page directly');
   check((await protectedPage('/sales')).headers.get('location')?.endsWith('/forbidden'), 'User must not open sales page directly');
@@ -159,14 +159,14 @@ try {
   check((await protectedPage('/')).status === 200 && (await (await protectedPage('/')).text()).includes('account-trigger'), 'Landing ignores forged user metadata role and shows the account trigger');
   check((await protectedPage('/admin')).headers.get('location')?.endsWith('/forbidden'), 'Editable metadata must not grant Admin');
   accessRole = 'Sales';
-  await checkGuestEntryRedirects('/sales');
+  await checkGuestEntryRedirects('/');
   check((await protectedPage('/customer')).headers.get('location')?.endsWith('/forbidden'), 'Sales cannot open customer-only homepage');
-  check((await (await post('signin',valid)).json()).destination === '/sales', 'Sales login returns to the homepage');
+  check((await (await post('signin',valid)).json()).destination === '/', 'Sales login returns to the homepage');
   check((await protectedPage('/sales')).status === 200, 'Sales can open sales page');
   check((await protectedPage('/admin')).headers.get('location')?.endsWith('/forbidden'), 'Sales cannot open admin page');
   accessRole = 'Admin';
-  await checkGuestEntryRedirects('/admin');
-  check((await (await post('signin',valid)).json()).destination === '/admin', 'Admin login returns to the homepage');
+  await checkGuestEntryRedirects('/');
+  check((await (await post('signin',valid)).json()).destination === '/', 'Admin login returns to the homepage');
   check((await protectedPage('/admin')).status === 200, 'Admin can open admin page');
   accessRole = 'User';
   check((await protectedPage('/admin')).headers.get('location')?.endsWith('/forbidden'), 'Role downgrade must take effect immediately');
@@ -175,7 +175,7 @@ try {
   const refreshRedirect = await fetch(`${origin}/account`, { headers: { Cookie: 'pose-refresh=fixture-refresh' }, redirect: 'manual' });
   check(refreshRedirect.headers.get('location')?.includes('/auth/refresh?next='), 'SSR refresh must use a writable route handler');
   const safeRedirect = await fetch(`${origin}/auth/refresh?next=https://evil.example`, { headers: { Cookie: cookie }, redirect: 'manual' });
-  check(safeRedirect.headers.get('location') === `${origin}/customer`, 'Refresh must reject open redirects and fall back to homepage');
+  check(safeRedirect.headers.get('location') === `${origin}/`, 'Refresh must reject open redirects and fall back to homepage');
   providerOffline = true;
   const unavailable = await fetch(`${origin}/api/auth/me`, { headers: { Cookie: cookie } });
   check(unavailable.status === 503 && unavailable.headers.getSetCookie().length === 0, 'Provider outages must not destroy cookies');

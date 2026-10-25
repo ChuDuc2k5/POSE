@@ -2,7 +2,7 @@ import { validOrigin } from '../../common/http.js';
 import { WebRequest, WebResponse } from '../../common/http.js';
 import { authClient, authenticatedSession, clearSession, consumeAttempt, resetAttempts, saveSession } from './session.js';
 import { normalizeEmail, validateCredentials } from '../../common/auth-validation.js';
-import { roleHome } from '../../common/roles.js';
+import { signedInHome } from '../../common/roles.js';
 import { beginRecovery, clearRecovery, readProfile, recoverySession, updateIdentity } from '../account/account.service.js';
 import { validatePassword } from '../../common/profile-validation.js';
 
@@ -18,7 +18,7 @@ export async function GET(_request: WebRequest, context: Context) {
     const session = await authenticatedSession();
     if (!session) return json({ message: 'Vui lòng đăng nhập để tiếp tục.' }, 401);
     const providers = [...new Set(session.user.identities?.map(identity => identity.provider) || [])];
-    return json({ user: { id: session.user.id, email: session.user.email, name: (await readProfile(session.access)).name, verified: true, role: session.role, providers }, destination: roleHome(session.role) });
+    return json({ user: { id: session.user.id, email: session.user.email, name: (await readProfile(session.access)).name, verified: true, role: session.role, providers }, destination: signedInHome });
   } catch {
     return json({ message: 'Dịch vụ tài khoản chưa khả dụng. Vui lòng thử lại sau.' }, 503);
   }
@@ -107,7 +107,7 @@ export async function POST(request: WebRequest, context: Context) {
       await saveSession(data.session);
       const verifiedSession=await authenticatedSession();
       if (!verifiedSession) return json({message:'Tài khoản chưa có quyền truy cập.'},403);
-      return json({ message: 'Email đã được xác minh.', destination: roleHome(verifiedSession.role) });
+      return json({ message: 'Email đã được xác minh.', destination: signedInHome });
     }
     const email = normalizeEmail(input.email);
     const message = action === 'resend' ? (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? 'Vui lòng nhập email hợp lệ.' : null) : validateCredentials(input, action === 'signup');
@@ -135,7 +135,7 @@ export async function POST(request: WebRequest, context: Context) {
     const session = await authenticatedSession();
     if (!session) return json({ message: 'Tài khoản đã bị vô hiệu hóa hoặc phiên không còn hợp lệ.' }, 403);
     resetAttempts(email);
-    return json({ message: 'Đăng nhập thành công.', destination: roleHome(session.role) });
+    return json({ message: 'Đăng nhập thành công.', destination: signedInHome });
   } catch {
     return json({ message: 'Dịch vụ tài khoản chưa khả dụng. Vui lòng thử lại sau.' }, 503);
   }

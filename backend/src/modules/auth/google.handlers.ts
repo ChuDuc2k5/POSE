@@ -2,7 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { cookies, currentClientIp, validOrigin, WebRequest, WebResponse } from '../../common/http.js';
 import { clearRecovery } from '../account/account.service.js';
-import { roleHome } from '../../common/roles.js';
+import { signedInHome } from '../../common/roles.js';
 import { authenticatedSession, consumeAttempt, saveSession, verifyAccessSession } from './session.js';
 import { ensureGoogleProfile } from './google-profile.js';
 
@@ -84,7 +84,7 @@ export async function START(request: WebRequest) {
       return json({ message: 'Vui lòng đồng ý điều khoản trước khi tiếp tục với Google.' }, 400);
     }
     const existing = await authenticatedSession();
-    if (existing) return json({ url: roleHome(existing.role) });
+    if (existing) return json({ url: signedInHome });
     if (!consumeAttempt('google-start', currentClientIp(), 30)) {
       return json({ message: 'Bạn đã thử đăng nhập Google quá nhiều lần. Vui lòng thử lại sau 15 phút.' }, 429);
     }
@@ -132,7 +132,7 @@ export async function CALLBACK(request: WebRequest) {
     await ensureGoogleProfile(session.access, session.user);
     await clearRecovery();
     await saveSession(data.session);
-    const destination = session.role === 'User' && flow.next ? flow.next : roleHome(session.role);
+    const destination = session.role === 'User' && flow.next ? flow.next : signedInHome;
     return finish(request, destination);
   } catch { return finish(request, '/sign-in?oauth=failed'); }
 }

@@ -1,6 +1,6 @@
 import { WebRequest, WebResponse } from '../../common/http.js';
 import { authenticatedSession } from './session.js';
-import { roleHome } from '../../common/roles.js';
+import { signedInHome } from '../../common/roles.js';
 
 const guestEntries = new Set(['/', '/sign-in', '/sign-up']);
 const publicDestinations = new Set(['/consultation','/guest/inquiries']);
@@ -12,7 +12,7 @@ export async function GET(request: WebRequest) {
   try {
     const session = await authenticatedSession();
     const destination = session
-      ? next && !guestEntries.has(next) ? next : roleHome(session.role)
+      ? next && !guestEntries.has(next) ? next : signedInHome
       : next && (guestEntries.has(next) || publicDestinations.has(next) || catalogDestination) ? next : '/sign-in';
     const response = WebResponse.redirect(new URL(destination, request.url));
     response.headers.set('Cache-Control', 'no-store');

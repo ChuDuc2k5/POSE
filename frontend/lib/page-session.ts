@@ -3,7 +3,7 @@ import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { backendFetch } from './backend';
-import { allowsRole, roleHome, type Role } from './roles';
+import { allowsRole, roleHome, signedInHome, type Role } from './roles';
 export const ACCESS_COOKIE = 'pose-access';
 export const REFRESH_COOKIE = 'pose-refresh';
 // One backend session lookup per request, shared by layouts and pages.
@@ -32,7 +32,7 @@ export async function redirectSignedInUser(path: '/' | '/sign-in' | '/sign-up') 
   const jar = await cookies();
   if (!jar.get(ACCESS_COOKIE)?.value && !jar.get(REFRESH_COOKIE)?.value) return;
   const session = await authenticatedSession({ writable: false });
-  if (session) redirect(roleHome(session.role));
+  if (session) redirect(path === '/' ? roleHome(session.role) : signedInHome);
   if (jar.get(REFRESH_COOKIE)?.value) redirect(`/auth/refresh?next=${encodeURIComponent(path)}`);
 }
 
