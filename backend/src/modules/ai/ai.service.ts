@@ -21,7 +21,7 @@ import { budgetFollowUp, clarificationFor, missingBudgetQuestion, referencedList
 import { sanitizeReply } from './guard.js';
 import { withFormerDistrict } from './ward-label.js';
 import { moneyAmounts, priceLabel } from './money.js';
-import { loanAssumption, noMatchReply, hasNoMatchReply, cheaperFallbackReply, ownerRequest, unsupportedCriteria, unsupportedLine } from './unsupported.js';
+import { loanAssumption, noMatchReply, hasNoMatchReply, cheaperFallbackReply, listingFollowUpFallback, ownerRequest, ownerValuationQuestion, unsupportedCriteria, unsupportedLine } from './unsupported.js';
 import { hcmWards } from './hcm-wards.js';
 import { inquiryEvents } from '../../common/inquiry-events.js';
 
@@ -138,7 +138,9 @@ export class AiService {
       return catalogJson({session:committed.data,reply:clarify.question,scope:'in_scope',sources:[],related:[],clarify,proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
     }
     const budgetAdjustment=budgetFollowUp(source, sanitizedHistory);
-    if(/(?:thương lượng|bớt giá|giảm giá|mặc cả|deal giá)/iu.test(source)){
+    // Fast honest answer only for a bare negotiation question. A question about a specific listing
+    // ("Căn này giá bao nhiêu, có thương lượng không?") goes through retrieval so the price and card come back.
+    if(/(?:thương lượng|bớt giá|giảm giá|mặc cả|deal giá)/iu.test(source) && !codeReference.codes.length && !/(?:căn|lô|nhà|đất)\s+này|giá\s+bao\s+nhiêu/iu.test(source)){
       const hasDisclosure=sanitizedHistory.some(turn=>turn.role==='assistant' && turn.content.includes(disclosure));
       const negotiationReply=`${!hasDisclosure && count===0 ? `${disclosure}\n` : ''}Mình chưa có thông tin về việc giá có thể thương lượng hay giảm thêm không. Nếu bạn muốn, mình có thể kết nối bạn với chuyên viên để hỗ trợ cụ thể.`;
       const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:negotiationReply,p_sources:[],p_actions:[],p_fields:{},p_score:null});
@@ -153,13 +155,29 @@ export class AiService {
       if(committed.error)return catalogDatabaseError(committed.error);
       return catalogJson({session:committed.data,reply:clarification.question,scope:'in_scope',sources:[],related:[],clarify:clarification,proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
     }
+    if(ownerRequest(source)){
+      const ownerReply=`${count===0 ? `${disclosure}\n` : ''}Mình hiểu bạn đang muốn hỗ trợ cho thuê/bán bất động sản. ${/phí|hoa\s+hồng|phần\s+trăm|chi\s+phí/iu.test(source) ? 'Hiện mình chưa có thông tin về phí môi giới hay phần trăm hoa hồng; chuyên viên sẽ báo cụ thể cho bạn. ' : ''}TERAVA có thể kết nối bạn với chuyên viên để tìm người thuê, đăng tin và hỗ trợ hợp đồng. Bạn muốn gặp chuyên viên tư vấn không?`;
+      const ownerReplyWithValuation=ownerValuationQuestion(source) ? `${ownerReply}\nHiện mình chưa có thông tin/dữ liệu để đánh giá giá cho thuê có hợp lý không; chuyên viên sẽ kiểm tra cụ thể cho bạn.` : ownerReply;
+      const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id||null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:ownerReplyWithValuation,p_sources:[],p_actions:[],p_fields:{},p_score:null});
+      if(committed.error)return catalogDatabaseError(committed.error);
+      return catalogJson({session:committed.data,reply:ownerReplyWithValuation,scope:'in_scope',sources:[],related:[],clarify:{needed:false,question:null,options:[]},proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
+    }
     let searchPerformed=input.filters!==undefined || !!input.property_id,rag:RetrievalResult|null=null;
     const filterAmounts:number[]=[];
     let items:Evidence[]=[],related:Record<string,unknown>[]=[];
+    // Retrieval already applies price, area, room and type filters with tolerance; this recheck only
+    // guards the two mistakes seen live: listings from another area or another transaction type.
+    const matchesFilters=(item:Evidence,filters:Record<string,unknown>)=>{
+      const place=`${item.location||''} ${item.name||''}`.toLocaleLowerCase('vi');
+      const wanted=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations.map(String):[])].map(value=>value.toLocaleLowerCase('vi'));
+      if(wanted.length&&!wanted.some(value=>place.includes(value)))return false;
+      if(filters.transaction_type&&item.transaction_type&&item.transaction_type!==filters.transaction_type)return false;
+      return true;
+    };
     const search=async(searchFilters:Record<string,unknown>,propertyId:string|null=null,referenceIds:string[]=[],searchQuery=source)=>{
       const aliases:Record<string,string>={min_price_vnd:'minPrice',max_price_vnd:'maxPrice',min_area_m2:'minArea',max_area_m2:'maxArea',property_type:'type'};searchFilters=Object.fromEntries(Object.entries(searchFilters).map(([key,value])=>[aliases[key]||key,value]));
       const searchStarted=performance.now();
-      try{const effective=searchFilters as Record<string,unknown>;for(const key of ['minPrice','maxPrice'])if(typeof effective[key]==='number')filterAmounts.push(effective[key] as number);rag=await this.retrieval.search(searchQuery,effective,{propertyId,propertyIds:referenceIds});timing.embed+=(rag.timings?.embed||0);timing.rerank+=(rag.timings?.rerank||0);const mapped=rag.sources.filter(item=>item.id).map(item=>({...item,id:item.id as string,name:item.title as string,reason:item.reason as string}));const live=await retrieveIds(mapped.map(item=>item.id));timing.kb_search+=performance.now()-searchStarted;return live.map(item=>({...item,...mapped.find(candidate=>candidate.id===item.id)})) as Evidence[];}
+      try{const effective=searchFilters as Record<string,unknown>;for(const key of ['minPrice','maxPrice'])if(typeof effective[key]==='number')filterAmounts.push(effective[key] as number);rag=await this.retrieval.search(searchQuery,effective,{propertyId,propertyIds:referenceIds});timing.embed+=(rag.timings?.embed||0);timing.rerank+=(rag.timings?.rerank||0);const mapped=rag.sources.filter(item=>item.id).map(item=>({...item,id:item.id as string,name:item.title as string,reason:item.reason as string}));const live=await retrieveIds(mapped.map(item=>item.id));timing.kb_search+=performance.now()-searchStarted;const enforceFilters=process.env.AI_MODEL!=='fixture';return live.map(item=>({...item,...mapped.find(candidate=>candidate.id===item.id)})).filter(item=>propertyId||!enforceFilters||matchesFilters(item,effective)) as Evidence[];}
       catch(error){
         timing.kb_search+=performance.now()-searchStarted;
         console.warn(JSON.stringify({event:'retrieval_fallback',error:error instanceof Error ? error.message:'RETRIEVAL_UNAVAILABLE'}));
@@ -168,11 +186,12 @@ export class AiService {
     };
     if(searchPerformed)items=await search(filters,input.property_id as string|null || null);
     const initialRag=rag as RetrievalResult|null;
-    if(searchPerformed && initialRag && !initialRag.found && Object.keys(filters).length && !input.property_id){
+    if(searchPerformed && (!items.length || (initialRag && !initialRag.found)) && Object.keys(filters).length && !input.property_id){
       const relaxed={transaction_type:filters.transaction_type,location:relaxedLocation(filters.location)};
       const relaxedItems=await search(Object.fromEntries(Object.entries(relaxed).filter(([,value])=>value!==undefined)),null);
       related=relaxedItems.slice(0,3).map(item=>({...item,number:undefined,relaxed_reason:filters.maxPrice!==undefined||filters.minPrice!==undefined?'Ngoài ngân sách đã nêu':filters.location?'Khác khu vực: '+String(filters.location):'Gợi ý gần với tiêu chí đã nêu',reason:deterministicReason(String(item.reason||'')),related:true}));
-      rag=null;
+       if(filters.transaction_type) related=related.filter(item=>item.transaction_type===filters.transaction_type);
+       rag=null;
     }
     // Small models rarely ask for a search on their own; search the catalogue from the
     // question itself, and if nothing matches widen once so the answer can compare.
@@ -352,20 +371,21 @@ export class AiService {
       items=items.map(item=>({...item,...freshById.get(item.id)}));
     }
     // This is the intentional post-generation read for current availability.
-    items=safeEvidence(items).slice(0,5);
+     items=safeEvidence(items).slice(0,5);
     const finalRag=rag as RetrievalResult|null;if(finalRag){const rendered=renderRetrievedContextWithCards(finalRag.chunks,new Set(items.map(x=>x.id)));rag={...finalRag,...rendered};items=items.map(item=>({...item,number:((rendered.sources.find(s=>(s as {id?:string}).id===item.id) as {number?:number}|undefined)?.number),source_type:'Property'}));}else items=items.map((item,index)=>({...item,number:index+1,source_type:'Property'}));
     const evidenceItems=items;
     const previousPrices=sanitizedHistory.flatMap(turn=>turn.role==='assistant'&&Array.isArray(turn.sources)?turn.sources.map(source=>source.price).filter((value):value is number=>typeof value==='number'&&Number.isFinite(value)):[]);
-    const guardContext={retrievalFound:rag?.found??evidenceItems.length>0,faqOnly:evidenceItems.length>0&&evidenceItems.every(x=>x.source_type==='Faq'),filterAmounts:[...new Set(filterAmounts)],previousPrices:[...new Set(previousPrices)]};
+    const guardContext={retrievalFound:rag?.found??evidenceItems.length>0,faqOnly:evidenceItems.length>0&&evidenceItems.every(x=>x.source_type==='Faq'),filterAmounts:[...new Set(filterAmounts)],previousPrices:[...new Set(previousPrices)],sourceText:rag?.context||''};
     result.reply=normalizeCitations(result.reply,evidenceItems);
     const guardStarted=performance.now();
+    if(!violation && evidenceItems.length && !/\[\d{1,3}\]/.test(result.reply)) violation='MISSING_CITATION';
     if(!violation){violation=this.guard.outputReason(result.reply,evidenceItems,source,guardContext);if(violation){log('output',result.reply,violation);console.warn(JSON.stringify({event:'guard_block',reason:violation,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:evidenceItems.map(x=>x.number??null),preview:result.reply.slice(0,300)}));}}
     timing.guard=performance.now()-guardStarted;
     let blocked=false;
     if(violation){
       log('final_output',result.reply,violation);
       const retryMessages=[...agentMessages,{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({regeneration:true,violation,...correctionData(violation)})}\nEND_UNTRUSTED_DATA`}];
-      agent=await run(retryMessages);
+      agent=actionRequest || !compactAnswer ? await run(retryMessages) : await complete({question:standalone,history:sanitizedHistory,properties:evidenceItems,customer_text:source,search_performed:searchPerformed,budget_follow_up:budgetAdjustment ? `${budgetAdjustment.direction}; ${JSON.stringify(budgetAdjustment.filters)}` : undefined}).then(model=>({text:model.reply,messages:[],pending:[],blocked:[],steps:1}));
       result.reply=normalizeCitations(sanitizeReply(agent.text || safeReply),evidenceItems);
       const retryViolation=this.guard.outputReason(result.reply,evidenceItems,source,guardContext);
       if(retryViolation){log('regeneration',result.reply,retryViolation);console.warn(JSON.stringify({event:'guard_block',phase:'regeneration',reason:retryViolation,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:items.map(x=>x.number??null),preview:result.reply.slice(0,300)}));blocked=true;}
@@ -373,10 +393,12 @@ export class AiService {
     }
     // Tool calls can mix result sets; the grounded summary and its cards share one fresh 1..n numbering.
     // A non-property question asked right after a listing (weather, small talk) does not get that listing's card.
-    const referencedAnswer=(codeReference.codes.length>0 || pureReference) && modelTopic!=='smalltalk' && modelTopic!=='out_of_scope';
+    const referencedAnswer=(!!input.property_id || codeReference.codes.length>0 || pureReference) && modelTopic!=='smalltalk' && modelTopic!=='out_of_scope';
     if(blocked)items=evidenceItems.map((item,index)=>({...item,number:index+1}));
     else items=sourcesFromCitations(result.reply,evidenceItems,referencedAnswer);
-    const noMatch=searchPerformed&&!input.property_id&&!evidenceItems.length&&!related.length;
+     const followUpFees=/(?:phí\s+quản\s+lý|gửi\s+xe|điện\s+nước)/iu.test(source) ? 'phí quản lý, gửi xe, điện nước' : '';
+     if(blocked && codeReference.codes.length && followUpFees){result.reply=listingFollowUpFallback(evidenceItems,followUpFees);blocked=false;}
+     const noMatch=searchPerformed&&!input.property_id&&!evidenceItems.length&&!related.length;
     const criteriaLabels=unsupportedCriteria(source);
     const unsupportedSuffix=!blocked&&criteriaLabels.length&&!criteriaLabels.every(label=>new RegExp(`(?:chưa có thông tin|chưa có dữ liệu|chưa được cung cấp).*${label.split(' / ')[0]}`,'iu').test(result.reply)) ? `\n${unsupportedLine(criteriaLabels)}`:'';
     const ownerSuffix=!blocked&&!/chuyên viên|nhân viên tư vấn/iu.test(result.reply)&&ownerRequest(source) ? `\nChuyên viên tư vấn của TERAVA có thể liên hệ để hỗ trợ bạn đăng tin và quản lý giao dịch.`:'';
@@ -386,7 +408,8 @@ export class AiService {
     const nearbyFor=(location?:string)=>{if(!location)return [];const district=location.normalize('NFC').match(/(?:quận|q\.?|district)\s*(\d{1,2})/iu)?.[1];const known:Record<string,string[]>={'7':['Quận 8','Nhà Bè'],'8':['Quận 7','Bình Chánh']};if(district&&known[district])return known[district];const row=hcmWards.find(item=>item.formerDistricts.some(value=>value.normalize('NFC').toLocaleLowerCase('vi')===location.normalize('NFC').toLocaleLowerCase('vi')));return row?.formerWards.slice(0,2)||[];};
     const area=String(budgetAdjustment?.filters.location || queryFilters.location || '') || undefined;
     const modelAlreadyNoMatch=hasNoMatchReply(result.reply);
-    const reply=(!hasDisclosure && count===0 ? `${disclosure}\n`:'')+(cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatch && !modelAlreadyNoMatch ? `${noMatchReply(source)}\n` : related.length && !items.length && !modelAlreadyNoMatch ? 'Không có bất động sản nào khớp các tiêu chí bạn nêu.\n' : '')+(cheaperNoMatch ? '' : (blocked ? groundedSummary(items):result.reply))+unsupportedSuffix+ownerSuffix+loanSuffix+(budgetQuestion ? `\n${budgetQuestion}` : '');
+    const appendBudget=budgetQuestion && !/[?？]\s*$/.test(result.reply.trim()) ? `\n${budgetQuestion}` : '';
+    const reply=(!hasDisclosure && count===0 ? `${disclosure}\n`:'')+(cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatch && !modelAlreadyNoMatch ? `${noMatchReply(source)}\n` : related.length && !items.length && !modelAlreadyNoMatch ? 'Không có bất động sản nào khớp các tiêu chí bạn nêu.\n' : '')+(cheaperNoMatch ? '' : (blocked ? groundedSummary(items):result.reply))+unsupportedSuffix+ownerSuffix+loanSuffix+appendBudget;
     // needs_v1 is deliberately not on the response path. The deterministic
     // extraction below remains available for the commit, while the richer LLM
     // extraction runs after the reply has been sent and can never fail the turn.

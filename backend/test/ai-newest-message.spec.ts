@@ -29,6 +29,8 @@ describe('cards without [n] citations', () => {
 });
 
 import { clarificationFor, missingBudgetQuestion, referencedListingCodes } from '../src/modules/ai/history-aware.js';
+import { ownerRequest, ownerValuationQuestion, listingFollowUpFallback } from '../src/modules/ai/unsupported.js';
+import { explicitWriteIntent } from '../src/modules/ai/guard.js';
 describe('picking a listing that was just shown', () => {
   const history = [{ role: 'user', content: 'Cho thuê căn hộ 2 phòng ngủ Quận 7' }, { role: 'assistant', content: 'Có 5 căn ở Quận 7.\nMã: CFR-AAA11111, CFR-BBB22222' }];
   const message = 'tôi quan tâm căn này\nCăn hộ 2 phòng ngủ tại CC Midtown Phú Mỹ Hưng, giá 26 triệu đồng/tháng.';
@@ -41,13 +43,23 @@ describe('picking a listing that was just shown', () => {
 });
 
 describe('search clarification', () => {
+  it('searches concrete criteria even when area and budget are absent', () => {
+    expect(clarificationFor('Tôi cần mua nhà diện tích khoảng 80 m², có 2 phòng ngủ.', []).needed).toBe(false);
+    expect(clarificationFor('Tôi muốn thuê nhà đầy đủ nội thất trong 6 tháng.', []).needed).toBe(false);
+  });
   it('asks for area and budget before a first broad search', () => {
     const result = clarificationFor('Tôi muốn thuê chung cư', []);
     expect(result.needed).toBe(true);
     expect(result.options).toContain('Chưa rõ, gợi ý giúp tôi');
   });
-  it('asks for the area when only a budget is supplied', () => {
-    expect(clarificationFor('Tìm căn hộ dưới 3 tỷ', []).needed).toBe(true);
+  it('searches when only a budget is supplied', () => {
+    expect(clarificationFor('Tìm căn hộ dưới 3 tỷ', []).needed).toBe(false);
+  });
+  it('answers a follow-up about the listing in history instead of clarifying', () => {
+    expect(clarificationFor('Tiền cọc mấy tháng và hợp đồng thuê tối thiểu bao lâu?', [{ role: 'user', content: 'Chi tiết căn CFR-0FC7C10BB520419B' }]).needed).toBe(false);
+  });
+  it('keeps the property type the customer named', () => {
+    expect(clarificationFor('Tôi muốn thuê nhà', []).question).toContain('nhà thuê');
   });
   it('does not block an area search and adds a budget prompt', () => {
     expect(clarificationFor('Thuê căn hộ ở Quận 7', []).needed).toBe(false);
@@ -73,6 +85,26 @@ describe('search clarification', () => {
     ]);
     expect(result?.direction).toBe('higher');
     expect(result?.filters.minPrice).toBeGreaterThan(16000000);
+  });
+});
+
+describe('seller and viewing intents', () => {
+  it('does not route owners into buyer clarification', () => {
+    expect(ownerRequest('Tôi muốn cho thuê nhà nhưng không muốn tự quản lý khách thuê.')).toBe(true);
+    expect(clarificationFor('Tôi muốn cho thuê nhà của mình.', []).needed).toBe(false);
+  });
+  it('recognizes direct viewing as an action turn', () => {
+    expect(explicitWriteIntent('Tôi muốn xem trực tiếp căn CFR-0FC7C10BB520419B vào chiều thứ Bảy.')).toBe(true);
+  });
+  it('recognizes direct owner sale wording and valuation questions', () => {
+    expect(ownerRequest('Tôi muốn bán nhà trong vòng 3 tháng.')).toBe(true);
+    expect(ownerValuationQuestion('Giá cho thuê 15 triệu có hợp lý không?')).toBe(true);
+  });
+  it('keeps a listing follow-up grounded when the answer needs a fallback', () => {
+    const reply = listingFollowUpFallback([{ number: 1, name: 'Căn Midtown', price: 11000000, transaction_type: 'Rent', price_period: 'Month' }], 'phí quản lý, gửi xe, điện nước');
+    expect(reply).toContain('[1]');
+    expect(reply).toContain('11');
+    expect(reply).toContain('chưa có thông tin');
   });
 });
 

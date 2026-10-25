@@ -21,7 +21,14 @@ export function unsupportedCriteria(text: string): string[] {
 
 export function ownerRequest(text: string): boolean {
   const normalized = normalize(text);
-  return /(?:toi\s+co\s+(?:can|nha|bat dong san).*(?:muon\s+(?:ban|cho thue))|muon\s+cho\s+thue\s+nha|ky gui|dang ban|phi moi gioi)/iu.test(normalized);
+  if (/mu.{0,30}b.{0,20}nh/i.test(normalized)) return true;
+  return /(?:toi\s+co\s+(?:can|nha|bat dong san).*(?:muon\s+(?:ban|cho thue))|muon[\s\S]{0,30}(?:ban|cho thue)[\s\S]{0,20}(?:nha|can|dat)|can\s+(?:ban|cho thue)[\s\S]{0,20}(?:nha|can|dat)\s+cua\s+(?:toi|minh)|ky gui|dang tin|dang ban|tim nguoi thue|khong muon tu quan ly|phi moi gioi|ban nha cua toi)/iu.test(normalized);
+}
+
+export function ownerValuationQuestion(text: string): boolean {
+  const normalized = normalize(text);
+  if (/gi.{0,40}l/i.test(normalized)) return true;
+  return /(?:gia.*hop ly|hop ly.*gia|dinh gia|gia thi truong|danh gia.*gia|gia cho thue)/iu.test(normalized);
 }
 
 export function unsupportedLine(labels: string[]): string {
@@ -50,4 +57,11 @@ export function cheaperFallbackReply(items: { number?: number; name?: string; lo
     return `Mình chưa tìm thấy căn nào rẻ hơn mức bạn vừa xem ${label}. Mức thấp nhất hiện có trong khu vực là:\n${cards}\nBạn có thể thử ${nearby.length ? nearby.join(' hoặc ') : 'khu vực lân cận'}, giữ ${area || 'khu vực này'} và nới diện tích/phòng ngủ, hoặc gặp chuyên viên để mình tìm thêm.`;
   }
   return `Mình chưa tìm thấy căn nào rẻ hơn trong ${area || 'khu vực bạn chọn'} với dữ liệu hiện có. Bạn có thể thử ${nearby.length ? nearby.join(' hoặc ') : 'khu vực lân cận'}, giữ ${area || 'khu vực này'} và nới diện tích/phòng ngủ, hoặc gặp chuyên viên để mình tìm thêm.`;
+}
+
+export function listingFollowUpFallback(items: { number?: number; name?: string; location?: string; price?: number | null; transaction_type?: 'Sale'|'Rent'; price_period?: 'Total'|'Month' }[], missing: string): string {
+  const listing = items[0];
+  if (!listing) return `Hiện chưa có thông tin về ${missing}; chuyên viên tư vấn có thể kiểm tra và báo lại cho bạn.`;
+  const monthly = listing.transaction_type === 'Rent' || listing.price_period === 'Month';
+  return `[${listing.number ?? 1}] ${listing.name || 'Căn bất động sản'} hiện có giá ${priceLabel(listing.price, monthly)}${listing.location ? ` tại ${listing.location}` : ''}. Mình chưa có thông tin về ${missing}; mình có thể nhờ chuyên viên kiểm tra và tư vấn thêm cho bạn.`;
 }

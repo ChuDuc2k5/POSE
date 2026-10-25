@@ -19,7 +19,7 @@ describe('grounded summary when the model answer stays blocked', () => {
     const text = groundedSummary([{ ...(evidence as unknown as Record<string, unknown>[])[0], number: 1 } as never]);
     expect(text).toContain('[1] Cho thuê Midtown M8 2PN Q7');
     expect(text).toContain('10.000.000 VND/tháng');
-    expect(text).toContain('đang mở bán');
+    expect(text).toContain('đang cho thuê');
   });
   it('falls back to the safe reply when no listing was retrieved', () => {
     expect(groundedSummary([])).toBe(safeReply);
@@ -34,5 +34,20 @@ describe('cheaper budget fallback', () => {
     expect(reply).toContain('11 triệu');
     expect(reply).toContain('Quận 8');
     expect(reply).not.toContain('chưa thể xác nhận câu trả lời an toàn');
+  });
+});
+
+describe('travel time and distance claims', () => {
+  it('blocks an invented travel time', () => {
+    expect(outputReason('Căn hộ ở Quận 7, đi Quận 1 mất khoảng 15-30 phút [1].', evidence)).toBe('UNSUPPORTED_TRAVEL');
+  });
+  it('allows a distance that the retrieved source states', () => {
+    expect(outputReason('Căn hộ cách PMH 1.5 km [1].', evidence, '', { sourceText: 'Midtown M8, cách PMH 1.5 km, full nội thất' })).toBeNull();
+  });
+});
+
+describe('customer-stated travel limits', () => {
+  it('allows echoing the travel time the customer asked for', () => {
+    expect(outputReason('Hiện chưa có thông tin về thời gian đi làm khoảng 20 phút từ căn này [1].', evidence, 'Tôi muốn thuê căn hộ gần Quận 1, đi làm khoảng 20 phút.')).toBeNull();
   });
 });

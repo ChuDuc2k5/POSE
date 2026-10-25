@@ -92,24 +92,27 @@ export function budgetFollowUp(message: string, history: HistoryTurn[]): BudgetF
   return { filters, direction: cheaper ? 'cheaper' : 'higher' };
 }
 export function clarificationFor(message: string, history: { role: string; content: string }[]): Clarification {
+  const ownerText=message.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').toLowerCase();
+  if (/(?:cho\s+thue\s+(?:nha|can)|dang\s+tin|tim\s+nguoi\s+thue|ky\s+gui|ban\s+nha\s+cua\s+toi|muon\s+cho\s+thue|ban\s+nha\s+qua|nho\s+ban|phi\s+moi\s+gioi|hoa\s+hong)/u.test(ownerText)) return { needed: false, question: null, options: [] };
   // A named listing ("Đặt lịch xem căn RVL-…") or a booking/saving request is never a new search.
+  // A question about the listing just discussed ("Tiền cọc mấy tháng?") is answered from that listing.
+  if (referencedListingCodes(message, history).codes.length) return { needed: false, question: null, options: [] };
   if (!searchIntent.test(message) || budgetFollowUp(message, history) || locationPattern.test(message) || namesPlace(message) || isFollowUp(message) || listingCodes(message).length || /(?<![\p{L}])(?:đặt\s+lịch|hẹn\s+xem|lưu\s+căn|yêu\s+thích|liên\s+hệ|chuyên\s+viên)(?![\p{L}])/iu.test(message)) return { needed: false, question: null, options: [] };
   const location = previousSearchLocation(history);
   const inferred = inferSearch(message) || {};
   const hasBudget = inferred.minPrice !== undefined || inferred.maxPrice !== undefined;
+  const concrete = /(?:\d+\s*(?:m²|m2|m\s*2|phòng|pn)|diện\s+tích|nội\s+thất|đầy\s+đủ|nguyên\s+căn|kinh\s+doanh|trong\s+\d+\s+tháng|hợp\s+đồng(?:\s+ngắn)?\s+hạn|dự\s+án|tên\s+(?:dự\s+án|khu)|khoảng\s+\d+)/iu.test(message);
   // A new search must establish the two fields that make a catalogue search useful.
   const previousAssistant = [...history].reverse().find(turn => turn.role === 'assistant')?.content || '';
   const previousWasClarification = /khu vực nào|ngân sách.*(?:tháng|triệu|tỷ)|chưa rõ,? gợi ý/iu.test(previousAssistant);
-  if (!location && !hasBudget && (!history.length || !previousWasClarification)) return {
+  const kind = /chung\s+cư|căn\s+hộ/iu.test(message) ? 'chung cư' : /đất/iu.test(message) ? 'đất' : 'nhà';
+  if (!location && !hasBudget && !concrete && (!history.length || !previousWasClarification)) return {
     needed: true,
-    question: /thuê/iu.test(message) ? 'Bạn đang tìm chung cư thuê ở khu vực nào (quận, phường hay tuyến đường) và ngân sách khoảng bao nhiêu mỗi tháng ạ? Nếu chưa chắc, mình gợi ý vài khu phù hợp nhé.' : 'Bạn đang tìm mua ở khu vực nào (quận, phường hay tuyến đường) và ngân sách khoảng bao nhiêu ạ? Nếu chưa chắc, mình gợi ý vài khu phù hợp nhé.',
+    question: /thuê/iu.test(message) ? `Bạn đang tìm ${kind} thuê ở khu vực nào (quận, phường hay tuyến đường) và ngân sách khoảng bao nhiêu mỗi tháng ạ? Nếu chưa chắc, mình gợi ý vài khu phù hợp nhé.` : `Bạn đang tìm mua ${kind} ở khu vực nào (quận, phường hay tuyến đường) và ngân sách khoảng bao nhiêu ạ? Nếu chưa chắc, mình gợi ý vài khu phù hợp nhé.`,
     options: /thuê/iu.test(message) ? ['Dưới 10 triệu', '10–20 triệu', 'Chưa rõ, gợi ý giúp tôi'] : ['Dưới 3 tỷ', '3–6 tỷ', 'Chưa rõ, gợi ý giúp tôi'],
   };
-  if (!location && hasBudget) return {
-    needed: true,
-    question: 'Bạn muốn tìm ở khu vực nào? Bạn có thể chọn khu vực phổ biến hoặc nói “Chưa rõ, gợi ý giúp tôi”.',
-    options: ['Thủ Đức', 'Quận 7', 'Chưa rõ, gợi ý giúp tôi'],
-  };
+  // A budget alone is concrete enough to search; the area question can follow the results.
+  if (!location && hasBudget) return { needed: false, question: null, options: [] };
   if (!location) return { needed: false, question: null, options: [] };
   if (!hasBudget && !locationPattern.test(message) && !namesPlace(message)) {
     const action = /thuê/iu.test(message) ? 'thuê' : /mua/iu.test(message) ? 'mua' : 'tìm';

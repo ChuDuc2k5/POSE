@@ -4,7 +4,7 @@ export function sanitizeReply(reply:string) { return reply.replace(/\[n\]/gi,'')
 const word = (source:string) => new RegExp(`(?<![\\p{L}])(?:${source})(?![\\p{L}])`,'iu');
 export function explicitWriteIntent(text:string) {
   const normalized=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\u0111/g,'d').toLowerCase();
-  return word('luu(?: can| lai)|yeu thich|dat lich|hen xem|xem (?:nha|can)|goi lai|lien he(?: voi| lai)?(?: toi|minh|em|anh|chi)|gap chuyen vien|nhan vien tu van|chuyen vien tu van').test(normalized);
+  return word('luu(?: can| lai)|yeu thich|dat lich|hen xem|xem (?:nha|can)|xem truc tiep|di xem|lich xem|goi lai|lien he(?: voi| lai)?(?: toi|minh|em|anh|chi)|gap chuyen vien|nhan vien tu van|chuyen vien tu van|dang tin|tim nguoi thue|ky gui|cho thue nha|ban nha cua toi').test(normalized);
 }
 const refusal=/(?:không thể|không được phép|chỉ) hỗ trợ (?:yêu cầu|nội dung|câu hỏi|tìm hiểu bất động sản)|không thể (?:trả lời|đáp ứng) (?:yêu cầu|câu hỏi|nội dung) này/iu;
 // Vulgar or sexual messages are refused before any search, so no listing is attached to them.
@@ -66,6 +66,7 @@ export function groundedSummary(evidence:Evidence[]) {
   const status:Record<string,string>={Available:'đang mở bán',Sold:'đã bán, không còn mở bán',Reserved:'đã giữ chỗ',Unavailable:'tạm ngưng giao dịch'};
   const lines=properties.map((e,index)=>{
     const monthly=e.price_period==='Month' || e.transaction_type==='Rent';
+    if (e.transaction_type==='Rent') { status.Available='đang cho thuê'; status.Sold='đã cho thuê/không còn trống'; status.Reserved='đã có người giữ'; status.Unavailable='tạm ngưng cho thuê'; }
     const natural=priceLabel(e.price,monthly);
     // Keep the exact VND value beside the conversational label for auditability;
     // the label is what customers read first and prevents values such as 4,98 tỷ
@@ -75,7 +76,7 @@ export function groundedSummary(evidence:Evidence[]) {
   });
   return `Mình tìm thấy ${properties.length} căn bạn có thể tham khảo:\n${lines.join('\n')}\nBạn muốn mình lọc thêm theo phường/đường, điều chỉnh ngân sách hay hẹn chuyên viên xem căn nào?`;
 }
-export type Evidence={id:string;code:string;name:string;price:number|null;availability:string;updated_at:string;location:string;property_type:string;bedrooms?:number|null;transaction_type?:'Sale'|'Rent';price_period?:'Total'|'Month';number?:number;source_type?:'Property'|'Faq';reason?:string};
+export type Evidence={id:string;code:string;name:string;price:number|null;availability:string;updated_at:string;location:string;property_type:string;area?:number|null;bedrooms?:number|null;transaction_type?:'Sale'|'Rent';price_period?:'Total'|'Month';number?:number;source_type?:'Property'|'Faq';reason?:string};
 const clauses=(text:string)=>text.split(/\n|[;!?]|(?<!\d)[.,](?!\d)/).filter(Boolean);
 function negated(text:string,index:number){
   const prefix=text.slice(Math.max(0,index-90),index).split(/nhưng|tuy nhiên|\bbut\b|\bhowever\b/i).at(-1) || '';
@@ -107,7 +108,7 @@ function moneyText(text:string,evidence:Evidence[]){
   for(const e of evidence)result=result.replace(new RegExp(`(?<![a-z0-9_-])${e.code.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?![a-z0-9_-])`,'gi'),'');
   return result;
 }
-export function outputReason(reply:string,evidence:Evidence[],customerText='',context?:{retrievalFound?:boolean;faqOnly?:boolean;filterAmounts?:number[];previousPrices?:number[]}) {
+export function outputReason(reply:string,evidence:Evidence[],customerText='',context?:{retrievalFound?:boolean;faqOnly?:boolean;filterAmounts?:number[];previousPrices?:number[];sourceText?:string}) {
   const returned=new Set(evidence.map(e=>e.number).filter((n):n is number=>typeof n==='number'));
   for(const match of reply.matchAll(/\[(\d+)\]/g))if(returned.size&&!returned.has(Number(match[1])))return 'INVALID_CITATION';
   const customerAmounts=moneyAmounts(customerText);
@@ -122,6 +123,9 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
   if(secrets.test(reply) || clauses(reply).some(clause=>[...clause.matchAll(privateCustomers)].some(m=>!negated(clause,m.index!))))return 'PRIVATE_DATA_OR_SECRET';
   if(links.test(reply))return 'PRIVATE_OR_UNSUPPORTED_LINK';
   if(clauses(reply).some(commitment))return 'UNSUPPORTED_COMMITMENT';
+  // Travel times and distances ("khoảng 15-30 phút", "3 km") are only allowed when a cited source states them.
+  const sourceText=`${context?.sourceText||''} ${evidence.map(e=>`${e.name||''} ${e.location||''}`).join(' ')}`;
+  for(const m of reply.matchAll(/\d+(?:[,.]\d+)?(?:\s*[-–]\s*\d+(?:[,.]\d+)?)?\s*(?:phút|km|cây số)(?![\p{L}])/giu))if(!sourceText.includes(m[0]) && !customerText.includes(m[0].replace(/\s+/gu,' ')) && !customerText.replace(/\s+/gu,'').includes(m[0].replace(/\s+/gu,'')))return 'UNSUPPORTED_TRAVEL';
   const uuid=/[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}/gi;
   if([...reply.matchAll(uuid)].some(m=>!evidence.some(e=>e.id.toLowerCase()===m[0].toLowerCase())))return 'UNSUPPORTED_PROPERTY';
   const withoutDates=reply.replace(/(?<![a-z\d_-])\d{4}-\d{2}-\d{2}(?:T[\d:.+Z-]+)?/gi,'').replace(uuid,'');
