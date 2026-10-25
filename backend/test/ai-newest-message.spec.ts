@@ -62,3 +62,13 @@ describe('booking a named listing', () => {
     expect(clarificationFor('Tôi muốn đặt lịch xem nhà', history).needed).toBe(false);
   });
 });
+
+describe('project and ward names count as a location', () => {
+  const history = [{ role: 'user', content: 'thuê nhà ở Quận 9' }, { role: 'assistant', content: 'Có 1 căn ở Quận 9.' }];
+  it('does not ask for the area again', () => {
+    expect(clarificationFor('Bán căn hộ studio Vinhomes Grand Park dưới 2 tỷ', history).needed).toBe(false);
+    expect(clarificationFor('Thuê căn hộ ở Phú Mỹ Hưng', history).needed).toBe(false);
+    expect(clarificationFor('Mua nhà phường Long Bình', history).needed).toBe(false);
+    expect(clarificationFor('Thuê căn hộ giá 10 triệu', history).needed).toBe(true);
+  });
+});
