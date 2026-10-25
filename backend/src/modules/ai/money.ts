@@ -30,7 +30,7 @@ export function moneyAmounts(text: string): number[] {
   for (const match of source.matchAll(pattern)) {
     if (consumed.some(([start, end]) => match.index! >= start && match.index! < end)) continue;
     const raw = match[1], unit = match[3]?.toLowerCase();
-    if (!unit && !/[., ]\\d{3}/.test(raw) && raw.length < 7) continue;
+    if (!unit && !/[., ]\d{3}/.test(raw) && raw.length < 7) continue;
     add(match.index!, match.index! + match[0].length, numeric(raw) * (unit ? multiplier(unit) : 1));
   }
   return amounts;

@@ -212,7 +212,8 @@ export class AiService {
     const calledWriteTools=new Set(agent.messages.flatMap(message=>message.role==='assistant' ? (message.tool_calls||[]).filter(call=>call.type==='function').map(call=>call.function.name) : []));
     const normalizedSource=source.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\u0111/g,'d').toLowerCase();
     const fallbackTool=/(lien he|goi lai|gap chuyen vien|nhan vien tu van|chuyen vien tu van)/i.test(normalizedSource) ? 'request_handoff' : /(dat lich|hen xem|xem (?:nha|can))/i.test(normalizedSource) && codeReference.codes.length ? 'propose_appointment' : /luu can/i.test(normalizedSource) && codeReference.codes.length ? 'save_favorite' : null;
-    if(explicitWriteIntent(source) && fallbackTool && !calledWriteTools.has(fallbackTool)){
+    // A viewing request needs a time the customer has not given yet; signed-in users get it asked in the reply.
+    if(explicitWriteIntent(source) && fallbackTool && !calledWriteTools.has(fallbackTool) && (guest || fallbackTool!=='propose_appointment')){
       const code=codeReference.codes[0] || null;
       const args=fallbackTool==='request_handoff' ? {summary:source} : fallbackTool==='propose_appointment' ? {code,preferred_start:null,preferred_end:null} : {code};
       const action_id=await createPending(fallbackTool,args);
