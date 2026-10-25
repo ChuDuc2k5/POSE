@@ -97,6 +97,7 @@ Mỗi lần gọi mô hình đều được ghi vào bảng `ai_request_log`, g�
 | 6 | Endpoint ảnh do AI viết dùng client ẩn danh để tải file khi người xem là Admin. Admin chỉ thấy ảnh giữ chỗ trên trang chủ | Sinh viên chụp màn hình trang chủ không có ảnh. Thử trực tiếp trên storage: client ẩn danh nhận 404, client có secret tải được | Ảnh công khai luôn tải bằng secret phía server; thêm cache 10 phút |
 | 7 | Bộ kiểm tra đầu ra của trợ lý AI chặn nhầm câu trả lời đúng: giá dạng "4 tỷ 125 triệu", số phòng có trong tên căn, hoặc khi trợ lý nhắc lại mức giá khách đưa ra | Chạy bộ đánh giá 60 câu, đọc từng câu bị chặn | Viết lại phần đọc số tiền (`money.ts`) và các luật so khớp; chuẩn hoá cách in giá (`priceLabel`) |
 | 8 | Dropdown "Bất động sản"/"Hỗ trợ" đóng ngay khi chuột đi từ nút xuống menu | Sinh viên báo lỗi khi dùng thử | Thêm độ trễ đóng 250ms và vùng đệm nối khe giữa nút và menu; thêm test di chuột qua khe |
+| 9 | Form đặt lịch tái dùng class `.ai-error`, mà khung chat toàn màn hình lại đặt class này vào cột lưới thứ 2. Khi có lỗi, form bị tách làm hai cột. Lỗi cũng không tự xoá khi đổi ngày hoặc giờ | Sinh viên chụp màn hình form bị vỡ lúc chưa xác minh số điện thoại | Dùng class riêng `ai-booking-error`; xoá lỗi khi đổi ngày, giờ hoặc chuyên viên; khi thiếu xác minh thì thêm link tới hồ sơ |
 
 ## 7. Phần của các thành viên khác
 
