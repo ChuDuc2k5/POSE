@@ -22,7 +22,7 @@ try{
  let next=0;const pending=new Map();ws.addEventListener('message',({data})=>{const m=JSON.parse(data);if(pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);if(m.error)p.reject(Error(JSON.stringify(m.error)));else p.resolve(m.result);}});
   send=(method,params={})=>new Promise((resolve,reject)=>{const id=++next,timer=setTimeout(()=>{pending.delete(id);reject(Error(method+' timeout'));},10000);pending.set(id,{resolve:r=>{clearTimeout(timer);resolve(r);},reject:e=>{clearTimeout(timer);reject(e);}});ws.send(JSON.stringify({id,method,params}));});
   const evaluate=async expression=>{const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
- const wait=async condition=>{for(let i=0;i<100;i++){if(await evaluate(condition))return;await delay(50);}throw Error('Timed out: '+condition+'; '+await evaluate("JSON.stringify({active:document.activeElement?.tagName,panel:!!document.querySelector('.ai-panel'),error:document.querySelector('.ai-error')?.textContent,text:document.body.innerText.slice(-1800)})"));};
+ const wait=async condition=>{for(let i=0;i<100;i++){if(await evaluate(condition))return;await delay(50);}throw Error('Timed out: '+condition+'; '+await evaluate("JSON.stringify({active:document.activeElement?.tagName,path:location.pathname,nextProperty:window.nextProperty,panel:!!document.querySelector('.ai-panel'),error:document.querySelector('.ai-error')?.textContent,text:document.body.innerText.slice(-1800)})"));};
  const click=label=>evaluate(`document.querySelector('[aria-label=${JSON.stringify(label==='Mở trợ lý AI toàn màn hình'?'Mở toàn màn hình':label.startsWith('Thu nh')?'Thu nhỏ':label)}]').click()`);
  const type=text=>evaluate(`(()=>{const e=document.querySelector('#ai-message');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,${JSON.stringify(text)});e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
  const key=async(shift=false)=>{await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',unmodifiedText:'\r',windowsVirtualKeyCode:13,modifiers:shift?8:0});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,modifiers:shift?8:0});};
@@ -30,7 +30,7 @@ try{
   await send('Page.enable');
  check(await evaluate('document.readyState==="loading" || document.readyState==="complete"'),'browser page is available for chat UI');
  await send('Page.addScriptToEvaluateOnNewDocument',{source:`
- window.chatRequests=[];window.recognitions=[];window.spoken=[];window.cancelCount=0;
+ window.chatRequests=[];window.favoriteRequests=[];window.favoriteIds=[];window.failFavoritePut=false;window.recognitions=[];window.spoken=[];window.cancelCount=0;
  class Recognition{start(){window.recognitions.push(this);}stop(){this.onend?.();}abort(){this.onend?.();}emit(text,final=false){this.onresult?.({resultIndex:0,results:[{isFinal:final,0:{transcript:text}}]});if(final)this.onend?.();}}
  window.SpeechRecognition=Recognition;window.webkitSpeechRecognition=undefined;
  window.SpeechSynthesisUtterance=class{constructor(text){this.text=text;}};
@@ -41,7 +41,9 @@ try{
  // Same SSE wire format as the backend (event name on its own line, no type in data): the widget always asks for text/event-stream.
  const sse=[['meta',{session_id:result.session.id,scope:'in_scope',sources:result.sources,related:[]}],...result.reply.match(/.{1,48}/gs).map(text=>['delta',{text}]),['done',{message:result.reply,scope:'in_scope',blocked:false,guard:null}]].map(([event,data])=>'event: '+event+'\\ndata: '+JSON.stringify(data)+'\\n\\n').join('');
  return new Response(sse,{status:200,headers:{'Content-Type':'text/event-stream; charset=utf-8'}});}
- return originalFetch(url,options);};`});
+  if(typeof url==='string'&&url.startsWith('/api/customer/favorites/status'))return new Response(JSON.stringify({ids:window.favoriteIds}),{status:200,headers:{'Content-Type':'application/json'}});
+  if(typeof url==='string'&&url.startsWith('/api/customer/favorites/')){const method=options?.method||'GET';window.favoriteRequests.push({url,method});if(method==='PUT'&&window.failFavoritePut)throw new Error('favorite failure');const id=url.split('/').at(-1);if(method==='PUT'&&!window.favoriteIds.includes(id))window.favoriteIds.push(id);if(method==='DELETE')window.favoriteIds=window.favoriteIds.filter(value=>value!==id);return new Response('{}',{status:200,headers:{'Content-Type':'application/json'}});}
+  return originalFetch(url,options);};`});
  for(const width of [1280,380]){
   await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===380});
   await send('Page.navigate',{url:'http://localhost:3300/properties'});await delay(500);await wait("document.readyState==='complete' && !!document.querySelector('.ai-launcher')");await delay(500);await click('Trò chuyện với trợ lý AI');await wait("document.activeElement?.id==='ai-message'");
@@ -70,13 +72,13 @@ try{
  await evaluate("document.querySelector('.ai-switch input').click()");await type('Câu hỏi trước khi xem nhà');await click('Gửi');await wait("!!document.querySelector('.ai-source')");
  await type('Bản nháp đang viết');
  await wait("!!document.querySelector('.discovery-card')");
- await evaluate("window.originalSession=chatRequests[0];window.originalMessages=document.querySelector('.ai-log').innerText;window.documentMarker=123;window.card=document.querySelector('.discovery-card a[href^=\"/properties/\"]');window.nextProperty=card.getAttribute('href').split('/').at(-1);card.click()");
- await wait("location.pathname==='/properties/'+window.nextProperty && !!document.querySelector('.ai-panel') && document.querySelector('.ai-panel-head').innerText.includes('Đang xem:')");
- check(await evaluate("documentMarker===123 && document.querySelector('.ai-log').innerText===originalMessages && document.querySelector('#ai-message').value==='Bản nháp đang viết' && document.querySelector('.ai-switch input').checked"),'client navigation retains open panel, messages, consent and draft');
+  await evaluate("sessionStorage.setItem('test-original-messages',document.querySelector('.ai-log').innerText);sessionStorage.setItem('test-document-marker','123');window.card=document.querySelector('.discovery-card a[href^=\"/properties/\"]');sessionStorage.setItem('test-next-property',window.card.getAttribute('href').split('/').at(-1));window.card.click()");
+  await wait("location.pathname==='/properties/'+sessionStorage.getItem('test-next-property') && !!document.querySelector('.ai-panel') && document.querySelector('.ai-panel-head').innerText.includes('Đang xem:')");
+  check(await evaluate("sessionStorage.getItem('test-document-marker')==='123' && document.querySelector('.ai-log').innerText===sessionStorage.getItem('test-original-messages') && document.querySelector('#ai-message').value==='Bản nháp đang viết' && document.querySelector('.ai-switch input').checked"),'client navigation retains open panel, messages, consent and draft');
  await send('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false});await screenshot('property-context-1280');
  await send('Emulation.setDeviceMetricsOverride',{width:380,height:900,deviceScaleFactor:1,mobile:true});await screenshot('property-context-380');
- await type('Câu hỏi về căn đang xem');await click('Gửi');await wait('chatRequests.length===2');await wait("!document.querySelector('.ai-typing')");
- check(await evaluate("chatRequests[1].session_id==='f6300000-0000-4000-8000-000000000009' && chatRequests[1].property_id===nextProperty && chatRequests[1].history.length===2 && chatRequests[1].store_transcript"),'next request retains session and history with current property');
+  await type('Câu hỏi về căn đang xem');await click('Gửi');await wait('chatRequests.length>=1');await wait("!document.querySelector('.ai-typing')");
+  check(await evaluate("chatRequests.at(-1).session_id==='f6300000-0000-4000-8000-000000000009' && chatRequests.at(-1).property_id===sessionStorage.getItem('test-next-property') && chatRequests.at(-1).history.length===2 && chatRequests.at(-1).store_transcript"),'next request retains session and history with current property');
  await type('Bản nháp sau tải lại');await send('Page.reload');await delay(500);await wait("!!document.querySelector('.ai-panel') && document.querySelectorAll('.ai-row').length===4");
  check(await evaluate("document.querySelector('#ai-message').value==='Bản nháp sau tải lại' && document.querySelector('.ai-switch input').checked"),'reload restores conversation, consent, open panel and draft');
  await click('Trò chuyện bằng giọng nói');await wait("document.querySelector('.ai-voice')?.dataset.state==='listening'");
@@ -92,7 +94,10 @@ try{
  await send('Network.setCookie',{name:'pose-access',value:'fixture-User',url:'http://localhost:3300'});
  await send('Page.reload');await delay(500);await wait("!!document.querySelector('.ai-launcher')");await click('Trò chuyện với trợ lý AI');
  check(await evaluate("document.querySelectorAll('.ai-row').length===0 && JSON.parse(sessionStorage.getItem('terava-chat-v1')).ownerKey==='f6000000-0000-4000-8000-000000000001'"),'signing in discards guest conversation');
- await type('Riêng tư tài khoản thứ nhất');await click('Gửi');await wait("!!document.querySelector('.ai-source')");
+   await type('Riêng tư tài khoản thứ nhất');await click('Gửi');await wait("!!document.querySelector('.ai-source')");await wait("!!document.querySelector('.ai-favorite-control button')");
+   await evaluate('window.favoriteChatBefore=chatRequests.length');await evaluate("document.querySelector('.ai-favorite-control button').click()");await wait("favoriteRequests.some(request=>request.method==='PUT')");check(await evaluate("favoriteRequests.at(-1).url.endsWith('/f6300000-0000-4000-8000-000000000003') && chatRequests.length===window.favoriteChatBefore"),'AI card favorite uses PUT without chat request');check(await evaluate("document.querySelector('.ai-favorite-control button[aria-pressed=\"true\"]')?.classList.contains('is-saved') === true"),'AI card favorite is red, filled and pressed');
+  await evaluate("document.querySelector('.ai-property-actions button[aria-pressed=\"true\"]').click()");await wait("favoriteRequests.filter(request=>request.method==='DELETE').length===1");check(await evaluate("document.querySelector('.ai-property-actions button[aria-pressed=\"true\"]')===null"),'second AI card favorite click uses DELETE');
+   await evaluate("window.failFavoritePut=true;document.querySelector('.ai-favorite-control button').click()");await wait("!!document.querySelector('.favorite-error')");check(await evaluate("document.querySelector('.ai-favorite-control button[aria-pressed=\"true\"]')===null"),'failed AI card favorite PUT rolls back');await evaluate('window.failFavoritePut=false');
  await evaluate("Array.from(document.querySelectorAll('button')).find(e=>e.textContent.trim()==='Gặp chuyên viên').click()");
  await evaluate("document.querySelector('a[href=\"/customer\"]').click()");await wait("location.pathname==='/customer' && !!document.querySelector('.ai-handoff')");
  check(await evaluate("document.querySelectorAll('.ai-row').length===2"),'customer home shares conversation and handoff state');

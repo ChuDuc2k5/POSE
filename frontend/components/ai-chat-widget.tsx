@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowUp, AudioLines, ChevronLeft, ChevronRight, Maximize2, Menu, Mic, MicOff, Minimize2, Plus, Search, UserRound, X } from 'lucide-react';
@@ -8,6 +8,7 @@ import { availabilityLabels } from '@/lib/catalog';
 import { chatStorageKey } from '@/lib/chat-storage';
 import { RecommendationCard } from './recommendation-card';
 import { BookingForm, type BookingProperty } from './booking-form';
+import { useFavoriteStatus } from './property-card';
 
 type Source={id:string;code:string;name:string;updated_at:string;price:number|null;availability:keyof typeof availabilityLabels;transaction_type:'Sale'|'Rent';price_period:'Total'|'Month';number?:number;cover_id?:string|null;area?:number|null;bedrooms?:number|null;location?:string;reason?:string;relaxed_reason?:string};
 type PendingAction={id:string;tool:string;summary_vi:string;status?:string;requires_verified_phone?:boolean};
@@ -76,6 +77,8 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   const requestController=useRef<AbortController|null>(null),conversationEpoch=useRef(0);
   const voiceActive=voice!==null;
   const [restored,setRestored]=useState(false);
+  const favoriteIds=useMemo(()=>Array.from(new Set(messages.flatMap(message=>[...(message.sources||[]),...(message.related||[])].map(source=>source.id)))),[messages]);
+  const favorites=useFavoriteStatus(favoriteIds,signedIn);
   const refreshConversations=useCallback(()=>setConversationVersion(value=>value+1),[]);
   useEffect(()=>{
     try{
@@ -349,8 +352,8 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
           : <div className="ai-row ai-row-assistant" key={i}><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><div className="ai-answer"><p>{renderReply(m.content)}</p>{m.action && <div className="ai-action-card"><strong>{m.action.summary_vi}</strong><div><button type="button" disabled={busy} onClick={()=>void decide(m.action!.id,true)}>Xác nhận</button><button type="button" disabled={busy} onClick={()=>void decide(m.action!.id,false)}>Huỷ</button></div></div>}
               {m.options?.length && <div className="ai-clarify-options" role="group" aria-label="Chọn khu vực">{m.options.map(option=><button type="button" key={option} disabled={busy} onClick={()=>void ask(option)}>{option}</button>)}</div>}
               {!!m.sources?.length && <div className="ai-sources">{m.sources.map(s=><Link className="ai-source" href={`/properties/${s.id}`} key={s.id}><strong>{s.name}</strong><span>{s.code} · {s.price===null ? 'Giá chưa công bố':`${new Intl.NumberFormat('vi-VN').format(s.price)} VND${s.price_period==='Month' ? '/tháng':''}`}</span><em className={`ai-status ai-status-${s.availability}`}>{s.transaction_type==='Rent'&&s.availability==='Available' ? 'Còn cho thuê':availabilityLabels[s.availability]}</em><small>Cập nhật {new Date(s.updated_at).toLocaleString('vi-VN')}</small></Link>)}</div>}
-               {!!m.sources?.length && <div className="ai-property-list">{m.sources.slice(0,5).map(s=><div key={s.id} data-source-number={s.number} className={citation===s.number?'is-citation-target':''}><RecommendationCard source={s} related={false} onAsk={message=>message.startsWith('Đặt lịch')?openBooking(s):void ask(message)} signedIn={signedIn}/></div>)}</div>}
-               {!!m.related?.length && <section className="ai-related"><h3>Có thể bạn quan tâm</h3><div className="ai-property-list">{m.related.slice(0,3).map(s=><RecommendationCard key={s.id} source={s} related onAsk={message=>void ask(message)} signedIn={signedIn}/>)}</div></section>}
+                {!!m.sources?.length && <div className="ai-property-list">{m.sources.slice(0,5).map(s=><div key={s.id} data-source-number={s.number} className={citation===s.number?'is-citation-target':''}><RecommendationCard source={s} related={false} onAsk={message=>message.startsWith('Đặt lịch')?openBooking(s):void ask(message)} signedIn={signedIn} saved={favorites.has(s.id)} customer={favorites.customer} ready={favorites.ready&&!favorites.error}/></div>)}</div>}
+                {!!m.related?.length && <section className="ai-related"><h3>Có thể bạn quan tâm</h3><div className="ai-property-list">{m.related.slice(0,3).map(s=><RecommendationCard key={s.id} source={s} related onAsk={message=>void ask(message)} signedIn={signedIn} saved={favorites.has(s.id)} customer={favorites.customer} ready={favorites.ready&&!favorites.error}/>)}</div></section>}
              </div></div>)}
          {busy && voice!=='thinking' && <div className="ai-row ai-row-assistant"><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><span className="ai-typing-bubble" role="status" aria-label="Trợ lý đang tìm dữ liệu…"><span>Trợ lý đang tìm dữ liệu…</span><span className="ai-typing"><i/><i/><i/></span><button type="button" className="ai-stop" onClick={cancelPending}>Dừng</button></span></div>}
          {notice && <p className="ai-notice" role="status">{notice}</p>}
