@@ -6,7 +6,14 @@ export function explicitWriteIntent(text:string) {
   const normalized=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\u0111/g,'d').toLowerCase();
   return word('luu(?: can| lai)|yeu thich|dat lich|hen xem|xem (?:nha|can)|goi lai|lien he(?: voi| lai)?(?: toi|minh|em|anh|chi)|gap chuyen vien|nhan vien tu van|chuyen vien tu van').test(normalized);
 }
+const refusal=/(?:không thể|không được phép|chỉ) hỗ trợ (?:yêu cầu|nội dung|câu hỏi|tìm hiểu bất động sản)|không thể (?:trả lời|đáp ứng) (?:yêu cầu|câu hỏi|nội dung) này/iu;
+// Vulgar or sexual messages are refused before any search, so no listing is attached to them.
+const abusiveWords=/(?<!\p{L})(?:địt|đụ|đéo|lồn|cặc|buồi|chịch|đĩ|đm|đmm|dmm|vcl|vkl|clm|cđm|fuck|fucking|porn|gái gọi|gái bán dâm|mại dâm|sex)(?!\p{L})/iu;
+export function isAbusive(text:string) { return abusiveWords.test(text.normalize('NFC')); }
+export const abusiveReply='Mình không thể hỗ trợ nội dung này. Nếu bạn cần tìm hiểu bất động sản, giá, khu vực hay đặt lịch xem nhà, mình sẵn sàng giúp.';
 export function sourcesFromCitations<T extends { number?: number; code?: string; price?: number|null }>(reply:string, sources:T[], referencedListing=false) {
+  // A refusal never carries cards, even while a listing is being discussed.
+  if (refusal.test(reply)) return [];
   if (referencedListing) return sources;
   const cited=[...new Set([...reply.matchAll(/\[(\d{1,3})\]/g)].map(match=>Number(match[1])))];
   if (cited.length) return cited.map(number=>sources.find(source=>source.number===number)).filter((source):source is T=>Boolean(source));

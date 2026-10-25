@@ -39,3 +39,18 @@ describe('picking a listing that was just shown', () => {
     expect(referencedListingCodes(message, history)).toEqual({ codes: ['CFR-AAA11111', 'CFR-BBB22222'], ambiguous: true });
   });
 });
+
+import { isAbusive } from '../src/modules/ai/guard.js';
+describe('abusive messages and refusals', () => {
+  it('flags vulgar messages but not ordinary property words', () => {
+    expect(isAbusive('tao muốn địt gái gia lai')).toBe(true);
+    expect(isAbusive('đm sao chậm thế')).toBe(true);
+    expect(isAbusive('Nhà này có sổ đỏ không, đường trước nhà rộng bao nhiêu?')).toBe(false);
+    expect(isAbusive('Có nhà gần chợ Đà Lạt không?')).toBe(false);
+  });
+  it('drops cards from a refusal even for a referenced listing', () => {
+    const card = [{ number: 1, code: 'RVL-69B7C6BB8461439E', price: 7000000000 }];
+    expect(sourcesFromCitations('Tôi rất tiếc, tôi không thể hỗ trợ yêu cầu này. Nếu bạn cần tư vấn về bất động sản, tôi sẵn sàng giúp bạn.', card, true)).toEqual([]);
+    expect(sourcesFromCitations('Căn này giá 7 tỷ, chưa có thông tin về sổ hồng.', card, true)).toEqual(card);
+  });
+});
