@@ -11,8 +11,8 @@ let chrome;
 for(const candidate of [process.env.CHROME_PATH,process.env.PROGRAMFILES&&join(process.env.PROGRAMFILES,'Google/Chrome/Application/chrome.exe'),process.env['PROGRAMFILES(X86)']&&join(process.env['PROGRAMFILES(X86)'],'Google/Chrome/Application/chrome.exe')].filter(Boolean)){try{await access(candidate);chrome=candidate;break;}catch{}}
 assert.ok(chrome,'Chrome executable required');
 const root=join(tmpdir(),'pose-admin-shell');await mkdir(root,{recursive:true});
-const routes=['/admin?kind=properties','/admin?kind=projects','/admin?kind=subdivisions','/admin/inquiries','/admin/campaigns','/admin/calls','/admin/ai-dashboard','/admin/sales'];
-const order=['Sản phẩm','Dự án','Phân khu','Yêu cầu tư vấn','Chiến dịch gọi','Cuộc gọi','AI Platform','Quản lý Sales'];
+const routes=['/admin?kind=properties','/admin?kind=projects','/admin?kind=subdivisions','/admin/inquiries','/admin/leads','/admin/campaigns','/admin/calls','/admin/ai-dashboard','/admin/sales'];
+const order=['Sản phẩm','Dự án','Phân khu','Yêu cầu tư vấn','Quản lý Lead','Chiến dịch gọi','Cuộc gọi','AI Platform','Quản lý Sales'];
 let server,child,ws,send,checks=0;const problems=[];let current='';
 const check=(value,label)=>{assert.ok(value,label);checks++;};
 try{
@@ -36,9 +36,11 @@ try{
   if(m.method==='Log.entryAdded'&&m.params.entry.level==='error'&&!(/ERR_CONNECTION_REFUSED/.test(m.params.entry.text)&&/\/socket\.io\?/.test(m.params.entry.url||'')))problems.push(current+': log '+m.params.entry.text.slice(0,200)+' '+(m.params.entry.url||''));});
  await send('Runtime.enable');await send('Log.enable');
  await send('Page.enable');
- // The discovery fixture has no M11 route; answer the Sales list in its real shape.
- ws.addEventListener('message',({data})=>{const m=JSON.parse(data);if(m.method==='Fetch.requestPaused')void send('Fetch.fulfillRequest',{requestId:m.params.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'application/json'}],body:Buffer.from(JSON.stringify({items:[],total:0,page:1,pageSize:20,stats:{total:0,active:0,suspended:0}})).toString('base64')});});
- await send('Fetch.enable',{patterns:[{urlPattern:'*/api/admin/sales?*',requestStage:'Request'}]});await send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
+ // The discovery fixture has no M04/M11 routes; answer them in their real shapes.
+ const stubs=[[/\/api\/admin\/sales\?/,{items:[],total:0,page:1,pageSize:20,stats:{total:0,active:0,suspended:0}}],[/\/api\/leads\/options/,{sales:[]}],[/\/api\/leads\/property-owners/,{items:[],total:0,page:1,pageSize:20}],[/\/api\/leads\?/,{items:[],total:0,page:1,pageSize:20,stats:{total:0,hot:0,warm:0,cold:0,unrated:0,unassigned:0}}]];
+ ws.addEventListener('message',({data})=>{const m=JSON.parse(data);if(m.method!=='Fetch.requestPaused')return;const body=stubs.find(([pattern])=>pattern.test(m.params.request.url))?.[1];
+  void send(body?'Fetch.fulfillRequest':'Fetch.continueRequest',body?{requestId:m.params.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'application/json'}],body:Buffer.from(JSON.stringify(body)).toString('base64')}:{requestId:m.params.requestId});});
+ await send('Fetch.enable',{patterns:[{urlPattern:'*/api/admin/sales?*',requestStage:'Request'},{urlPattern:'*/api/leads*',requestStage:'Request'}]});await send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
 
  await open('/');await wait(`document.querySelectorAll('[class*="propertyCard"] a[href^="/properties/"]').length>0`,'catalog listings on the landing');
  const landing=await evaluate(`[...document.querySelectorAll('[class*="propertyCard"]')].map(card=>!!card.querySelector('img'))`);

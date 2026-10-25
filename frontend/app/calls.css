@@ -40,3 +40,5 @@
 
 .calls-mode{border:1px solid var(--nx-line);border-radius:12px;padding:16px;margin-bottom:20px;display:flex;gap:20px;flex-wrap:wrap}.calls-mode label{display:flex;gap:8px;align-items:center}.calls-interim{color:var(--nx-muted);font-style:italic}.calls-voice{display:grid;gap:16px}.calls-voice meter{accent-color:var(--nx-primary);max-width:100%}.calls-voice small{display:block;color:var(--nx-muted);margin-top:8px}
 .calls-mode input{accent-color:var(--nx-primary)}.calls-voice meter::-webkit-meter-bar{background:var(--nx-surface-soft);border:1px solid var(--nx-line)}.calls-voice meter::-webkit-meter-optimum-value{background:var(--nx-primary)}.calls-voice meter::-moz-meter-bar{background:var(--nx-primary)}
+/* M08 calls inside the M05 Sales workspace: align with the CRM panels. */
+.crm-sales-calls{width:100%;padding:28px 0 0}

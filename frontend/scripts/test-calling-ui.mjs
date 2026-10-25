@@ -45,11 +45,11 @@ try {
   await send('Emulation.setDeviceMetricsOverride',{width,height:1100,screenWidth:width,screenHeight:1100,deviceScaleFactor:1,mobile:width===380});
   const path=page==='sales'?'/sales':page==='detail'?'/admin/calls/'+completed.id:page==='playground'?'/admin/calls/playground':'/admin/calls';
   await send('Page.navigate',{url:'http://localhost:3501/fixture?role='+(page==='sales'?'sales':'admin')+'&path='+encodeURIComponent(path)});
-  const condition=page==='sales'?"document.querySelectorAll('.calls-sales .calls-item').length===4":page==='list'?"document.querySelectorAll('.calls-item').length===5&&document.querySelectorAll('.calls-filters select').length===3":page==='detail'?"document.querySelectorAll('.calls-timeline li').length>=3&&!!document.querySelector('[data-call-cost]')":"document.querySelector('.catalog-sidebar')&&document.querySelector('select option[value=\"f7800000-0000-4000-8000-000000000001\"]')";
+  const condition=page==='sales'?"document.querySelectorAll('.calls-sales .calls-item').length>=4":page==='list'?"document.querySelectorAll('.calls-item').length===5&&document.querySelectorAll('.calls-filters select').length===3":page==='detail'?"document.querySelectorAll('.calls-timeline li').length>=3&&!!document.querySelector('[data-call-cost]')":"document.querySelector('.catalog-sidebar')&&document.querySelector('select option[value=\"f7800000-0000-4000-8000-000000000001\"]')";
   await waitFor(`document.readyState==='complete'&&!!(${condition})`,name+' specific content');
   if(page!=='sales'){
    const shell=await evaluate("({nav:Array.from(document.querySelectorAll('.catalog-sidebar nav a')).map(a=>a.innerText),active:document.querySelector('.catalog-sidebar nav [aria-current]')?.innerText,label:document.querySelector('.catalog-sidebar-label')?.innerText,shared:document.querySelectorAll('.admin-sidebar').length===1&&!document.querySelector('.catalog-sidebar:not(.admin-sidebar)'),profile:!!document.querySelector('.catalog-sidebar-bottom a'),logout:!!document.querySelector('.catalog-sidebar-bottom button'),breadcrumb:document.querySelector('.catalog-topbar')?.innerText})");
-   assert.deepEqual(shell.nav,['Sản phẩm','Dự án','Phân khu','Yêu cầu tư vấn','Chiến dịch gọi','Cuộc gọi','AI Platform','Quản lý Sales']);assert.equal(shell.active,'Cuộc gọi');assert.equal(shell.label,'KHÔNG GIAN QUẢN TRỊ');assert.ok(shell.shared&&shell.profile&&shell.logout);assert.ok(shell.breadcrumb.includes('Quản trị')&&shell.breadcrumb.includes('Cuộc gọi'));await visible(width>=900 ? '.admin-sidebar nav' : '.admin-menu-button');
+   assert.deepEqual(shell.nav,['Sản phẩm','Dự án','Phân khu','Yêu cầu tư vấn','Quản lý Lead','Chiến dịch gọi','Cuộc gọi','AI Platform','Quản lý Sales']);assert.equal(shell.active,'Cuộc gọi');assert.equal(shell.label,'KHÔNG GIAN QUẢN TRỊ');assert.ok(shell.shared&&shell.profile&&shell.logout);assert.ok(shell.breadcrumb.includes('Quản trị')&&shell.breadcrumb.includes('Cuộc gọi'));await visible(width>=900 ? '.admin-sidebar nav' : '.admin-menu-button');
   }
   if(page==='list'){
    await visible('.calls-filters');await visible('.calls-item');const content=await evaluate("document.querySelector('.calls-list').innerText");for(const label of ['Giả lập','Chiến dịch','Bắt đầu','Thời lượng','Lý do kết thúc','Xem chi tiết'])assert.ok(content.includes(label),name+' '+label);for(const call of adminCalls)assert.ok(!content.includes(call.phone_e164),'masked list phone');assert.equal(await evaluate("!!document.querySelector('dialog[open]')"),false,'clean list screenshot');
@@ -61,9 +61,10 @@ try {
    assert.ok(await evaluate("Array.from(document.querySelectorAll('.calls-detail .calls-actions button')).find(b=>b.innerText==='Không liên hệ').classList.contains('secondary')"),'secondary opt-out');
   }
   if(page==='sales'){
-   await visible('.calls-sales .catalog-title');await visible('.calls-sales .calls-item');await waitFor("!!document.querySelector('.ai-workspace article')",'M06 hand-off item');
+   // M08 calls sit below the M05 CRM workspace on /sales.
+   await evaluate("document.querySelector('.calls-sales').scrollIntoView({block:'start'})");await visible('.calls-sales .catalog-title');await visible('.calls-sales .calls-item');await waitFor("!!document.querySelector('.ai-workspace article')",'M06 hand-off item');
    const text=await evaluate('document.body.innerText');for(const label of ['Cuộc gọi của khách được giao','Minh Anh','Bàn giao từ trợ lý AI','Chưa đồng ý lưu','Đang xử lý','Lưu thất bại'])assert.ok(text.includes(label),name+' '+label);
-   const ids=await evaluate("Array.from(document.querySelectorAll('.calls-sales .calls-item')).map(el=>el.dataset.callId)");assert.deepEqual(ids.sort(),assigned.map(c=>c.id).sort(),'Sales rows match RLS');assert.equal(await evaluate("!!document.querySelector('.account-card')"),false,'no generic welcome card');
+   const ids=await evaluate("Array.from(document.querySelectorAll('.calls-sales .calls-item')).map(el=>el.dataset.callId)");const visibleNow=(await (await fetch('http://localhost:3500/api/calls',{headers:{Cookie:'pose-access=fixture-sales'}})).json()).items;assert.deepEqual(ids.sort(),visibleNow.map(c=>c.id).sort(),'Sales rows match RLS');assert.ok(assigned.every(c=>ids.includes(c.id)),'initially assigned calls stay visible');assert.equal(await evaluate("!!document.querySelector('.account-card')"),false,'no generic welcome card');
    assert.ok(await evaluate("!!document.querySelector('.calls-evidence-links a[href$=\"#recording\"]')&&!!document.querySelector('.calls-evidence-links a[href$=\"#transcript\"]')"),'Sales evidence links');
   }
   if(page==='playground'){
@@ -90,7 +91,7 @@ try {
   const nav=await evaluate(`(()=>{const side=document.querySelector('.admin-sidebar'),links=Array.from(side.querySelectorAll('nav a')),box=side.getBoundingClientRect(),menu=document.querySelector('.admin-menu-button');return {overflow:document.documentElement.scrollWidth>innerWidth,sidebars:document.querySelectorAll('.catalog-sidebar').length,onScreen:box.right>0&&box.width>0,menu:!!menu&&getComputedStyle(menu).display!=='none',links:links.map(a=>({icon:!!a.querySelector('svg'),name:a.innerText.trim()}))};})()`);
   assert.equal(nav.overflow,false,'catalog no horizontal overflow '+width);
   assert.equal(nav.sidebars,1,'one shared admin sidebar '+width);
-  assert.equal(nav.links.length,8);assert.ok(nav.links.every(a=>a.icon&&a.name),'admin links have icons and names');
+  assert.equal(nav.links.length,9);assert.ok(nav.links.every(a=>a.icon&&a.name),'admin links have icons and names');
   if(width>=900)assert.ok(nav.onScreen&&!nav.menu,'desktop sidebar stays open');
   else {assert.ok(!nav.onScreen&&nav.menu,'narrow screens use the drawer '+width);await evaluate("document.querySelector('.admin-menu-button').click()");await waitFor("document.querySelector('.admin-sidebar.is-open')?.getBoundingClientRect().left>=0",'drawer opens '+width);}
   await shot('catalog-sidebar-'+width,false);

@@ -16,8 +16,10 @@ import { CustomerModule } from './modules/customer/customer.module.js';
 import { WorkspaceModule } from './modules/workspace/workspace.module.js';
 import { QueueModule } from './modules/queue/queue.module.js';
 import { HealthController } from './modules/queue/health.controller.js';
+import { LeadsModule } from './modules/leads/leads.module.js';
+import { SalesModule } from './modules/sales/sales.module.js';
 @Module({
-  imports: [CallingModule, CampaignsModule, GatewayModule, AiModule, SupabaseModule, AuthModule, AccountModule, CatalogModule, CustomerModule, WorkspaceModule, QueueModule],
+  imports: [CallingModule, CampaignsModule, GatewayModule, AiModule, SupabaseModule, AuthModule, AccountModule, CatalogModule, CustomerModule, WorkspaceModule, QueueModule, LeadsModule, SalesModule],
   controllers: [AppController, AccessController, HealthController],
   providers: [AppService, { provide: APP_GUARD, useClass: AuthGuard }],
 })
