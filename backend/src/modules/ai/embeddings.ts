@@ -22,16 +22,18 @@ export class EmbeddingService{
     const config=this.config();if(!config) return null;
     const started=Date.now();
     const vectors:number[][]=[];
+    let promptTokens=0;
     for(let offset=0;offset<inputs.length;offset+=EMBEDDING_BATCH_MAX){
       const input=inputs.slice(offset,offset+EMBEDDING_BATCH_MAX);
       const response=await fetch(config.url,{method:'POST',headers:{'Content-Type':'application/json',...(config.key?{Authorization:`Bearer ${config.key}`}:{})},body:JSON.stringify({model:config.model,input,...config.openai?{dimensions:config.dimensions}:{}}),signal:AbortSignal.timeout(config.timeout)});
       if(!response.ok)throw new Error('EMBEDDING_UNAVAILABLE');
-      const body=await response.json() as {data?:{index:number;embedding:number[]}[]};
+      const body=await response.json() as {data?:{index:number;embedding:number[]}[];usage?:{prompt_tokens?:number}};
+      promptTokens+=body.usage?.prompt_tokens||0;
       const batch=(body.data||[]).sort((a,b)=>a.index-b.index).map(item=>item.embedding);
       if(batch.length!==input.length||batch.some(vector=>vector.length!==config.dimensions||vector.some(value=>!Number.isFinite(value))))throw new Error('INVALID_EMBEDDING');
       vectors.push(...batch);
     }
-    logAiRequest({kind:'embed',model:config.model,latencyMs:Date.now()-started,status:'ok'});
+    logAiRequest({kind:'embed',model:config.model,promptTokens,totalTokens:promptTokens,latencyMs:Date.now()-started,status:'ok'});
     return {model:config.model,vectors};
   }
 }
