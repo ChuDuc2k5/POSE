@@ -38,10 +38,25 @@ chấm `has_answer=false` cho cả 6 ứng viên đúng — giới hạn của m
 Rerank tăng MRR (căn đúng lên cao hơn) nhưng mô hình 4B đôi khi loại cả ứng viên đúng; mục tiêu
 recall@5 ≥ 0,75 sẽ đo lại khi có `gpt-4.1-mini` (chỉ đổi biến môi trường).
 
+## 60 câu hỏi thật của khách (Qwen3-4B, `--set real-questions`)
+
+| Lần | Thay đổi | Tìm theo nhu cầu | Giá | Pháp lý | Vị trí | Thuê | Dự án | Mẫu mua | Mẫu thuê | Mẫu bán | Tổng |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | trước khi sửa | 1/5 | 0/5 | 0/5 | 0/5 | 1/5 | 0/5 | 3/10 | 2/10 | 6/10 | 13/60 |
+| 2 | hiểu "căn này" theo mã ở lượt trước, suy ra mua/thuê, chặn công cụ ghi khi khách không yêu cầu | 1/5 | 3/5 | 3/5 | 3/5 | 1/5 | 2/5 | 5/10 | 6/10 | 7/10 | 31/60 |
+| 3 | câu hỏi ngay sau khi xem một căn là hỏi về căn đó | 0/5 | 4/5 | 5/5 | 5/5 | 4/5 | 3/5 | 5/10 | 5/10 | 8/10 | 39/60 |
+| 4 | guard đọc giá ghép ("4 tỷ 100 triệu"), số phòng trong tên ("2PN"); sửa 2 đáp án sai trong bộ đề; gửi yêu cầu chuyên viên khi khách nói rõ | 2/5 | 4/5 | 5/5 | 5/5 | 5/5 | 4/5 | 5/10 | 7/10 | 8/10 | 45/60 |
+| 5 | đưa giá đã viết sẵn ("4,1 tỷ đồng") vào ngữ cảnh | 2/5 | 4/5 | 5/5 | 5/5 | 4/5 | 4/5 | 5/10 | 7/10 | 7/10 | 43/60 |
+| 6 | guard cho phép nhắc lại mức giá khách nêu ("dưới 15 triệu/tháng") | 4/5 | 3/5 | 5/5 | 5/5 | 4/5 | 4/5 | 5/10 | 7/10 | 8/10 | **45/60** |
+
+Còn lại: tiêu chí dữ liệu không có (diện tích, khoảng cách km, thuê ngắn hạn), và vài câu trả lời đúng ý nhưng
+không dùng cụm "chưa có thông tin" hoặc không đề nghị chuyên viên.
+
 ## Chạy lại
 
 ```bash
 node backend/scripts/ai-eval.mjs --fake
 AI_EVAL_BASE_URL=http://localhost:3011 node --env-file=backend/.env --env-file=frontend/.env.local backend/scripts/ai-eval.mjs
 cd backend && node scripts/rag-eval-real.mjs [--rerank]
+AI_EVAL_BASE_URL=http://localhost:3012 node --env-file=backend/.env --env-file=frontend/.env.local backend/scripts/ai-eval.mjs --set real-questions
 ```
