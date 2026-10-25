@@ -6,13 +6,14 @@ import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, LoaderCircle, Mail, ShieldCh
 import { Brand, TeravaMark } from './brand';
 import { validateCredentials } from '@/lib/auth-validation';
 import { readInquiryDraft } from '@/lib/inquiry-draft';
+import { GoogleSignIn } from './google-sign-in';
 
-export function AuthForm({ mode, verificationFailed = false, next }: { mode: 'signin' | 'signup'; verificationFailed?: boolean; next?: string }) {
+export function AuthForm({ mode, verificationFailed = false, oauthError = '', next }: { mode: 'signin' | 'signup'; verificationFailed?: boolean; oauthError?: string; next?: string }) {
   const signup = mode === 'signup';
   const router = useRouter();
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(verificationFailed ? 'Liên kết xác minh không hợp lệ, đã dùng hoặc đã hết hạn. Bạn có thể gửi lại liên kết bên dưới.' : '');
+  const [error, setError] = useState(oauthError || (verificationFailed ? 'Liên kết xác minh không hợp lệ, đã dùng hoặc đã hết hạn. Bạn có thể gửi lại liên kết bên dưới.' : ''));
   const [notice, setNotice] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -94,7 +95,8 @@ export function AuthForm({ mode, verificationFailed = false, next }: { mode: 'si
             <button className="button primary submit-button" disabled={busy}>{busy ? <><LoaderCircle className="spin" size={18}/> Đang xử lý…</> : <>{signup ? 'Tạo tài khoản' : 'Đăng nhập'}<ArrowRight size={18}/></>}</button>
           </>}
         </form>
-        <button type="button" className="access-resend" onClick={resend} disabled={busy}><Mail size={14}/>{registered ? 'Gửi lại email xác minh' : 'Chưa xác minh email? Gửi lại liên kết'}</button>
+        {registered || verificationFailed ? <button type="button" className="access-resend" onClick={resend} disabled={busy}><Mail size={14}/>Gửi lại email xác minh</button> : <details className="access-email-help"><summary>Hỗ trợ xác minh tài khoản email</summary><p>Chỉ dành cho tài khoản đăng ký bằng email và mật khẩu. Đăng nhập Google không cần xác minh email lại.</p><button type="button" className="access-resend" onClick={resend} disabled={busy}><Mail size={14}/>Gửi lại liên kết xác minh</button></details>}
+        {!registered && <GoogleSignIn/>}
         <div className="access-switch">{signup ? 'Đã có tài khoản?' : 'Chưa có tài khoản?'} <Link href={signup ? '/sign-in' : '/sign-up'}>{signup ? 'Đăng nhập' : 'Đăng ký ngay'} <ArrowRight size={14}/></Link></div>
         <p className="access-security"><ShieldCheck size={14}/> Kết nối an toàn. Thông tin được bảo vệ.</p>
       </div>

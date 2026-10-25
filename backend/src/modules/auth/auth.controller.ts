@@ -6,10 +6,17 @@ import { dispatch } from '../../common/http.js';
 import * as actions from './auth-action.handlers.js';
 import * as confirmation from './confirm.handlers.js';
 import * as refresh from './refresh.handlers.js';
+import * as google from './google.handlers.js';
 
 // Handlers enforce session, role and origin checks to preserve existing error responses.
 @Controller()
 export class AuthController {
+  @Post('auth/google')
+  @Public()
+  googleStart(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, google.START); }
+  @Get('auth/google/callback')
+  @Public()
+  googleCallback(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, google.CALLBACK); }
   @Get('auth/session')
   @Public()
   session(@Req() request: Request, @Res() response: Response) {

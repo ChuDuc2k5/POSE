@@ -140,7 +140,7 @@ export function HomeConsultation() {
       setError('Trình duyệt chưa cho phép lưu nhu cầu. Bạn có thể đăng nhập để gửi yêu cầu trực tiếp.');
       return;
     }
-    router.push('/sign-in?next=/customer/inquiries/new');
+    router.push('/consultation');
   }
   return <form className={styles.consultationForm} id="dang-ky-tu-van" onSubmit={submit}>
     <h3>Đăng ký nhận tư vấn</h3>

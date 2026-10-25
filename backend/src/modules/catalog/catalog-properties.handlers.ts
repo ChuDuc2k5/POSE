@@ -9,6 +9,7 @@ export async function GET(request: WebRequest) {
     const page=Number(request.nextUrl.searchParams.get('page') || 1), pageSize=Number(request.nextUrl.searchParams.get('pageSize') || 20);
     if (!Number.isSafeInteger(page) || page<1 || page>10000 || !Number.isSafeInteger(pageSize) || pageSize<1 || pageSize>50) return catalogError('INVALID_PAGE','Phân trang không hợp lệ.',400);
     let query=authClient().from('property_products').select('id,code,name,project_id,subdivision_id,property_type,area,bedrooms,price,currency,location,description,publication,availability,version,updated_at',{count:'exact'}).eq('publication','Published');
+    query=query.is('deleted_at',null);
     if (request.nextUrl.searchParams.get('available')==='true') query=query.eq('availability','Available');
     const result=await query.order('updated_at',{ascending:false}).order('id').range((page-1)*pageSize,page*pageSize-1);
     if(result.error)return catalogDatabaseError(result.error);

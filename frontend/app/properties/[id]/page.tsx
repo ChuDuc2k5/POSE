@@ -14,7 +14,7 @@ function SimilarProperties({items}:{items:PublicProperty[]}){
 
 export const dynamic='force-dynamic';
 export const metadata={title:'Chi tiết bất động sản | TERAVA'};
-export default async function PropertyPage({params}:{params:Promise<{id:string}>}){
+export default async function PropertyPage({params,searchParams}:{params:Promise<{id:string}>;searchParams:Promise<Record<string,string|string[]|undefined>>}){
   const {id}=await params;if(!uuidPattern.test(id))notFound();
   const response = await backendFetch(`/api/catalog/properties/${id}`);
   if (response.status === 404) notFound();
@@ -24,5 +24,5 @@ export default async function PropertyPage({params}:{params:Promise<{id:string}>
   const similar = similarResponse.ok ? (await similarResponse.json()).items || [] : [];
   const session = await publicPageSession(`/properties/${id}`);
   const role=session?.role ?? null;
-  return <><PropertyDetail item={item as PublicProperty} media={media} role={role}/><SimilarProperties items={similar as PublicProperty[]}/><AiChatPage ownerKey={session?.user.id ?? 'guest'} signedIn={role==='User'} propertyId={id} propertyName={item.name}/></>;
+  return <><PropertyDetail returnTo={(await searchParams).returnTo as string | undefined} item={item as PublicProperty} media={media} role={role}/><SimilarProperties items={similar as PublicProperty[]}/><AiChatPage ownerKey={session?.user.id ?? 'guest'} signedIn={role==='User'} propertyId={id} propertyName={item.name}/></>;
 }

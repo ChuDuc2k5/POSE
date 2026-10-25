@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { startStack } from './test-stack.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import sharp from 'sharp';
+import { createHash } from 'node:crypto';
 
 // Integration tests use an isolated provider fixture; never send real email.
 let revoked = false;
@@ -12,6 +13,8 @@ let providerOffline = false;
 let recoveryState = 'None';
 let currentPassword = 'safe-password-123';
 const usedLinks = new Set();
+let oauthChallenge = '';
+const usedOAuthCodes = new Set();
 const user = { id: '00000000-0000-4000-8000-000000000001', aud: 'authenticated', email: 'fixture@example.test', email_confirmed_at: '2026-10-04T00:00:00Z', app_metadata: {}, user_metadata: { display_name: 'Khách thử nghiệm' }, created_at: '2026-10-04T00:00:00Z' };
 let profile = { name: 'Khách thử nghiệm', phone: '', phoneVerified: false, notificationsEnabled: true, avatarPath: null, version: 0, updatedAt: null };
 const history = [];
@@ -26,6 +29,7 @@ const provider = createServer(async (request, response) => {
   if (providerOffline) return reply(503, { msg: 'Unavailable' });
   if (url.pathname.endsWith('/rpc/pose_access_context')) return reply(200, { user_id: user.id, role: accessRole, active: accountActive, session_valid: !revoked });
   if (url.pathname.endsWith('/rpc/pose_read_profile')) return reply(200, profile);
+  if (url.pathname.endsWith('/account_profiles')) return reply(200, [{ user_id: user.id }]);
   if (url.pathname.endsWith('/rpc/pose_update_profile')) {
     if (input.p_version !== profile.version) return reply(409, { code: '40001', message: 'PROFILE_CONFLICT' });
     profile = { ...profile, ...(input.p_changes.name ? { name: input.p_changes.name } : {}), ...(input.p_changes.phone !== undefined ? { phone: input.p_changes.phone, phoneVerified: false } : {}), ...(input.p_changes.notificationsEnabled !== undefined ? { notificationsEnabled: input.p_changes.notificationsEnabled } : {}), ...(input.p_changes.avatarPath ? { avatarPath: input.p_changes.avatarPath } : {}), version: profile.version + 1 };
@@ -49,10 +53,18 @@ const provider = createServer(async (request, response) => {
   }
   if (url.pathname.includes('/storage/v1/object/')) return reply(200, { Key: 'fixture.png' });
   if (url.pathname.endsWith('/recover')) return input.email === user.email ? reply(200, {}) : reply(400, { msg: 'Unknown email' });
-  if (url.pathname.endsWith('/settings')) return reply(200, { mailer_autoconfirm: false, external: { email: true } });
+  if (url.pathname.endsWith('/settings')) return reply(200, { mailer_autoconfirm: false, external: { email: true, google: true } });
+  if (url.pathname.endsWith('/authorize') && url.searchParams.get('provider') === 'google') {
+    oauthChallenge = url.searchParams.get('code_challenge');
+    response.writeHead(302, { Location: `${url.searchParams.get('redirect_to')}?code=oauth-once` }); return response.end();
+  }
   if (url.pathname.endsWith('/signup')) return reply(200, { ...user, email_confirmed_at: null });
   if (url.pathname.endsWith('/resend')) return reply(200, {});
   if (url.pathname.endsWith('/token')) {
+    if (url.searchParams.get('grant_type') === 'pkce' && input.auth_code === 'oauth-once' && !usedOAuthCodes.has(input.auth_code) && createHash('sha256').update(input.code_verifier || '').digest('base64url') === oauthChallenge) {
+      usedOAuthCodes.add(input.auth_code); revoked = false;
+      user.identities = [{ provider: 'google', id: 'fixture-google' }]; return reply(200, session());
+    }
     if (url.searchParams.get('grant_type') === 'password' && input.password === currentPassword) { revoked = false; return reply(200, session()); }
     if (url.searchParams.get('grant_type') === 'refresh_token' && input.refresh_token === 'fixture-refresh' && !revoked) return reply(200, session());
     return reply(400, { code: 'invalid_credentials', msg: 'Invalid login credentials' });
@@ -76,7 +88,7 @@ const provider = createServer(async (request, response) => {
 });
 await new Promise(resolve => provider.listen(3211, '127.0.0.1', resolve));
 let stack;
-try { stack = await startStack(3210, {"SUPABASE_URL": "http://127.0.0.1:3211", "SUPABASE_PUBLISHABLE_KEY": "fixture-public-key"}); } catch (error) { provider.close(); throw error; }
+try { stack = await startStack(3210, {"SUPABASE_URL": "http://127.0.0.1:3211", "SUPABASE_PUBLISHABLE_KEY": "fixture-public-key"}, { build: !process.argv.includes('--no-build') }); } catch (error) { provider.close(); throw error; }
 const { app } = stack;
 let startupOutput = '';
 app.stdout.on('data', chunk => { startupOutput += chunk; });
@@ -201,6 +213,8 @@ try {
   check(phoneVerified.status === 200 && (await phoneVerified.json()).profile.phoneVerified, 'Phone marked verified only after provider verification');
   check((await profileRequest({ ...profileInput, phone: '0987654321', version: profile.version })).status === 200 && !profile.phoneVerified, 'Changing number clears verified status');
   const avatarPost = (file) => { const form = new FormData(); form.set('file', file); form.set('version', String(profile.version)); return fetch(`${origin}/api/account/avatar`, { method: 'POST', headers: { Origin: origin, Cookie: cookie }, body: form }); };
+  const missingAvatarVersion = new FormData(); missingAvatarVersion.set('file', new File([avatar], 'valid.png', { type: 'image/png' }));
+  check((await fetch(`${origin}/api/account/avatar`, { method: 'POST', headers: { Origin: origin, Cookie: cookie }, body: missingAvatarVersion })).status === 400, 'Avatar upload requires an explicit profile version');
   check((await avatarPost(new File(['<svg/>'], 'bad.svg', { type: 'image/svg+xml' }))).status === 400, 'SVG avatar denied');
   check((await avatarPost(new File(['not-a-png'], 'bad.png', { type: 'image/png' }))).status === 400, 'Fake image MIME denied');
   check((await avatarPost(new File([avatar], 'valid.png', { type: 'image/png' }))).status === 200, 'Valid avatar decoded and stored');
@@ -223,9 +237,37 @@ try {
   check((await fetch(`${origin}/auth/confirm?token_hash=recovery-once&type=recovery`, { redirect: 'manual' })).headers.get('location')?.includes('verification=failed'), 'Used recovery email token denied');
   check((await post('signin', valid)).status === 401, 'Old password rejected after reset');
   check((await post('signin', { ...valid, password: currentPassword })).status === 200, 'New password signs in');
+  // Run the Google PKCE flow through Next's production proxy and NestJS. The
+  // provider is isolated; this never contacts Google or creates a real account.
+  const loginHtml = await (await fetch(`${origin}/sign-in`)).text();
+  check(loginHtml.includes('Tiếp tục với Google'), 'Sign-in renders the Google option');
+  check((await post('google', { acceptTerms: false })).status === 400, 'Google requires explicit terms');
+  check((await post('google', { acceptTerms: true }, undefined, 'https://evil.example')).status === 403, 'Google rejects a forged origin');
+  const googleStart = await post('google', { acceptTerms: true, next: '/customer/inquiries/new' });
+  check(googleStart.status === 200, 'Google start passes through the frontend proxy');
+  const authorize = new URL((await googleStart.json()).url);
+  check(authorize.searchParams.get('code_challenge_method') === 's256', 'Google uses S256 PKCE');
+  check(authorize.searchParams.get('redirect_to') === `${origin}/api/auth/google/callback`, 'Google callback uses the public frontend origin');
+  oauthChallenge = authorize.searchParams.get('code_challenge');
+  const flow = googleStart.headers.getSetCookie().find(value => value.startsWith('pose-google-flow='));
+  check(Boolean(flow) && /HttpOnly/.test(flow) && /Secure/.test(flow), 'Proxy preserves the secure OAuth transaction cookie');
+  const googleCallback = await fetch(`${origin}/api/auth/google/callback?code=oauth-once`, { headers: { Cookie: flow.split(';')[0] }, redirect: 'manual' });
+  check(googleCallback.status === 303 && googleCallback.headers.get('location') === `${origin}/customer/inquiries/new`, 'Google callback resumes the customer inquiry');
+  const googleCookies = googleCallback.headers.getSetCookie().filter(value => /^pose-(access|refresh)=fixture/.test(value));
+  check(googleCookies.length === 2 && googleCookies.every(value => /HttpOnly/.test(value)), 'Google session remains backend-managed');
+  const googleCookie = googleCookies.map(value => value.split(';')[0]).join('; ');
+  check((await (await fetch(`${origin}/api/auth/me`, { headers: { Cookie: googleCookie } })).json()).user.providers.includes('google'), 'Google identity is available in the account profile');
+  check((await fetch(`${origin}/api/auth/admin`, { headers: { Cookie: googleCookie } })).status === 403, 'Google customer cannot access Admin API');
+  const replay = await fetch(`${origin}/api/auth/google/callback?code=oauth-once`, { headers: { Cookie: flow.split(';')[0] }, redirect: 'manual' });
+  check(replay.headers.get('location') === `${origin}/sign-in?oauth=failed`, 'Google authorization code cannot be reused');
+  const missingFlow = await fetch(`${origin}/api/auth/google/callback?code=oauth-once`, { redirect: 'manual' });
+  check(missingFlow.headers.get('location') === `${origin}/sign-in?oauth=expired`, 'Google callback rejects a missing browser transaction');
+  check((await post('logout', {}, googleCookie)).status === 200, 'Google login supports ordinary application logout');
+  const oauthErrorHtml = await (await fetch(`${origin}/sign-in?oauth=cancelled`)).text();
+  check(oauthErrorHtml.includes('Bạn đã hủy'), 'OAuth cancellation has a clear Vietnamese message');
   console.log(`PASS: ${checks} auth integration checks; no real user/email created.`);
   if (process.argv.includes('--preview')) {
-    currentPassword = valid.password; revoked = false;
+    currentPassword = valid.password; revoked = false; usedOAuthCodes.clear();
     console.log(`PREVIEW READY: ${origin}; fixture@example.test / safe-password-123 (fake provider only).`);
     await new Promise(resolve => { process.once('SIGINT', resolve); process.once('SIGTERM', resolve); });
   }

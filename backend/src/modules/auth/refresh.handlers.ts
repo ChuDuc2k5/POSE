@@ -3,7 +3,8 @@ import { authenticatedSession } from './session.js';
 import { roleHome } from '../../common/roles.js';
 
 const guestEntries = new Set(['/', '/sign-in', '/sign-up']);
-const destinations = new Set([...guestEntries, '/account', '/customer', '/customer/favorites', '/customer/inquiries', '/customer/inquiries/new', '/sales', '/admin']);
+const publicDestinations = new Set(['/consultation','/guest/inquiries']);
+const destinations = new Set([...guestEntries,...publicDestinations, '/account', '/customer', '/customer/favorites', '/customer/inquiries', '/customer/inquiries/new', '/sales', '/admin','/admin/inquiries','/admin/sales']);
 export async function GET(request: WebRequest) {
   const requested = request.nextUrl.searchParams.get('next') || '';
   const catalogDestination = /^\/properties(?:\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?(?:\?[^#]*)?$/i.test(requested);
@@ -12,7 +13,7 @@ export async function GET(request: WebRequest) {
     const session = await authenticatedSession();
     const destination = session
       ? next && !guestEntries.has(next) ? next : roleHome(session.role)
-      : next && (guestEntries.has(next) || catalogDestination) ? next : '/sign-in';
+      : next && (guestEntries.has(next) || publicDestinations.has(next) || catalogDestination) ? next : '/sign-in';
     const response = WebResponse.redirect(new URL(destination, request.url));
     response.headers.set('Cache-Control', 'no-store');
     return response;

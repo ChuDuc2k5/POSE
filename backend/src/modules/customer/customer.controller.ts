@@ -7,10 +7,24 @@ import * as inquiries from './customer-inquiries.handlers.js';
 import * as confirmation from './customer-inquiries-id-confirm.handlers.js';
 import * as favoriteStatus from './customer-favorites-status.handlers.js';
 import * as favorite from './customer-favorites-id.handlers.js';
+import * as guest from './guest-inquiries.handlers.js';
+import * as inbox from './admin-inquiries.handlers.js';
 
 // Handlers enforce session, role and origin checks to preserve existing error responses.
 @Controller()
 export class CustomerController {
+  @Post('guest/inquiries')
+  @Public()
+  guestSubmit(@Req() request:Request,@Res() response:Response){return dispatch(request,response,guest.POST);}
+  @Get('guest/inquiries')
+  @Public()
+  guestList(@Req() request:Request,@Res() response:Response){return dispatch(request,response,guest.GET);}
+  @Get('admin/inquiries')
+  @Public()
+  adminInquiries(@Req() request:Request,@Res() response:Response){return dispatch(request,response,inbox.GET);}
+  @Post('admin/inquiries/:id/read')
+  @Public()
+  readInquiry(@Req() request:Request,@Res() response:Response){return dispatch(request,response,inbox.READ);}
   @Get('customer/favorites')
   @Public()
   listFavorites(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, favorites.GET); }

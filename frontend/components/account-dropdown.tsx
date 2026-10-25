@@ -10,7 +10,17 @@ export function AccountDropdown({ role, name }: { role: Role; name?: string }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
-  const displayName = name?.trim() || 'Tài khoản';
+  // Pages that do not pass the name (search, detail, …) still show it: read it once from the profile.
+  const [loadedName, setLoadedName] = useState<string>();
+  useEffect(() => {
+    if (name?.trim()) return;
+    const controller = new AbortController();
+    fetch('/api/account/profile', { signal: controller.signal }).then(response => response.ok ? response.json() : null)
+      .then(data => { const value = data?.profile?.name; if (typeof value === 'string' && value.trim()) setLoadedName(value.trim()); })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [name]);
+  const displayName = name?.trim() || loadedName || 'Tài khoản';
   const close = (restore = false) => { setOpen(false); if (restore) trigger.current?.focus(); };
   useEffect(() => {
     if (!open) return;

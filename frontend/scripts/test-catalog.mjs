@@ -14,13 +14,13 @@ const image=await sharp({create:{width:32,height:24,channels:3,background:'#387c
 const profile={name:'Quản trị viên NexCall',phone:'',phoneVerified:false,notificationsEnabled:true,avatarPath:null,version:0,updatedAt:null};
 function seed(){
   const now=new Date().toISOString();
-  db={property_projects:[{id:projectId,code:'NexCall-RV',name:'NexCall Riverside',location:'Thành phố Hồ Chí Minh',description:'Dự án minh họa trong môi trường kiểm thử.',amenities:'Công viên, hồ bơi, khu sinh hoạt chung',archived:false,version:0,updated_at:now}],property_subdivisions:[{id:subdivisionId,project_id:projectId,code:'BLOCK-A',name:'Riverside · Block A',location:'Thành phố Hồ Chí Minh',description:'Phân khu minh họa',amenities:'Vườn nội khu',archived:false,version:0,updated_at:now}],property_products:[],property_media:[],property_history:[]};
-  for(const [i,name,code,area,price,publication,availability] of [[1,'Căn hộ 2 phòng ngủ · Block A','A-1201',82.5,3200000000,'Published','Available'],[2,'Căn hộ sân vườn','A-1602',98.5,null,'Draft','Unavailable'],[3,'Căn hộ gia đình · Block A','A-0805',105,4100000000,'Published','Sold'],[4,'Căn hộ góc, hướng công viên','A-0703',88,3500000000,'Hidden','Reserved']])db.property_products.push({id:`fc300000-0000-4000-8000-00000000000${i}`,project_id:projectId,subdivision_id:subdivisionId,code,name,area,price,publication,availability,property_type:'Apartment',bedrooms:2,currency:'VND',location:'Thành phố Hồ Chí Minh',description:'Không gian sống thoáng đãng, tiện ích đầy đủ và kết nối thuận tiện.',version:0,updated_at:now});
+  db={property_projects:[{id:projectId,code:'NexCall-RV',name:'NexCall Riverside',location:'Thành phố Hồ Chí Minh',description:'Dự án minh họa trong môi trường kiểm thử.',amenities:'Công viên, hồ bơi, khu sinh hoạt chung',archived:false,version:0,updated_at:now}],property_subdivisions:[{id:subdivisionId,project_id:projectId,code:'BLOCK-A',name:'Riverside · Block A',location:'Thành phố Hồ Chí Minh',description:'Phân khu minh họa',amenities:'Vườn nội khu',archived:false,version:0,updated_at:now}],property_products:[],property_media:[],property_history:[],account_history:[]};
+  for(const [i,name,code,area,price,publication,availability] of [[1,'Căn hộ 2 phòng ngủ · Block A','A-1201',82.5,3200000000,'Published','Available'],[2,'Căn hộ sân vườn','A-1602',98.5,null,'Draft','Unavailable'],[3,'Căn hộ gia đình · Block A','A-0805',105,4100000000,'Published','Sold'],[4,'Căn hộ góc, hướng công viên','A-0703',88,3500000000,'Hidden','Reserved']])db.property_products.push({id:`fc300000-0000-4000-8000-00000000000${i}`,project_id:projectId,subdivision_id:subdivisionId,code,name,area,price,publication,availability,property_type:'Apartment',bedrooms:2,currency:'VND',location:'Thành phố Hồ Chí Minh',description:'Không gian sống thoáng đãng, tiện ích đầy đủ và kết nối thuận tiện.',created_by:i===3 ? 'fc000000-0000-4000-8000-000000000099' : i===4 ? null:user.id,deleted_at:null,deleted_by:null,version:0,updated_at:now});
   files=new Map();currentRole='Admin';active=true;offline=false;uploadFailure=false;attachFailure=false;
 }
 seed();
 const tables={projects:'property_projects',subdivisions:'property_subdivisions',properties:'property_products',media:'property_media'};
-const published=p=>p?.publication==='Published' && db.property_projects.some(j=>j.id===p.project_id && !j.archived) && (!p.subdivision_id || db.property_subdivisions.some(s=>s.id===p.subdivision_id && !s.archived));
+const published=p=>!p?.deleted_at && p?.publication==='Published' && db.property_projects.some(j=>j.id===p.project_id && !j.archived) && (!p.subdivision_id || db.property_subdivisions.some(s=>s.id===p.subdivision_id && !s.archived));
 const publicMedia=m=>m.visibility==='Public' && m.visible && !m.removed && published(db.property_products.find(p=>p.id===m.property_id));
 const provider=createServer(async(req,res)=>{
   const chunks=[];for await(const chunk of req)chunks.push(chunk);const bytes=Buffer.concat(chunks);
@@ -33,6 +33,19 @@ const provider=createServer(async(req,res)=>{
   if(url.pathname.endsWith('/logout')){res.writeHead(204);return res.end();}
   if(url.pathname.endsWith('/rpc/pose_access_context'))return reply(200,{user_id:user.id,role,active,session_valid:active});
   if(url.pathname.endsWith('/rpc/pose_read_profile'))return reply(200,profile);
+  if(url.pathname.endsWith('/rpc/pose_admin_inquiries'))return reply(200,{items:[],total:0,unread:0});
+  if(url.pathname.endsWith('/rpc/pose_catalog_lifecycle')){
+    if(role!=='Admin')return reply(403,{code:'42501',message:'ADMIN_REQUIRED'});
+    const row=db.property_products.find(p=>p.id===input.p_id);
+    if(!row)return reply(404,{code:'P0002',message:'NOT_FOUND'});
+    if(row.version!==input.p_version)return reply(409,{code:'40001',message:'VERSION_CONFLICT'});
+    if((input.p_action==='delete')===!!row.deleted_at)return reply(409,{code:'22023',message:'INVALID_LIFECYCLE'});
+    const before={...row};row.version++;row.updated_at=new Date().toISOString();
+    row.deleted_at=input.p_action==='delete' ? row.updated_at:null;row.deleted_by=row.deleted_at ? user.id:null;
+    if(input.p_action==='restore')row.publication='Draft';
+    db.property_history.unshift({id:randomUUID(),entity_kind:'properties',entity_id:row.id,actor_id:user.id,action:input.p_action==='delete' ? 'properties_deleted':'properties_restored',reason:input.p_reason,before_data:before,after_data:{...row},created_at:row.updated_at});
+    return reply(200,row);
+  }
   if(url.pathname.endsWith('/rpc/pose_save_catalog')){
     if(role!=='Admin')return reply(403,{code:'42501',message:'ADMIN_REQUIRED'});
     if(attachFailure && input.p_kind==='media' && !input.p_id){attachFailure=false;return reply(409,{code:'40001',message:'VERSION_CONFLICT'});}
@@ -45,8 +58,9 @@ const provider=createServer(async(req,res)=>{
     if((['Hidden','Archived'].includes(data.publication) && data.publication!==old?.publication || old && data.availability && data.availability!==old.availability || data.archived && !old?.archived) && (input.p_reason || '').trim().length<3)return reply(400,{code:'22023',message:'REASON_REQUIRED'});
     const parent=input.p_kind==='media' ? db.property_products.find(p=>p.id===(old?.property_id || data.property_id)):null;
     if(input.p_kind==='media' && !old && (!parent || parent.version!==input.p_version))return reply(409,{code:'40001',message:'VERSION_CONFLICT'});
+    if(old?.deleted_at || parent?.deleted_at)return reply(409,{code:'22023',message:'PRODUCT_TRASHED'});
     const before=old ? {...old}:null;
-    const saved={...(old || {id:randomUUID(),removed:false}),...data,version:old ? old.version+1:0,updated_at:new Date().toISOString()};
+    const saved={...(old || {id:randomUUID(),removed:false,...(input.p_kind==='properties' ? {created_by:user.id,deleted_at:null,deleted_by:null}:{})}),...data,version:old ? old.version+1:0,updated_at:new Date().toISOString()};
     if(saved.removed)saved.visible=false;if(old)Object.assign(old,saved);else db[table].push(saved);
     if(parent)parent.version++;
     db.property_history.unshift({id:randomUUID(),entity_kind:input.p_kind==='media' ? 'properties':input.p_kind,entity_id:parent?.id || saved.id,actor_id:user.id,action:`${input.p_kind}_${old ? 'updated':'created'}`,reason:input.p_reason,before_data:before,after_data:{...saved},created_at:new Date().toISOString()});
@@ -54,8 +68,8 @@ const provider=createServer(async(req,res)=>{
   }
   if(url.pathname.startsWith('/rest/v1/')){
     const table=url.pathname.split('/').pop();if(!db[table])return reply(404,{});
-    let rows=db[table].filter(row=>role==='Admin' || table==='property_products' && published(row) || table==='property_media' && publicMedia(row) || table==='property_projects' && !row.archived || table==='property_subdivisions' && !row.archived);
-    for(const [key,value] of url.searchParams){if(value.startsWith('eq.'))rows=rows.filter(row=>String(row[key])===value.slice(3));}
+    let rows=db[table].filter(row=>role==='Admin' && (table!=='property_media' || !db.property_products.find(p=>p.id===row.property_id)?.deleted_at) || table==='property_products' && published(row) || table==='property_media' && publicMedia(row) || table==='property_projects' && !row.archived || table==='property_subdivisions' && !row.archived);
+    for(const [key,value] of url.searchParams){if(value.startsWith('eq.'))rows=rows.filter(row=>String(row[key])===value.slice(3));else if(value==='is.null')rows=rows.filter(row=>row[key]==null);else if(value==='not.is.null')rows=rows.filter(row=>row[key]!=null);}
     const search=url.searchParams.get('or')?.match(/code\.ilike\.%((?:\\.|[^%])*)%/)?.[1]?.replace(/\\([%_])/g,'$1');if(search)rows=rows.filter(row=>`${row.code} ${row.name}`.toLowerCase().includes(search.toLowerCase()));
     if(url.searchParams.get('order')){const order=url.searchParams.get('order').split(',');rows.sort((a,b)=>{for(const field of order){const [key,direction]=field.split('.');const comparison=a[key]>b[key] ? 1:a[key]<b[key] ? -1:0;if(comparison)return direction==='desc' ? -comparison:comparison;}return 0;});}
     const total=rows.length,offset=Number(url.searchParams.get('offset') || 0),limit=Number(url.searchParams.get('limit') || total || 1);rows=rows.slice(offset,offset+limit);
@@ -78,7 +92,7 @@ const provider=createServer(async(req,res)=>{
 });
 await new Promise(resolve=>provider.listen(3221,'127.0.0.1',resolve));
 let stack;
-try { stack = await startStack(3220, {"SUPABASE_URL": "http://127.0.0.1:3221", "SUPABASE_PUBLISHABLE_KEY": "fixture-public-key", "SUPABASE_STORAGE_SECRET_KEY": "fixture-storage-key"}); } catch (error) { provider.close(); throw error; }
+try { stack = await startStack(3220, {"SUPABASE_URL": "http://127.0.0.1:3221", "SUPABASE_PUBLISHABLE_KEY": "fixture-public-key", "SUPABASE_STORAGE_SECRET_KEY": "fixture-storage-key"},{build:!process.argv.includes("--no-build")}); } catch (error) { provider.close(); throw error; }
 const { app } = stack;
 let output='';app.stdout.on('data',chunk=>{output+=chunk;});app.stderr.on('data',chunk=>{output+=chunk;});
 const origin='http://localhost:3220',admin='pose-access=fixture-access';let checks=0;
@@ -92,6 +106,7 @@ async function upload(property,file,version=property.version,visibility='Public'
 }
 try{
   let ready=false;for(let i=0;i<40;i++){try{if((await fetch(origin)).ok){ready=true;break;}}catch{}await delay(250);}assert.ok(ready,output);
+  const adminPage=await call('/admin');check(adminPage.status===200 && (await adminPage.text()).includes('Quản lý bất động sản'),'Admin page renders with profile and catalogue controls');
   check((await call(`${route}/projects`,'GET',null,null)).status===401,'Guest denied admin catalogue');
   for(const role of ['User','Sales'])check((await call(`${route}/projects`,'GET',null,`pose-access=fixture-${role}`)).status===403,`${role} denied despite forged editable metadata`);
   check((await call(`${route}/projects`,'POST',payload,admin,'https://other.example')).status===403,'Cross-origin mutation denied');
@@ -107,7 +122,7 @@ try{
   const propertyInput={code:'HTTP_P',name:'Căn hộ HTTP',project_id:project.id,subdivision_id:zone.id,location:'Hồ Chí Minh',description:'Căn hộ kiểm thử có đầy đủ thông tin giới thiệu.',property_type:'Apartment',area:85,bedrooms:2,price:null,publication:'Draft',availability:'Available',version:0,reason:''};
   for(const [field,value] of [['area',-1],['area',0],['price',0],['bedrooms',-1],['property_type','Fake']])check((await call(`${route}/properties`,'POST',{...propertyInput,[field]:value})).status===400,`Invalid ${field} denied`);
   let property=(await (await call(`${route}/properties`,'POST',propertyInput)).json()).item;check(property.price===null,'Unknown price stays null');
-  const editProperty=async changes=>{const response=await call(`${route}/properties/${property.id}`,'PATCH',{...propertyInput,...property, ...changes,id:undefined,currency:undefined,updated_at:undefined,removed:undefined});const data=await response.json();if(response.ok)property=data.item;return response;};
+  const editProperty=async changes=>{const response=await call(`${route}/properties/${property.id}`,'PATCH',{...propertyInput,...property, ...changes,id:undefined,currency:undefined,updated_at:undefined,removed:undefined,created_by:undefined,deleted_at:undefined,deleted_by:undefined});const data=await response.json();if(response.ok)property=data.item;return response;};
   check((await editProperty({publication:'Published',description:'Ngắn'})).status===400,'Incomplete publication denied');
   check((await editProperty({publication:'Published'})).status===200,'Publish complete product');
   check((await editProperty({publication:'Hidden'})).status===400,'Hide needs reason');
@@ -144,6 +159,37 @@ try{
   check((await editProperty({publication:'Hidden',reason:'Ẩn sản phẩm để cập nhật'})).status===200,'Hide product with audit reason');
   check(!(await (await call('/api/catalog/properties','GET',null,null)).json()).items.some(p=>p.id===property.id),'Hidden product disappears from public source immediately');
   const detail=await (await call(`${route}/properties/${property.id}`)).json();check(detail.history.length>0 && detail.media.length===1,'History and remaining media load');
+  const mine=await (await call(`${route}/properties?scope=mine`)).json();
+  check(mine.items.length>0 && mine.items.every(p=>p.created_by===user.id),'Mine only includes authenticated creator');
+  check(property.created_by===user.id,'Server records creator');
+  check((await call(`${route}/properties?scope=other`)).status===400,'Invalid creator scope denied');
+  check((await call(`${route}/properties?trash=anything`)).status===400,'Invalid trash flag denied');
+  check((await call(`${route}/projects?scope=mine`)).status===400,'Creator scope only applies to products');
+  check((await call(`${route}/properties`,'POST',{...propertyInput,code:'FORGED',created_by:randomUUID()})).status===400,'Forged creator rejected');
+  check((await call(`${route}/properties/${property.id}`,'DELETE',{version:property.version,reason:'Xóa sản phẩm'},admin,'https://other.example')).status===403,'Cross-origin delete denied');
+  check((await call(`${route}/properties/${property.id}`,'DELETE',{version:property.version,reason:'Xóa sản phẩm'},'pose-access=fixture-User')).status===403,'User cannot delete');
+  check((await call(`${route}/properties/${property.id}/restore`,'POST',{version:property.version,reason:'Khôi phục'},'pose-access=fixture-Sales')).status===403,'Sales cannot restore');
+  check((await call(`${route}/properties/${property.id}`,'DELETE',{reason:'Xóa sản phẩm'})).status===400,'Delete requires version');
+  check((await call(`${route}/properties/${property.id}`,'DELETE',{version:property.version,reason:' '})).status===400,'Delete requires reason');
+  check((await call(`${route}/properties/${property.id}`,'DELETE',{version:property.version,reason:'Xóa sản phẩm',deleted_by:randomUUID()})).status===400,'Lifecycle server fields cannot be forged');
+  const fileCount=files.size, staleVersion=property.version;
+  const deleted=await call(`${route}/properties/${property.id}`,'DELETE',{version:property.version,reason:'Bài đăng không còn phù hợp'});
+  check(deleted.status===200,'Admin soft deletes product');property=(await deleted.json()).item;
+  check(property.deleted_at && property.deleted_by===user.id && files.size===fileCount,'Soft delete retains files and captures actor');
+  check((await call(`${route}/properties/${property.id}`,'DELETE',{version:staleVersion,reason:'Gửi lặp yêu cầu'})).status===409,'Stale/replayed delete conflicts');
+  check(!(await (await call(`${route}/properties`)).json()).items.some(p=>p.id===property.id),'Default list excludes trash');
+  check((await (await call(`${route}/properties?trash=true`)).json()).items.some(p=>p.id===property.id),'Trash list includes deleted product');
+  check((await call(`/api/catalog/media/${document.id}`)).status===404,'Trashed product revokes file gateway access');
+  check((await call(`${route}/properties/${property.id}`,'PATCH',{...propertyInput,version:property.version,reason:'Thử sửa sản phẩm đã xóa'})).status===409,'Editing a trashed product is denied');
+  check((await upload(property,new File([image],'trash.png',{type:'image/png'}))).status===409,'Upload to trash denied');
+  const restored=await call(`${route}/properties/${property.id}/restore`,'POST',{version:property.version,reason:'Khôi phục để kiểm tra'});
+  check(restored.status===200,'Restore succeeds');property=(await restored.json()).item;
+  check(property.publication==='Draft' && !property.deleted_at && property.created_by===user.id,'Restore is Draft and preserves creator');
+  check(!(await (await call('/api/catalog/properties','GET',null,null)).json()).items.some(p=>p.id===property.id),'Restored draft is not public');
+  check((await (await call(`${route}/properties?trash=true`)).json()).items.every(p=>p.id!==property.id),'Restored product leaves trash');
+  check((await call(`${route}/properties/${property.id}/restore`,'POST',{version:property.version,reason:'Khôi phục lần hai'})).status===409,'Restore on active product conflicts');
+  const audited=await (await call(`${route}/properties/${property.id}`)).json();
+  check(audited.history.some(h=>h.action==='properties_deleted') && audited.history.some(h=>h.action==='properties_restored'),'Lifecycle audit visible in product detail');
   currentRole='Sales';check((await call(`${route}/projects`)).status===403,'Current role downgrade takes effect');currentRole='Admin';
   active=false;check((await call(`${route}/projects`)).status===401,'Inactive account denied');active=true;
   offline=true;check((await call(`${route}/projects`)).status===503,'Provider outage fails closed');offline=false;

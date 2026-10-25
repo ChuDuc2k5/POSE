@@ -1,4 +1,4 @@
-import { Controller, Req, Res, Get, Post, Patch } from '@nestjs/common';
+import { Controller, Req, Res, Get, Post, Patch, Delete } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { Public } from '../../auth/auth.guard.js';
 import { dispatch } from '../../common/http.js';
@@ -12,10 +12,17 @@ import * as adminCatalog from './admin-catalog-kind.handlers.js';
 import * as adminItem from './admin-catalog-kind-id.handlers.js';
 import * as upload from './admin-catalog-properties-id-media.handlers.js';
 import * as propertyView from './catalog-property-view.handlers.js';
+import * as lifecycle from './catalog-lifecycle.handlers.js';
 
 // Handlers enforce session, role and origin checks to preserve existing error responses.
 @Controller()
 export class CatalogController {
+  @Delete('admin/catalog/properties/:id')
+  @Public()
+  trashProperty(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, lifecycle.DELETE); }
+  @Post('admin/catalog/properties/:id/restore')
+  @Public()
+  restoreProperty(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, lifecycle.RESTORE); }
   @Get('catalog/projects')
   @Public()
   listProjects(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, projects.GET); }

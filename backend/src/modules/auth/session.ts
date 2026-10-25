@@ -30,6 +30,14 @@ async function accessContext(access: string, userId: string) {
   return data.role as Role;
 }
 
+export async function verifyAccessSession(access: string) {
+  const { data, error } = await authClient().auth.getUser(access);
+  if (error && (!error.status || error.status === 429 || error.status >= 500)) throw new Error('AUTH_UNAVAILABLE');
+  if (error || !data.user?.email_confirmed_at) return null;
+  const role = await accessContext(access, data.user.id);
+  return role ? { user: data.user, access, role } : null;
+}
+
 export async function authenticatedSession({ writable = true }: { writable?: boolean } = {}) {
   const jar = await cookies();
   const client = authClient();

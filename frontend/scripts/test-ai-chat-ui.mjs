@@ -72,7 +72,7 @@ try{
  await evaluate("document.querySelector('.ai-switch input').click()");await type('Câu hỏi trước khi xem nhà');await click('Gửi');await wait("!!document.querySelector('.ai-source')");
  await type('Bản nháp đang viết');
  await wait("!!document.querySelector('.discovery-card')");
-  await evaluate("sessionStorage.setItem('test-original-messages',document.querySelector('.ai-log').innerText);sessionStorage.setItem('test-document-marker','123');window.card=document.querySelector('.discovery-card a[href^=\"/properties/\"]');sessionStorage.setItem('test-next-property',window.card.getAttribute('href').split('/').at(-1));window.card.click()");
+  await evaluate("sessionStorage.setItem('test-original-messages',document.querySelector('.ai-log').innerText);sessionStorage.setItem('test-document-marker','123');window.card=document.querySelector('.discovery-card a[href^=\"/properties/\"]');sessionStorage.setItem('test-next-property',window.card.getAttribute('href').split('?')[0].split('/').at(-1));window.card.click()");
   await wait("location.pathname==='/properties/'+sessionStorage.getItem('test-next-property') && !!document.querySelector('.ai-panel') && document.querySelector('.ai-panel-head').innerText.includes('Đang xem:')");
   check(await evaluate("sessionStorage.getItem('test-document-marker')==='123' && document.querySelector('.ai-log').innerText===sessionStorage.getItem('test-original-messages') && document.querySelector('#ai-message').value==='Bản nháp đang viết' && document.querySelector('.ai-switch input').checked"),'client navigation retains open panel, messages, consent and draft');
  await send('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false});await screenshot('property-context-1280');

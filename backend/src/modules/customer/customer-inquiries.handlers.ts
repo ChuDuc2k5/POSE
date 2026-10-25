@@ -2,6 +2,7 @@ import { WebRequest } from '../../common/http.js';
 import { customerSession, discoveryError } from './customer.service.js';
 import { inquiryInput } from '../../common/discovery.js';
 import { catalogError, catalogInput, catalogJson } from '../catalog/catalog.service.js';
+import { inquiryEvents } from '../../common/inquiry-events.js';
 
 export async function GET(request: WebRequest) {
   try {
@@ -21,6 +22,7 @@ export async function POST(request: WebRequest) {
     if (Object.keys(fields).length) return catalogError('INVALID_INPUT','Kiểm tra thông tin yêu cầu tư vấn.',400,fields);
     const result=await access.client.rpc('pose_submit_inquiry',{p_data:data,p_key:key});
     if (result.error) return discoveryError(result.error);
+    if(!result.data.replayed)inquiryEvents.emit('received');
     return catalogJson(result.data,result.data.replayed ? 200:201);
   } catch { return catalogError('UNAVAILABLE','Chưa thể gửi yêu cầu. Hãy thử lại với cùng nội dung.',503); }
 }
