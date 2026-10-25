@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Req, Res } from '@nestjs/common';
+import { Controller, Delete, Get, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { Public, Roles } from '../../auth/auth.guard.js';
 import { dispatch } from '../../common/http.js';
@@ -22,6 +22,15 @@ export class AiController {
   @Public()
   @Get('sessions/:id')
   session(@Req() req: Request, @Res() res: Response) { return dispatch<{id:string}>(req, res, async (request, context) => this.ai.getChat(request, (await context.params).id)); }
+  @Public()
+  @Delete('sessions/:id')
+  deleteSession(@Req() req: Request, @Res() res: Response) { return dispatch<{id:string}>(req, res, async (request, context) => this.ai.deleteSession(request, (await context.params).id)); }
+  @Public()
+  @Get('appointments/options')
+  appointmentOptions(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, request => this.ai.appointmentOptions(request)); }
+  @Public()
+  @Post('appointments')
+  appointments(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, request => this.ai.createAppointment(request)); }
   @Public()
   @Post('handoff')
   handoff(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, request => this.ai.handoff(request)); }
