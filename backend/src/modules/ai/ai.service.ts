@@ -284,7 +284,8 @@ export class AiService {
       else { violation=null; log('regeneration',{},null); }
     }
     // Tool calls can mix result sets; the grounded summary and its cards share one fresh 1..n numbering.
-    const referencedAnswer=codeReference.codes.length>0 || pureReference;
+    // A non-property question asked right after a listing (weather, small talk) does not get that listing's card.
+    const referencedAnswer=(codeReference.codes.length>0 || pureReference) && modelTopic!=='smalltalk' && modelTopic!=='out_of_scope';
     if(blocked)items=evidenceItems.map((item,index)=>({...item,number:index+1}));
     else items=sourcesFromCitations(result.reply,evidenceItems,referencedAnswer);
     const noMatch=searchPerformed&&!input.property_id&&!evidenceItems.length&&!related.length;
