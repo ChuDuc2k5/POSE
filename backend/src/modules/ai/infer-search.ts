@@ -14,10 +14,13 @@ export function inferTransactionType(text: string): 'Sale'|'Rent'|undefined {
 
 const types: [RegExp, string][] = [
   [word('biệt thự'), 'Villa'], [word('căn hộ|chung cư|studio|penthouse|duplex'), 'Apartment'], [word('văn phòng'), 'Office'],
-  [word('mặt bằng|shophouse|kiot|cửa hàng'), 'Shop'], [word('đất nền|lô đất|đất'), 'Land'], [word('nhà phố|nhà riêng|nhà'), 'House'],
+  [word('mặt bằng|shophouse|kiot|cửa hàng'), 'Shop'], [word('đất nền|lô đất|đất'), 'Land'], [word('nhà phố|nhà riêng|nhà nguyên căn|nhà mặt tiền|nhà mặt phố|nhà hẻm|nhà cấp 4|nhà \d+ tầng|nhà \d+ lầu'), 'House'], [word('nhà'), 'House'],
 ];
 const places = ['Thủ Đức', 'Bình Thạnh', 'Gò Vấp', 'Tân Bình', 'Tân Phú', 'Phú Nhuận', 'Bình Tân', 'Nhà Bè', 'Củ Chi', 'Hóc Môn', 'Bình Chánh', 'Cần Giờ', 'Thảo Điền', 'Phú Mỹ Hưng', 'Thủ Thiêm'];
 const propertyWords = /căn hộ|chung cư|nhà|đất|biệt thự|văn phòng|mặt bằng|bất động sản|thuê|mua|bán|giá|tỷ|triệu|phòng ngủ|quận|khu vực|diện tích|\bm\s*[²2]\b|apartment|house/i;
+
+// "thuê nhà" alone means a place to rent (apartments included); "mua nhà" still means a house.
+export function genericHome(text: string) { return word('thuê').test(text) && word('nhà').test(text) && !types.slice(0, -1).some(([pattern]) => pattern.test(text)); }
 
 export function inferSearch(text: string): InferredSearch | null {
   if (!propertyWords.test(text)) return null;
