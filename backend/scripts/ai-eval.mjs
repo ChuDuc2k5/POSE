@@ -32,7 +32,7 @@ function validateRealCases() {
     const wanted = normalize(canonicalDistrict(district));
     const text = normalize(location);
     if (text.includes(wanted)) return true;
-    return hcmWards.some(ward => ward.formerDistricts.some(former => normalize(former) === wanted) && [ward.ward, ...ward.formerWards].some(alias => text.includes(normalize(alias))));
+    return hcmWards.some(ward => ward.formerDistricts.some(former => normalize(former) === wanted) && [ward.ward, ...ward.formerWards].some(alias => normalize(alias).length > 1 && text.includes(normalize(alias))));
   };
   const matches = (item, constraints) => {
     if (!constraints) return false;

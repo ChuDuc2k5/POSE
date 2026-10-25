@@ -14,7 +14,7 @@ import { correctionData, disclosure, GUARD_VERSION, safeReply, groundedSummary, 
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
-import { setAiRequestSession } from './request-log.js';
+import { setAiRequestSession, logAiRequest } from './request-log.js';
 import { questionPreview } from './privacy.js';
 import { clarificationFor, referencedListingCodes } from './history-aware.js';
 import { sanitizeReply } from './guard.js';
@@ -209,6 +209,16 @@ export class AiService {
       agent=await run(agentMessages);
       if(!agent.text.trim() && !agent.pending.length && !agent.blocked.length)throw new Error('AI_EMPTY_RESPONSE');
     }
+    const calledWriteTools=new Set(agent.messages.flatMap(message=>message.role==='assistant' ? (message.tool_calls||[]).filter(call=>call.type==='function').map(call=>call.function.name) : []));
+    const normalizedSource=source.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\u0111/g,'d').toLowerCase();
+    const fallbackTool=/(lien he|goi lai|gap chuyen vien|nhan vien tu van|chuyen vien tu van)/i.test(normalizedSource) ? 'request_handoff' : /(dat lich|hen xem|xem (?:nha|can))/i.test(normalizedSource) && codeReference.codes.length ? 'propose_appointment' : /luu can/i.test(normalizedSource) && codeReference.codes.length ? 'save_favorite' : null;
+    if(explicitWriteIntent(source) && fallbackTool && !calledWriteTools.has(fallbackTool)){
+      const code=codeReference.codes[0] || null;
+      const args=fallbackTool==='request_handoff' ? {summary:source} : fallbackTool==='propose_appointment' ? {code,preferred_start:null,preferred_end:null} : {code};
+      const action_id=await createPending(fallbackTool,args);
+      if(action_id) pendingActions.push({id:action_id,tool:fallbackTool,args});
+      logAiRequest({kind:'chat',model:'deterministic',promptName:'assistant',toolsCalled:[fallbackTool],latencyMs:0,status:'ok'});
+    }
     for(const blockedReason of agent.blocked) log('agent',blockedReason,blockedReason,'flagged');
     let result={reply:agent.text || 'Hiện tôi chưa đủ dữ liệu để trả lời chính xác.',tool_calls:[] as unknown[],needs:{},flags:[] as never[]};
     result.reply=sanitizeReply(agent.text || result.reply);
@@ -224,7 +234,7 @@ export class AiService {
     const finalRag=rag as RetrievalResult|null;if(finalRag){const rendered=renderRetrievedContextWithCards(finalRag.chunks,new Set(items.map(x=>x.id)));rag={...finalRag,...rendered};items=items.map(item=>({...item,number:((rendered.sources.find(s=>(s as {id?:string}).id===item.id) as {number?:number}|undefined)?.number),source_type:'Property'}));}else items=items.map((item,index)=>({...item,number:index+1,source_type:'Property'}));
     const referencedAnswer=codeReference.codes.length>0 || pureReference;
     items=sourcesFromCitations(result.reply,items,referencedAnswer);
-    if(!violation){violation=this.guard.outputReason(result.reply,items,source,{retrievalFound:rag?.found??items.length>0,faqOnly:items.length>0&&items.every(x=>x.source_type==='Faq')});if(violation){log('output',result.reply,violation);console.warn(JSON.stringify({event:'guard_block',reason:violation,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:items.map(x=>x.number??null)}));}}
+    if(!violation){violation=this.guard.outputReason(result.reply,items,source,{retrievalFound:rag?.found??items.length>0,faqOnly:items.length>0&&items.every(x=>x.source_type==='Faq')});if(violation){log('output',result.reply,violation);console.warn(JSON.stringify({event:'guard_block',reason:violation,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:items.map(x=>x.number??null),preview:result.reply.slice(0,300)}));}}
     let blocked=false;
     if(violation){
       log('final_output',result.reply,violation);
@@ -232,7 +242,7 @@ export class AiService {
       agent=await run(retryMessages);
       result.reply=sanitizeReply(agent.text || safeReply);
       const retryViolation=this.guard.outputReason(result.reply,items,source,{retrievalFound:rag?.found??items.length>0,faqOnly:items.length>0&&items.every(x=>x.source_type==='Faq')});
-      if(retryViolation){log('regeneration',result.reply,retryViolation);blocked=true;}
+      if(retryViolation){log('regeneration',result.reply,retryViolation);console.warn(JSON.stringify({event:'guard_block',phase:'regeneration',reason:retryViolation,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:items.map(x=>x.number??null),preview:result.reply.slice(0,300)}));blocked=true;}
       else { violation=null; log('regeneration',{},null); }
     }
     // Tool calls can mix result sets; the grounded summary and its cards share one fresh 1..n numbering.

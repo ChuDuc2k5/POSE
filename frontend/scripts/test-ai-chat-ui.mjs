@@ -27,7 +27,8 @@ try{
  const type=text=>evaluate(`(()=>{const e=document.querySelector('#ai-message');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,${JSON.stringify(text)});e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
  const key=async(shift=false)=>{await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',unmodifiedText:'\r',windowsVirtualKeyCode:13,modifiers:shift?8:0});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,modifiers:shift?8:0});};
  const screenshot=async name=>{const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await writeFile(join(root,name+'.png'),Buffer.from(r.data,'base64'));};
- await send('Page.enable');
+  await send('Page.enable');
+ check(await evaluate('document.readyState==="loading" || document.readyState==="complete"'),'browser page is available for chat UI');
  await send('Page.addScriptToEvaluateOnNewDocument',{source:`
  window.chatRequests=[];window.recognitions=[];window.spoken=[];window.cancelCount=0;
  class Recognition{start(){window.recognitions.push(this);}stop(){this.onend?.();}abort(){this.onend?.();}emit(text,final=false){this.onresult?.({resultIndex:0,results:[{isFinal:final,0:{transcript:text}}]});if(final)this.onend?.();}}
