@@ -171,10 +171,27 @@ function duplicateKey(row) {
   return [row.transaction_type, row.price ?? '', row.area == null ? '' : Math.round(Number(row.area)), normalizedWard(row.location)].join('|');
 }
 
+// The generated suffix (amenities, rooms, source) is shared by most listings; compare the original text only.
+const ownText = value => String(value ?? '').replace(/Tiện ích: [^.]*\.|\d+ phòng tắm\.|\d+ tầng\.|Hướng [^.]*\.|Có nội thất\.|Nguồn: dữ liệu Revoland\./gu, ' ');
+const words = value => new Set(normalizeDedupeTitle(ownText(value)).split(' ').filter(word => word.length > 2));
+const floors = value => new Set([...normalizeDedupeTitle(value).matchAll(/\btang (\d{1,3})\b/gu)].map(match => match[1]));
+// Same price, area and ward is common for different units of one project (Vinhomes towers);
+// such rows are duplicates only when their text is alike and they do not name different floors.
+export function sameListing(a, b) {
+  const left = `${a.name ?? ''} ${a.description ?? ''}`, right = `${b.name ?? ''} ${b.description ?? ''}`;
+  const fa = floors(left), fb = floors(right);
+  if (fa.size && fb.size && ![...fa].some(floor => fb.has(floor))) return false;
+  const wa = words(left), wb = words(right);
+  let shared = 0;
+  for (const word of wa) if (wb.has(word)) shared++;
+  return shared / (wa.size + wb.size - shared || 1) >= 0.45;
+}
+
 export function dedupeRevoland(prepared, existing = []) {
   const existingById = new Map(existing.filter(row => row.source_external_id).map(row => [row.source_external_id, row]));
   const existingByTitle = new Map(existing.map(row => [normalizeDedupeTitle(row.name), row]).filter(([title]) => title));
-  const existingByKey = new Map(existing.map(row => [duplicateKey(row), row]));
+  const existingByKey = new Map();
+  for (const row of existing) existingByKey.set(duplicateKey(row), [...(existingByKey.get(duplicateKey(row)) ?? []), row]);
   const seenTitlePrice = new Map();
   const seenKey = new Map();
   const counts = { a: 0, b: 0, c: 0, d: 0, conflicts: 0, totalSkipped: 0 };
@@ -188,9 +205,9 @@ export function dedupeRevoland(prepared, existing = []) {
     let matched = null;
     if (existingById.has(row.source_external_id)) { reason = 'a'; matched = existingById.get(row.source_external_id); }
     else if (normalizeDedupeTitle(row.name) && existingByTitle.has(normalizeDedupeTitle(row.name))) { reason = 'b'; matched = existingByTitle.get(normalizeDedupeTitle(row.name)); }
-    else if (existingByKey.has(key)) { reason = 'c'; matched = existingByKey.get(key); }
+    else if ((matched = (existingByKey.get(key) ?? []).find(other => sameListing(row, other)))) reason = 'c';
     else if (seenTitlePrice.has(titlePrice)) { reason = 'd'; matched = seenTitlePrice.get(titlePrice); }
-    else if (seenKey.has(key)) { reason = 'd'; matched = seenKey.get(key); }
+    else if ((matched = (seenKey.get(key) ?? []).find(other => sameListing(row, other)))) reason = 'd';
     if (reason) {
       counts[reason]++;
       counts.totalSkipped++;
@@ -198,7 +215,7 @@ export function dedupeRevoland(prepared, existing = []) {
       continue;
     }
     seenTitlePrice.set(titlePrice, row);
-    seenKey.set(key, row);
+    seenKey.set(key, [...(seenKey.get(key) ?? []), row]);
     kept.push(preparedRow);
   }
   return { kept, skipped, counts };
@@ -281,7 +298,7 @@ async function main() {
       return body ? JSON.parse(body) : null;
     };
   }
-  if (shouldDedupe) dedupe = dedupeRevoland(prepared, await rest('property_products?select=id,code,name,price,area,transaction_type,location,source_website,source_external_id'));
+  if (shouldDedupe) dedupe = dedupeRevoland(prepared, await rest('property_products?select=id,code,name,description,price,area,transaction_type,location,source_website,source_external_id'));
   const preview = join(tmpdir(), 'import-revoland-preview.json');
   writeFileSync(preview, JSON.stringify(prepared, null, 2));
   console.log(JSON.stringify(summarizeRevoland(prepared)));

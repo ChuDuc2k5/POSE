@@ -70,11 +70,18 @@ describe('Revoland import', () => {
   it.each([
     ['a', { source_external_id: 'same' }, { source_external_id: 'same', code: 'OLD-A' }],
     ['b', { name: 'Same Title', source_external_id: 'new' }, { name: 'same title', code: 'OLD-B' }],
-    ['c', { transaction_type: 'Sale', price: 100, area: 50.04, location: 'Ward A, City', source_external_id: 'new' }, { transaction_type: 'Sale', price: 100, area: 50.01, location: 'Ward A, City', code: 'OLD-C' }],
+    ['c', { name: 'Nhà hẻm 61 Trần Đồng', description: 'Nhà 1 trệt 1 lầu hẻm 61 Trần Đồng sổ hồng riêng', transaction_type: 'Sale', price: 100, area: 50.04, location: 'Ward A, City', source_external_id: 'new' }, { name: 'NHÀ 1 TRỆT 1 LẦU HẺM 61 TRẦN ĐỒNG', description: 'Nhà 1 trệt 1 lầu hẻm 61 Trần Đồng sổ hồng riêng', transaction_type: 'Sale', price: 100, area: 50.01, location: 'Ward A, City', code: 'OLD-C' }],
   ])('deduplicates existing rule %s', (reason, row, existing) => {
     const result = dedupeRevoland([{ row } as any], [existing]);
     expect(result.counts[reason as 'a' | 'b' | 'c']).toBe(1);
     expect(result.skipped[0]).toMatchObject({ reason, matchedCode: existing.code });
+  });
+
+  it('keeps different units of one project that share price, area and ward', () => {
+    const base = { transaction_type: 'Rent', price: 9000000, area: 61, location: 'Phường Long Bình, Thành phố Hồ Chí Minh' };
+    const first = { ...base, name: 'Mã căn: BS tầng 16', description: 'Mã căn: BS tầng 16 Loại căn: 2PN2WC Loại hđ: 1 năm Nội thất bếp rèm', source_external_id: 'one' };
+    const second = { ...base, name: 'Origami S10 tầng 26', description: 'Mã căn: Origami S10 tầng 26 Loại căn: 2PN2WC Loại hđ: 1 năm Nội thất bếp rèm', source_external_id: 'two' };
+    expect(dedupeRevoland([{ row: first } as any, { row: second } as any], [{ ...base, name: 'RB S3 tầng 33', description: 'Mã căn: RB S3 tầng 33 Loại căn: 2PN1WC Loại hđ: 1 năm', code: 'OLD' }]).kept).toHaveLength(2);
   });
 
   it('deduplicates earlier records in the input under rule d', () => {
