@@ -115,7 +115,7 @@ try{
   check((await call('/customer/favorites','GET',undefined,null)).status===307,'Favorites page protected on server');
   check((await call('/customer/inquiries','GET',undefined,null)).status===307,'Inquiry list protected on server');
   for(const query of ['page=0','pageSize=51','minPrice=9&maxPrice=1','minArea=80&maxArea=20','minPrice=-1','maxPrice=Infinity','bedrooms=2.5','type=Unknown','project=invalid','sort=unknown','snapshot=invalid','publication=Hidden','q=one&q=two'])check((await call(`/api/catalog/search?${query}`,'GET',undefined,null)).status===400,`Invalid filter: ${query}`);
-  const filtered=await (await call(`/api/catalog/search?type=Apartment&project=${projectId}&location=Qu%E1%BA%ADn%207&bedrooms=2&minPrice=3000000000&maxPrice=3250000000&minArea=80&maxArea=90&availability=Available`)).json();
+  const filtered=await (await call(`/api/catalog/search?type=Apartment&project=${projectId}&location=${encodeURIComponent('Quận 7')}&bedrooms=2&minPrice=3000000000&maxPrice=3250000000&minArea=80&maxArea=90&availability=Available`)).json();
   check(filtered.total===1 && filtered.items[0].id===firstId,'All filters combine');
   const first=await (await call('/api/catalog/search?pageSize=10')).json(),second=await (await call(`/api/catalog/search?page=2&pageSize=10&snapshot=${first.snapshot}`)).json();
   check(first.total===16 && new Set([...first.items,...second.items].map(p=>p.id)).size===16,'Stable pagination covers all without duplicates');
