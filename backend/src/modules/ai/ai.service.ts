@@ -110,6 +110,14 @@ export class AiService {
     let referencedItems:Evidence[]=[];
     if(codeReference.ambiguous){
       referencedItems=await retrieveCodes(codeReference.codes);
+      // "tôi quan tâm căn … giá 26 triệu": a pasted line or price picks one of the listings just shown.
+      const said=new Set(moneyAmounts(source)),text=source.normalize('NFC').toLocaleLowerCase('vi');
+      const words=(value:string)=>value.normalize('NFC').toLocaleLowerCase('vi').split(/[^\p{L}\p{N}]+/u).filter(word=>word.length>2);
+      const score=(item:Evidence)=>(item.price!=null&&said.has(item.price)?3:0)+words(item.name||'').filter(word=>text.includes(word)).length/Math.max(1,words(item.name||'').length);
+      const ranked=referencedItems.map(item=>({item,score:score(item)})).sort((a,b)=>b.score-a.score);
+      if(ranked.length && ranked[0].score>=1 && (ranked.length===1 || ranked[0].score-ranked[1].score>=0.5)){codeReference.codes=[ranked[0].item.code];codeReference.ambiguous=false;}
+    }
+    if(codeReference.ambiguous){
       const clarify={needed:true,question:'Bạn đang hỏi căn nào?',options:referencedItems.slice(0,5).map(item=>`${item.code} - ${item.name}`)};
       const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:clarify.question,p_sources:[],p_actions:[],p_fields:{},p_score:null});
       if(committed.error)return catalogDatabaseError(committed.error);

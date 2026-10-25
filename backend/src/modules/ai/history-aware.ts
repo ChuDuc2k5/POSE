@@ -5,7 +5,9 @@ const listingCodePattern = /(?<![\p{L}\d])[A-Z][A-Z\d]{0,7}-[A-Z\d]{4,40}(?![\p{
 const searchIntent = /(?:căn|nhà|đất|phòng|mua|thuê|tìm|bất động sản|giá|chung cư|villa|shop|office)/iu;
 const locationPattern = /(?:quận|q\.?\s*\d{1,2}|huyện|thủ\s*đức|phường|xã|thành phố|tp\.?\s*hồ\s*chí\s*minh|hcm|sài\s*gòn)/iu;
 // "căn hộ này", "nhà đó", "dự án này"… point back at the listing discussed in the previous turn.
-const backReference = /(?<![\p{L}])(?:căn(?:\s+hộ)?|can(?:\s+ho)?|nhà|nha|đất|dat|lô\s+đất|dự\s+án|du\s+an)\s+(?:này|nay|đó|vừa\s+rồi|trên|kia)(?![\p{L}])/iu;
+// "quan tâm căn …", "chọn căn …" pick one of the listings just shown.
+const backReference = /(?<![\p{L}])(?:(?:căn(?:\s+hộ)?|can(?:\s+ho)?|nhà|nha|đất|dat|lô\s+đất|dự\s+án|du\s+an)\s+(?:này|nay|đó|vừa\s+rồi|trên|kia)|quan\s+tâm|quan\s+tam|(?:chọn|lấy|thích)\s+căn)(?![\p{L}])/iu;
+export function isFollowUp(message: string) { return backReference.test(message); }
 // A message that starts a new search is not a follow-up even without new location or price words.
 const newSearch = /(?<![\p{L}])(?:tìm|kiếm|có\s+căn\s+nào|còn\s+căn|gợi\s+ý|(?:muốn|cần)\s+(?:mua|thuê))(?![\p{L}])/iu;
 const district = (value: string) => {
@@ -37,7 +39,7 @@ export function referencedListingCodes(message: string, history: { role: string;
   return { codes: [] as string[], ambiguous: false };
 }
 export function clarificationFor(message: string, history: { role: string; content: string }[]): Clarification {
-  if (!searchIntent.test(message) || locationPattern.test(message)) return { needed: false, question: null, options: [] };
+  if (!searchIntent.test(message) || locationPattern.test(message) || isFollowUp(message)) return { needed: false, question: null, options: [] };
   const location = previousSearchLocation(history);
   if (!location) return { needed: false, question: null, options: [] };
   const action = /thuê/iu.test(message) ? 'thuê' : /mua/iu.test(message) ? 'mua' : 'tìm';

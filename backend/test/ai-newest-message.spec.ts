@@ -27,3 +27,15 @@ describe('cards without [n] citations', () => {
     expect(sourcesFromCitations('Hiện chưa có căn phù hợp.', sources)).toEqual([]);
   });
 });
+
+import { clarificationFor, referencedListingCodes } from '../src/modules/ai/history-aware.js';
+describe('picking a listing that was just shown', () => {
+  const history = [{ role: 'user', content: 'Cho thuê căn hộ 2 phòng ngủ Quận 7' }, { role: 'assistant', content: 'Có 5 căn ở Quận 7.\nMã: CFR-AAA11111, CFR-BBB22222' }];
+  const message = 'tôi quan tâm căn này\nCăn hộ 2 phòng ngủ tại CC Midtown Phú Mỹ Hưng, giá 26 triệu đồng/tháng.';
+  it('does not ask for the area again', () => {
+    expect(clarificationFor(message, history).needed).toBe(false);
+  });
+  it('treats "quan tâm" as a reference to the listings just shown', () => {
+    expect(referencedListingCodes(message, history)).toEqual({ codes: ['CFR-AAA11111', 'CFR-BBB22222'], ambiguous: true });
+  });
+});
