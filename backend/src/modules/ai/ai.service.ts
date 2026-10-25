@@ -221,6 +221,7 @@ export class AiService {
     const agentMessages=[{role:'system' as const,content:SYSTEM_PROMPT},{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({question:standalone,history:sanitizedHistory,properties:contextBlocks,customer_text:source,contact_redacted:guest && source!==input.message,injection_suspected:suspected,search_performed:searchPerformed})}\nEND_UNTRUSTED_DATA`}];
     const proposals:{tool:string;args_hash:string;decision:string;reason:string;rule_version:string}[]=[];
     const pendingActions:unknown[]=[];
+    let bookingAction:unknown;
     const execute=async(name:string,args:unknown)=>{
       if(name==='search_properties') { const a=args as Record<string,unknown>; const raw=object(a.filters) ? a.filters as Record<string,unknown> : {}; const f=Object.fromEntries(Object.entries(raw).filter(([,v])=>v!==null&&v!==undefined)); const found=await search(f,input.property_id as string|null || null); const labels:Record<string,string>={Available:'Đang mở bán',Sold:'Đã bán, không còn mở bán',Reserved:'Đã giữ chỗ, không còn mở bán',Unavailable:'Chưa khả dụng, không còn mở bán'}; return found.length ? found.map((p,i)=>`[${p.number || i+1}] ${p.code}: ${p.name}, giá ${priceLabel(p.price,p.price_period==='Month' || p.transaction_type==='Rent')}. ${labels[p.availability] || 'Chưa rõ khả dụng'}. Cập nhật ${p.updated_at}.`) : ['Chưa có kết quả phù hợp trong nguồn công bố. Bạn có thể nói ngân sách hoặc khu vực tìm kiếm không?']; }
       if(name==='get_property_detail') { const code=(args as {code:string}).code; const result=await authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type,transaction_type,price_period').eq('code',code).maybeSingle(); return result.error || !result.data ? {found:false} : {found:true,property:result.data}; }
@@ -229,6 +230,11 @@ export class AiService {
     };
     const createPending=async(name:string,args:unknown)=>{
       if(!explicitWriteIntent(source)) { log(name,args,guest?'SIGN_IN_REQUIRED':'WRITE_NOT_REQUESTED','flagged'); return null; }
+      if(name==='propose_appointment' && object(args) && !(args as Record<string,unknown>).preferred_start){
+        const code=String((args as Record<string,unknown>).code||'');const property=(await retrieveCodes([code]))[0];
+        if(property)bookingAction={type:'booking_form',property,requires_sign_in:guest};
+        log(name,args,guest?'SIGN_IN_REQUIRED':null);return null;
+      }
       if(guest) { log(name,args,'SIGN_IN_REQUIRED','flagged'); return null; }
       const summary=name==='request_handoff' ? String((args as {summary:string}).summary) : name==='propose_appointment' ? `Đề nghị lịch xem ${(args as {code?:string}).code || ''} lúc ${(args as {preferred_start:string}).preferred_start}` : `Lưu ${(args as {code:string}).code} vào yêu thích`;
       const pending=await who.client!.rpc('pose_ai_create_pending',{p_session:id,p_tool:name,p_args:args,p_summary:summary,p_key:`${id}:${hash(JSON.stringify({name,args}))}`});
@@ -253,8 +259,16 @@ export class AiService {
     if(explicitWriteIntent(source) && fallbackTool && !calledWriteTools.has(fallbackTool) && (guest || fallbackTool!=='propose_appointment')){
       const code=codeReference.codes[0] || null;
       const args=fallbackTool==='request_handoff' ? {summary:source} : fallbackTool==='propose_appointment' ? {code,preferred_start:null,preferred_end:null} : {code};
-      const action_id=await createPending(fallbackTool,args);
-      if(action_id) pendingActions.push({id:action_id,tool:fallbackTool,args});
+      if(fallbackTool==='propose_appointment' && !guest){
+        const property=items.find(item=>item.code?.toLowerCase()===String(code).toLowerCase()) || items[0];
+        if(property)bookingAction={type:'booking_form',property};
+      } else if(fallbackTool==='propose_appointment' && guest){
+        const property=items.find(item=>item.code?.toLowerCase()===String(code).toLowerCase()) || items[0];
+        if(property)bookingAction={type:'booking_form',property,requires_sign_in:true};
+      } else {
+        const action_id=await createPending(fallbackTool,args);
+        if(action_id) pendingActions.push({id:action_id,tool:fallbackTool,args});
+      }
       logAiRequest({kind:'chat',model:'deterministic',promptName:'assistant',toolsCalled:[fallbackTool],latencyMs:0,status:'ok'});
     }
     for(const blockedReason of agent.blocked) log('agent',blockedReason,blockedReason,'flagged');
@@ -319,7 +333,7 @@ export class AiService {
     if(guest)(await cookies()).set('pose-ai-session',who.token,{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',path:'/',maxAge:86400*7});
     const action=pendingActions[0];
     const scope: 'in_scope' | 'out_of_scope' = 'in_scope';
-    const payload={session:committed.data,reply,scope,sources:items,related,blocked,proposals,pending_actions:pendingActions,action,inquiry_url:'/customer/inquiries/new'};
+    const payload={session:committed.data,reply,scope,sources:items,related,blocked,proposals,pending_actions:pendingActions,action:bookingAction||action,inquiry_url:'/customer/inquiries/new'};
     if(request.headers.get('accept')?.includes('text/event-stream')){
       const encoder=new TextEncoder();
       const stream=new ReadableStream<Uint8Array>({start(controller){
@@ -330,6 +344,7 @@ export class AiService {
         const deltas=Array.from({length:Math.ceil(reply.length/48)},(_,i)=>reply.slice(i*48,i*48+48));
         for(const text of deltas)send('delta',{text});
         for(const pending of pendingActions)send('action',{action:pending});
+        if(bookingAction)send('action',{action:bookingAction});
         send('done',{message:reply,scope,blocked,guard:violation}); controller.close();
       }});
       return new Response(stream,{headers:{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','Connection':'keep-alive','X-Accel-Buffering':'no'}});
@@ -347,6 +362,46 @@ async getSessions(request:NextRequest) {
   if(!Number.isInteger(pageValue)||pageValue<1||pageValue>100)return catalogError('INVALID_INPUT','Trang không hợp lệ.',400);
   const result=await authClient(session.access).rpc('pose_ai_list_sessions',{p_page:pageValue});
   return result.error ? catalogDatabaseError(result.error):catalogJson({items:result.data||[]});
+}
+async appointmentOptions(request:NextRequest) {
+  try {
+    const session=await authenticatedSession();
+    if(!session || session.role!=='User')return catalogError('UNAUTHORIZED','Vui lòng đăng nhập.',401);
+    const url=new URL(request.url), propertyId=url.searchParams.get('property_id'), start=url.searchParams.get('start');
+    if(!propertyId || !uuidPattern.test(propertyId) || start && !Number.isFinite(Date.parse(start)))return catalogError('INVALID_INPUT','Bất động sản hoặc thời gian không hợp lệ.',400);
+    const result=await authClient(session.access).rpc('pose_ai_appointment_options',{p_property:propertyId,p_start:start||null});
+    if(result.error?.code==='P0002')return catalogError('NOT_FOUND','Không tìm thấy bất động sản.',404);
+    return result.error ? catalogDatabaseError(result.error):catalogJson(result.data||{property:null,sales:[]});
+  }catch{return unavailable();}
+}
+async createAppointment(request:NextRequest) {
+  try {
+    if(!validOrigin(request))return catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403);
+    const session=await authenticatedSession();
+    if(!session || session.role!=='User')return catalogError('UNAUTHORIZED','Vui lòng đăng nhập.',401);
+    const parsed=await catalogInput(request);if(parsed.error)return parsed.error;
+    const i=parsed.input as Record<string,unknown>;
+    if(Object.keys(i).some(k=>!['property_id','start','end','sales_id','note','session_id','request_key'].includes(k)) || typeof i.property_id!=='string' || !uuidPattern.test(i.property_id) || typeof i.start!=='string' || !Number.isFinite(Date.parse(i.start)) || i.end!=null && (typeof i.end!=='string'||!Number.isFinite(Date.parse(i.end))) || i.sales_id!=null && (typeof i.sales_id!=='string'||!uuidPattern.test(i.sales_id)) || i.note!=null && (typeof i.note!=='string'||i.note.length>500) || i.session_id!=null && (typeof i.session_id!=='string'||!uuidPattern.test(i.session_id)) || typeof i.request_key!=='string' || !uuidPattern.test(i.request_key))return catalogError('INVALID_INPUT','Kiểm tra thông tin đặt lịch.',400);
+    const result=await authClient(session.access).rpc('pose_ai_create_appointment',{p_property:i.property_id,p_start:i.start,p_end:i.end||null,p_sales:i.sales_id||null,p_note:i.note||null,p_session:i.session_id||null,p_request_key:i.request_key});
+    const message=result.error?.message||'';
+    if(message.includes('APPOINTMENT_OVERLAP'))return catalogError('APPOINTMENT_OVERLAP','Khung giờ đã có lịch. Vui lòng chọn giờ khác.',409);
+    if(message.includes('TIME_WINDOW_INVALID'))return catalogError('TIME_WINDOW_INVALID','Vui lòng chọn thời gian từ 1 giờ tới 60 ngày tới, trong khung 08:00–20:00.',400);
+    if(message.includes('SALES_NOT_AVAILABLE'))return catalogError('SALES_NOT_AVAILABLE','Chuyên viên này không còn khả dụng.',409);
+    if(message.includes('PHONE_VERIFICATION_REQUIRED'))return catalogError('PHONE_VERIFICATION_REQUIRED','Vui lòng xác minh số điện thoại trong hồ sơ để chuyên viên có thể liên hệ xác nhận lịch hẹn.',409);
+    if(message.includes('IDENTITY_REVIEW_REQUIRED'))return catalogError('IDENTITY_REVIEW_REQUIRED','Số điện thoại này đã gắn với một khách hàng khác. Vui lòng liên hệ TERAVA để được hỗ trợ.',409);
+    if(message.includes('PROPERTY_NOT_FOUND'))return catalogError('PROPERTY_NOT_FOUND','Căn này hiện không còn nhận lịch xem.',404);
+    return result.error ? catalogDatabaseError(result.error):catalogJson(result.data);
+  }catch{return unavailable();}
+}
+async deleteSession(request:NextRequest,id:string) {
+  try {
+    if(!validOrigin(request))return catalogError('INVALID_ORIGIN','Yêu cầu không hợp lệ.',403);
+    if(!uuidPattern.test(id))return catalogError('NOT_FOUND','Không tìm thấy hội thoại.',404);
+    const session=await authenticatedSession();if(!session||session.role!=='User')return catalogError('UNAUTHORIZED','Vui lòng đăng nhập.',401);
+    const result=await authClient(session.access).rpc('pose_ai_delete_session',{p_session:id});
+    if(result.error?.code==='P0002')return catalogError('NOT_FOUND','Không tìm thấy hội thoại.',404);
+    return result.error ? catalogDatabaseError(result.error):catalogJson({deleted:true});
+  }catch{return unavailable();}
 }
 async getUsage(request:NextRequest) {
   // Read-only GET: browsers send no Origin on same-origin GETs; CSRF checks guard state changes only.
