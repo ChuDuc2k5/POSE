@@ -3,8 +3,8 @@ import { moneyAmounts } from './money.ts';
 export function sanitizeReply(reply:string) { return reply.replace(/\[n\]/gi,'').replace(/\bDATA\b/g,'dữ liệu').replace(/[ \t]{2,}/g,' ').trim(); }
 const word = (source:string) => new RegExp(`(?<![\\p{L}])(?:${source})(?![\\p{L}])`,'iu');
 export function explicitWriteIntent(text:string) {
-  const normalized=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-  return word('luu(?: can| lai)|yeu thich|dat lich|hen xem|goi lai|lien he(?: voi| lai)?(?: toi|minh|em|anh|chi)|gap chuyen vien|nhan vien tu van|chuyen vien tu van').test(normalized);
+  const normalized=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\u0111/g,'d').toLowerCase();
+  return word('luu(?: can| lai)|yeu thich|dat lich|hen xem|xem (?:nha|can)|goi lai|lien he(?: voi| lai)?(?: toi|minh|em|anh|chi)|gap chuyen vien|nhan vien tu van|chuyen vien tu van').test(normalized);
 }
 export function sourcesFromCitations<T extends { number?: number }>(reply:string, sources:T[], referencedListing=false) {
   if (referencedListing) return sources;
@@ -50,7 +50,7 @@ export function groundedSummary(evidence:Evidence[]) {
   const lines=properties.map((e,index)=>`[${e.number ?? index+1}] ${e.name} – ${withFormerDistrict(e.location)} – ${price(e)} – ${status[e.availability] || e.availability}`);
   return `Mình tìm thấy ${properties.length} bất động sản phù hợp trong dữ liệu đã công bố (giá và tình trạng lấy trực tiếp từ hệ thống):\n${lines.join('\n')}\nBạn muốn xem chi tiết, lưu hoặc đề nghị lịch xem căn nào?`;
 }
-export type Evidence={id:string;code:string;name:string;price:number|null;availability:string;updated_at:string;location:string;property_type:string;transaction_type?:'Sale'|'Rent';price_period?:'Total'|'Month';number?:number;source_type?:'Property'|'Faq';reason?:string};
+export type Evidence={id:string;code:string;name:string;price:number|null;availability:string;updated_at:string;location:string;property_type:string;bedrooms?:number|null;transaction_type?:'Sale'|'Rent';price_period?:'Total'|'Month';number?:number;source_type?:'Property'|'Faq';reason?:string};
 const clauses=(text:string)=>text.split(/\n|[;!?]|(?<!\d)[.,](?!\d)/).filter(Boolean);
 function negated(text:string,index:number){
   const prefix=text.slice(Math.max(0,index-90),index).split(/nhưng|tuy nhiên|\bbut\b|\bhowever\b/i).at(-1) || '';
@@ -103,7 +103,11 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
   if(codes.some(m=>{const code=(m[1] || m[0]).toLowerCase();return !evidence.some(e=>e.code.toLowerCase()===code) && !evidenceText.includes(code);}))return 'UNSUPPORTED_PROPERTY';
   const customerAmounts=moneyAmounts(customerText),allowed=[...customerAmounts,...evidence.flatMap(e=>e.price===null ? []:[e.price])];
   if(moneyAmounts(moneyText(reply,evidence)).some(amount=>!allowed.includes(amount)))return 'UNSUPPORTED_PRICE';
-  for(const clause of clauses(reply)){
+  for(let clause of clauses(reply)){
+    for(const room of clause.matchAll(/(\d+)\s*(?:PN|ph\u00f2ng ng\u1ee7)/giu)){
+      const count=Number(room[1]);
+      if(evidence.some(p=>p.bedrooms===count || new RegExp('(?:^|[^\\d])'+count+'\\s*(?:PN|ph\u00f2ng ng\u1ee7)', 'iu').test(p.name))) clause=clause.replace(room[0],'');
+    }
     const mentioned=references(clause,evidence);
     const prefix=reply.slice(0,reply.indexOf(clause)).toLowerCase();
     const last=(e:Evidence)=>Math.max(...[e.code,e.id,e.name].map(v=>prefix.lastIndexOf(v.toLowerCase())));
