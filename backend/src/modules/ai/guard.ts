@@ -6,10 +6,14 @@ export function explicitWriteIntent(text:string) {
   const normalized=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\u0111/g,'d').toLowerCase();
   return word('luu(?: can| lai)|yeu thich|dat lich|hen xem|xem (?:nha|can)|goi lai|lien he(?: voi| lai)?(?: toi|minh|em|anh|chi)|gap chuyen vien|nhan vien tu van|chuyen vien tu van').test(normalized);
 }
-export function sourcesFromCitations<T extends { number?: number }>(reply:string, sources:T[], referencedListing=false) {
+export function sourcesFromCitations<T extends { number?: number; code?: string; price?: number|null }>(reply:string, sources:T[], referencedListing=false) {
   if (referencedListing) return sources;
   const cited=[...new Set([...reply.matchAll(/\[(\d{1,3})\]/g)].map(match=>Number(match[1])))];
-  return cited.map(number=>sources.find(source=>source.number===number)).filter((source):source is T=>Boolean(source));
+  if (cited.length) return cited.map(number=>sources.find(source=>source.number===number)).filter((source):source is T=>Boolean(source));
+  // Some models list listings without [n]; keep the ones the reply names by code or by their exact catalogue
+  // price (outputReason has already checked every price in the reply against the catalogue).
+  const amounts=new Set(moneyAmounts(reply));
+  return sources.filter(source=>(source.code && reply.toLowerCase().includes(source.code.toLowerCase())) || (source.price!=null && amounts.has(source.price)));
 }
 export { stripPhones } from './privacy.ts';
 import { withFormerDistrict } from './ward-label.js';
