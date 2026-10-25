@@ -9,12 +9,13 @@ import type { Role } from '@/lib/roles';
 import { CustomerNav } from './customer-nav';
 import { FavoriteButton, useFavoriteStatus } from './property-card';
 import { InquiryForm } from './inquiry-form';
-import { availabilityLabels, priceLabel, propertyTypeLabels } from '@/lib/catalog';
+import { availabilityLabel, availabilityLabels as catalogAvailabilityLabels, priceLabel, propertyTypeLabels } from '@/lib/catalog';
 import type { PublicProperty } from '@/lib/discovery';
 import { propertyReturn } from '@/lib/property-return';
 
 export type PublicMedia={id:string;name:string;media_type:'Image'|'Document';sort_order:number};
 export function PropertyDetail({item,media,role,returnTo='/properties'}:{item:PublicProperty;media:PublicMedia[];role:Role|null;returnTo?:string}){
+  const availabilityLabels = { ...catalogAvailabilityLabels, [item.availability || 'Unavailable']: availabilityLabel(item) };
   useEffect(()=>{if(role!=='User')return;void fetch(`/api/catalog/properties/${item.id}/view`,{method:'POST',headers:{Origin:window.location.origin}}).catch(()=>{});},[item.id,role]);
   const favorites=useFavoriteStatus([item.id],role!==null);
   const images=media.filter(file=>file.media_type==='Image'),documents=media.filter(file=>file.media_type==='Document');

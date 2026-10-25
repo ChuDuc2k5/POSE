@@ -2,6 +2,15 @@ export const catalogKinds = ['projects', 'subdivisions', 'properties', 'media'] 
 export type CatalogKind = typeof catalogKinds[number];
 export const publicationLabels = { Draft: 'Bản nháp', Published: 'Đã công bố', Hidden: 'Đang ẩn', Archived: 'Lưu trữ' };
 export const availabilityLabels = { Available: 'Đang mở bán', Reserved: 'Đã giữ chỗ', Sold: 'Đã bán', Unavailable: 'Chưa mở bán' };
+export function availabilityLabel(item: { availability?: keyof typeof availabilityLabels; transaction_type?: 'Sale' | 'Rent' }) {
+  const availability = item.availability || 'Unavailable';
+  if (item.transaction_type === 'Rent') {
+    if (availability === 'Available') return 'Đang cho thuê';
+    if (availability === 'Reserved') return 'Đã giữ chỗ';
+    return 'Đã cho thuê';
+  }
+  return availabilityLabels[availability];
+}
 export const propertyTypeLabels = { Apartment: 'Căn hộ', House: 'Nhà phố', Land: 'Đất nền', Villa: 'Biệt thự', Office: 'Văn phòng', Shop: 'Shophouse' };
 export type CatalogItem = {
   id: string; code: string; name: string; location: string; description: string;

@@ -29,6 +29,7 @@ export async function runSearchFiltersUI(origin){
     for(const width of [1280,380]){
       await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===380});
       await send('Page.navigate',{url:`${origin}/properties`});await wait(`document.querySelector('.property-results')?.getAttribute('aria-busy')==='false' && !!document.querySelector('#filter-price')`);
+      check(await evaluate(`(()=>{const active=[...document.querySelectorAll('.site-header nav [aria-current="page"]')];return active.length===1&&active[0].textContent.includes('Bất động sản');})()`),'Properties has only the real-estate nav item active');
       check(await evaluate(`document.documentElement.scrollWidth<=${width}`),`${width} no page overflow`);
       check(await evaluate(`!document.body.textContent.includes('Lưu tìm kiếm')`),'No saved-search control');
       for(const name of ['transaction','price','bedrooms','type','more']){

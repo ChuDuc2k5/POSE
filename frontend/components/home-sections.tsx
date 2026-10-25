@@ -2,10 +2,10 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Building2, ChevronDown, Headphones, MapPin, Menu, Search, Wallet, X } from 'lucide-react';
-import { priceLabel, propertyTypeLabels } from '@/lib/catalog';
+import { availabilityLabel, priceLabel, propertyTypeLabels } from '@/lib/catalog';
 import type { SearchResult } from '@/lib/discovery';
 import { saveInquiryDraft } from '@/lib/inquiry-draft';
 import { Brand } from './brand';
@@ -17,12 +17,13 @@ import styles from './system-home.module.css';
 
 function LegacyHomeNavigation() {
   const [open, setOpen] = useState(false);
+  const pathname = usePathname();
   return <header className={styles.navigation}>
     <div className={styles.navigationInner}>
       <Brand light={false} compactOnMobile/>
       <button type="button" className={styles.menuToggle} onClick={() => setOpen(!open)} aria-expanded={open} aria-controls="home-navigation" aria-label={open ? 'Đóng menu' : 'Mở menu'}>{open ? <X size={23}/> : <Menu size={23}/>}</button>
       <nav id="home-navigation" aria-label="Điều hướng chính" className={`${styles.navLinks} ${open ? styles.navOpen : ''}`} onClick={() => setOpen(false)}>
-        <a href="#trang-chu" aria-current="page">Trang chủ</a><a href="#du-an">Dự án</a><a href="#ve-nexcall">Về TERAVA</a><a href="#tu-van">Liên hệ</a>
+        <a href="#trang-chu" aria-current={pathname === '/' ? 'page' : undefined}>Trang chủ</a><a href="#du-an">Dự án</a><a href="#ve-nexcall">Về TERAVA</a><a href="#tu-van">Liên hệ</a>
         <a href="#tu-van" className={styles.supportLink}><Headphones size={16}/> Tư vấn cùng TERAVA</a>
         <PropertyNavigation/><div className={styles.drawerAccount}><Link href="/sign-in">Đăng nhập</Link><Link href="/sign-up" className={styles.primaryButton}>Đăng ký</Link></div>
       </nav>
@@ -34,9 +35,10 @@ function LegacyHomeNavigation() {
 const typeChips = [['Apartment', 'Căn hộ'], ['Villa', 'Biệt thự'], ['Land', 'Đất nền'], ['Office', 'Văn phòng']];
 export function HomeNavigation({ role, name }: { role: Role | null; name?: string }) {
   const [open, setOpen] = useState(false);
+  const pathname = usePathname();
   const close = () => setOpen(false);
   return <header className={styles.navigation}><div className={styles.navigationInner}><Brand light={false} compactOnMobile/><button type="button" className={styles.menuToggle} onClick={() => setOpen(value => !value)} aria-expanded={open} aria-controls="home-navigation" aria-label={open ? 'Đóng menu' : 'Mở menu'}>{open ? <X size={23}/> : <Menu size={23}/>}</button><nav id="home-navigation" aria-label="Điều hướng chính" className={`${styles.navLinks} ${open ? styles.navOpen : ''}`}>
-    <a href="/" aria-current="page" onClick={close}>Trang chủ</a><PropertyNavigation/><SupportNavigation onNavigate={close}/><a href="/#ve-nexcall" onClick={close}>Về TERAVA</a>
+    <a href="/" aria-current={pathname === '/' ? 'page' : undefined} onClick={close}>Trang chủ</a><PropertyNavigation/><SupportNavigation onNavigate={close}/><a href="/#ve-nexcall" onClick={close}>Về TERAVA</a>
     <div className={styles.drawerAccount}>{role ? <AccountDropdown role={role} name={name}/> : <><Link href="/sign-in" onClick={close}>Đăng nhập</Link><Link href="/sign-up" className={styles.primaryButton} onClick={close}>Đăng ký</Link></>}</div>
   </nav><div className={styles.navAccount}>{role ? <AccountDropdown role={role} name={name}/> : <><Link href="/sign-in" className={styles.smallButton}>Đăng nhập</Link><Link href="/sign-up" className={styles.primaryButton}>Đăng ký</Link></>}</div></div></header>;
 }
@@ -84,7 +86,7 @@ const examples = [
   { name: 'TERAVA Central Plaza', image: 'office', type: 'Office', description: 'Văn phòng hiện đại với mặt bằng thông thoáng, kết nối thuận tiện cho doanh nghiệp.', location: 'Kết nối trung tâm, đón đầu cơ hội', price: 'Văn phòng hiện đại' },
 ];
 
-type HomeProperty = { id: string; name: string; type: string; image: string; cover_id?: string | null; description: string; location: string; price: string; href: string };
+type HomeProperty = { id: string; name: string; type: string; image: string; cover_id?: string | null; description: string; location: string; price: string; href: string; availability?: 'Available' | 'Reserved' | 'Sold' | 'Unavailable'; transaction_type?: 'Sale' | 'Rent' };
 
 function PropertyPhoto({ item }: { item: HomeProperty }) {
   const [failed, setFailed] = useState(false);
@@ -101,7 +103,7 @@ export function FeaturedProperties() {
       .then(async response => {
         if (!response.ok) throw new Error('CATALOG_UNAVAILABLE');
         const result: SearchResult = await response.json();
-        setItems(result.items.map(item => ({ id: item.id, name: item.name, type: item.property_type || 'Apartment', cover_id: item.cover_id, image: item.cover_id ? `/api/catalog/media/${item.cover_id}?public=true` : '', description: item.description, location: item.location, price: priceLabel(item.price) + (item.price != null && item.price_period === 'Month' ? '/tháng' : ''), href: `/properties/${item.id}` })));
+        setItems(result.items.map(item => ({ id: item.id, name: item.name, type: item.property_type || 'Apartment', cover_id: item.cover_id, image: item.cover_id ? `/api/catalog/media/${item.cover_id}?public=true` : '', description: item.description, location: item.location, price: priceLabel(item.price) + (item.price != null && item.price_period === 'Month' ? '/tháng' : ''), href: `/properties/${item.id}`, availability: item.availability, transaction_type: item.transaction_type })));
       })
       .catch(() => { /* Keep the explicitly labelled inspiration cards available offline. */ });
     return () => controller.abort();
@@ -112,7 +114,7 @@ export function FeaturedProperties() {
     <div className={styles.propertyGrid}>{cards.map(item => <article key={item.id} className={styles.propertyCard}>
       {item.image ? <PropertyPhoto key={item.image} item={item}/> : <Link href={item.href} className={styles.propertyPhoto}><div className={styles.photoPlaceholder}><Building2 size={38}/><span>{item.name}</span></div></Link>}
       <div className={styles.propertyBody}>
-        <div className={styles.propertyMeta}><span className={`${styles.typeBadge} ${item.type === 'Villa' ? styles.villaBadge : item.type === 'Office' ? styles.officeBadge : ''}`}>{propertyTypeLabels[item.type as keyof typeof propertyTypeLabels] || 'Bất động sản'}</span><span>{item.price}</span></div>
+        <div className={styles.propertyMeta}><span className={`${styles.typeBadge} ${item.type === 'Villa' ? styles.villaBadge : item.type === 'Office' ? styles.officeBadge : ''}`}>{propertyTypeLabels[item.type as keyof typeof propertyTypeLabels] || 'Bất động sản'}</span>{item.availability && <span>{availabilityLabel(item)}</span>}<span>{item.price}</span></div>
         <h3><Link href={item.href}>{item.name}</Link></h3><p>{item.description}</p>
         <div className={styles.propertyBottom}><span><MapPin size={15}/>{item.location}</span><Link href={item.href} className={styles.smallButton}>{inspiration ? 'Khám phá' : 'Xem chi tiết'}</Link></div>
       </div>
