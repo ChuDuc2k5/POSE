@@ -8,6 +8,7 @@ export type CatalogItem = {
   amenities?: string; archived?: boolean; project_id?: string; subdivision_id?: string | null;
   property_type?: keyof typeof propertyTypeLabels; area?: number; bedrooms?: number | null; price?: number | null;
   currency?: string; publication?: keyof typeof publicationLabels; availability?: keyof typeof availabilityLabels;
+  created_by?: string | null; deleted_at?: string | null; deleted_by?: string | null;
   version: number; updated_at: string;
 };
 export type PropertyMedia = {
@@ -19,6 +20,14 @@ export const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
 export function isCatalogKind(value: string): value is CatalogKind { return (catalogKinds as readonly string[]).includes(value); }
 export function priceLabel(price: number | null | undefined) {
   return price == null ? 'Liên hệ' : `${new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 }).format(price)} ₫`;
+}
+
+export function validateCatalogLifecycle(input: Record<string, unknown>): Record<string, string> {
+  const errors: Record<string, string> = {};
+  if (Object.keys(input).some(key => !['version', 'reason'].includes(key))) errors.form = 'Dữ liệu chứa trường không được phép.';
+  if (!Number.isSafeInteger(input.version) || (input.version as number) < 0) errors.version = 'Phiên bản không hợp lệ. Vui lòng tải lại dữ liệu.';
+  if (typeof input.reason !== 'string' || input.reason.trim().length < 3 || input.reason.length > 1000) errors.reason = 'Nhập lý do từ 3 đến 1.000 ký tự.';
+  return errors;
 }
 
 export function validateCatalog(kind: CatalogKind, input: Record<string, unknown>): Record<string, string> {

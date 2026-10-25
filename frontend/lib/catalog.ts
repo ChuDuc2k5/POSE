@@ -8,6 +8,7 @@ export type CatalogItem = {
   amenities?: string; archived?: boolean; project_id?: string; subdivision_id?: string | null;
   property_type?: keyof typeof propertyTypeLabels; area?: number; bedrooms?: number | null; price?: number | null;
   currency?: string; publication?: keyof typeof publicationLabels; availability?: keyof typeof availabilityLabels;
+  created_by?: string | null; deleted_at?: string | null; deleted_by?: string | null;
   version: number; updated_at: string;
 };
 export type PropertyMedia = {

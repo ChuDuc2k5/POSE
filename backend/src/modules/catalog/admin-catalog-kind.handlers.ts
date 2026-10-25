@@ -13,6 +13,12 @@ export async function GET(request: WebRequest, context: { params: Promise<{ kind
     const search = (params.get('search') || '').trim();
     if (search.length > 160) return catalogError('INVALID_SEARCH','Từ khóa tối đa 160 ký tự.',400);
     let query = access.client.from(catalogTables[kind]).select('*', { count: 'exact' });
+    const scope = params.get('scope') || 'all', trash = params.get('trash') || 'false';
+    if (!['all','mine'].includes(scope) || !['true','false'].includes(trash) || (kind !== 'properties' && (scope !== 'all' || trash !== 'false'))) return catalogError('INVALID_FILTER','Bộ lọc người tạo hoặc thùng rác không hợp lệ.',400);
+    if (kind === 'properties') {
+      query = trash === 'true' ? query.not('deleted_at','is',null) : query.is('deleted_at',null);
+      if (scope === 'mine') query = query.eq('created_by',access.session.user.id);
+    }
     // Escape PostgREST filter punctuation and LIKE wildcards before interpolation.
     const term = search.replace(/[(),.\\"']/g,' ').trim().replace(/[%_]/g,'\\$&');
     if (term) query = query.or(`code.ilike.%${term}%,name.ilike.%${term}%`);

@@ -37,9 +37,10 @@ export async function POST(request: WebRequest, context: { params: Promise<{ id:
         if (content.length > 10*1024*1024) throw new Error();
       } catch { return catalogError('INVALID_FILE','Tệp không phải ảnh hợp lệ hoặc kích thước ảnh quá lớn.',400); }
     }
-    const property = await access.client.from('property_products').select('id,version').eq('id',id).maybeSingle();
+    const property = await access.client.from('property_products').select('id,version,deleted_at').eq('id',id).maybeSingle();
     if (property.error) return catalogDatabaseError(property.error);
     if (!property.data) return catalogError('NOT_FOUND','Không tìm thấy sản phẩm.',404);
+    if (property.data.deleted_at) return catalogError('PRODUCT_TRASHED','Sản phẩm đang ở thùng rác. Khôi phục trước khi tải tệp.',409);
     if (property.data.version !== version) return catalogError('VERSION_CONFLICT','Sản phẩm đã thay đổi. Tải lại trước khi tải tệp.',409);
     const path = `${id}/${randomUUID()}.${pdf ? 'pdf' : 'webp'}`, mime = pdf ? 'application/pdf' : 'image/webp';
     const storage = access.client.storage.from('property-files');

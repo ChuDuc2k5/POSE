@@ -17,6 +17,8 @@ export async function catalogAdmin(request?: WebRequest) {
   return { session, client: authClient(session.access) } as const;
 }
 export function catalogDatabaseError(error: { code?: string; message?: string }) {
+  if (error.message?.includes('PRODUCT_TRASHED')) return catalogError('PRODUCT_TRASHED','Sản phẩm đang ở thùng rác. Khôi phục trước khi chỉnh sửa hoặc tải tệp.',409);
+  if (error.message?.includes('INVALID_LIFECYCLE')) return catalogError('INVALID_LIFECYCLE','Trạng thái sản phẩm đã thay đổi. Tải lại danh sách trước khi thực hiện.',409);
   if (error.code === '40001') return catalogError('VERSION_CONFLICT','Dữ liệu đã được cập nhật ở nơi khác. Tải lại trước khi lưu.',409);
   if (error.code === '23505') return catalogError('DUPLICATE_CODE','Mã đã tồn tại. Vui lòng dùng mã khác.',409,{code:'Mã đã tồn tại.'});
   if (error.code === 'P0002') return catalogError('NOT_FOUND','Không tìm thấy dữ liệu.',404);
