@@ -2,7 +2,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowUp, AudioLines, ChevronLeft, ChevronRight, Maximize2, Menu, Mic, MicOff, Minimize2, Plus, Search, UserRound, X } from 'lucide-react';
+import { ArrowUp, AudioLines, ChevronLeft, ChevronRight, Maximize2, Menu, Mic, MicOff, Minimize2, MoreHorizontal, Pin, Plus, Search, UserRound, X } from 'lucide-react';
 import { TeravaMark } from './brand';
 import { availabilityLabels } from '@/lib/catalog';
 import { chatStorageKey } from '@/lib/chat-storage';
@@ -16,6 +16,7 @@ type BookingAction={type:'booking_form';property:BookingProperty;requires_sign_i
 type Message={role:'user'|'assistant';content:string;sources?:Source[];related?:Source[];action?:PendingAction;booking?:BookingAction;options?:string[]};
 type HistoryItem={id:string;title:string;time:string;updated_at?:string;message_count?:number;messages?:Message[]};
 type ConversationState={messages:Message[];sessionId?:string;pending:boolean;controller?:AbortController;error:string;store:boolean;unread:boolean;};
+type HistoryMenu={id:string;x:number;y:number};
 const historyCollapsedKey='terava-chat-history-collapsed-v1';
 function validMessage(message:Message){
   return message && (message.role==='user'||message.role==='assistant') && typeof message.content==='string' && (!message.options || Array.isArray(message.options) && message.options.length<=3 && message.options.every(option=>typeof option==='string')) &&
@@ -29,6 +30,7 @@ type RecognitionCtor=new()=>Recognition;
 const suggestions=['Căn hộ dưới 3,5 tỷ ở Thủ Đức','Cho thuê căn hộ 2 phòng ngủ Quận 7','Tư vấn đất nền TP.HCM'];
 const returnPathStorageKey='terava-chat-return-path-v1';
 const localHistoryKey='terava-chat-history-v1';
+const pinsKey=(ownerKey:string)=>`terava-chat-history-pins-v1:${ownerKey}`;
 const voiceLabels:Record<VoiceState,string>={idle:'Chạm để nói',listening:'Đang nghe…',thinking:'Đang suy nghĩ…',speaking:'Đang trả lời…'};
 const normalize=(value:string)=>value.toLocaleLowerCase('vi').replace(/[^\p{L}\p{N} ]/gu,'').replace(/\s+/g,' ').trim();
 const historyTimestamp=(item:HistoryItem)=>new Date(item.updated_at||item.time||0).getTime();
@@ -40,6 +42,9 @@ function mergeHistory(...lists:HistoryItem[][]){
     merged.set(item.id,previous ? {...previous,...item,messages:item.messages?.length?item.messages:previous.messages} : item);
   }
   return [...merged.values()].sort((a,b)=>historyTimestamp(b)-historyTimestamp(a)||b.id.localeCompare(a.id));
+}
+function retainHistory(items:HistoryItem[],pinned:Set<string>){
+  const merged=mergeHistory(items);return [...merged.filter(item=>pinned.has(item.id)),...merged.filter(item=>!pinned.has(item.id)).slice(0,20)];
 }
 function historyBucket(item:HistoryItem){
   const age=Date.now()-historyTimestamp(item),day=86400000;
@@ -63,7 +68,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   const fullPage=visible && navigationKey.split('?')[0]==='/tro-ly-ai';
   const [open,setOpen]=useState(false),[store,setStore]=useState(false),[session,setSession]=useState<string>();
   const [messages,setMessages]=useState<Message[]>([]),[text,setText]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
-  const [historyItems,setHistoryItems]=useState<HistoryItem[]>([]),[historyOpen,setHistoryOpen]=useState(false),[historyCollapsed,setHistoryCollapsed]=useState(false),[historySearch,setHistorySearch]=useState(''),[citation,setCitation]=useState<number>(),[conversationVersion,setConversationVersion]=useState(0),[confirmDelete,setConfirmDelete]=useState<string>();
+  const [historyItems,setHistoryItems]=useState<HistoryItem[]>([]),[historyOpen,setHistoryOpen]=useState(false),[historyCollapsed,setHistoryCollapsed]=useState(false),[historySearch,setHistorySearch]=useState(''),[citation,setCitation]=useState<number>(),[conversationVersion,setConversationVersion]=useState(0),[confirmDelete,setConfirmDelete]=useState<string>(),[pinnedIds,setPinnedIds]=useState<Set<string>>(()=>new Set()),[historyMenu,setHistoryMenu]=useState<HistoryMenu>();
   const [dictating,setDictating]=useState(false),[voice,setVoice]=useState<VoiceState|null>(null),[heard,setHeard]=useState(''),[showLatest,setShowLatest]=useState(false);
   const [handoffOpen,setHandoffOpen]=useState(false),[preferred,setPreferred]=useState(''),[handoffKey,setHandoffKey]=useState<string>(),[notice,setNotice]=useState(''),[bookingProperty,setBookingProperty]=useState<BookingProperty>(),[bookingAnchor,setBookingAnchor]=useState<string>(),[bookingConfirmation,setBookingConfirmation]=useState<{propertyId:string;message:string}>();
   const [consents,setConsents]=useState<Record<string,{Call:boolean;AIVoice:boolean}>>({}),[deciding,setDeciding]=useState<string>();
@@ -72,7 +77,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   const speechSupported=useSyncExternalStore(subscribeNever,()=>!!recognitionCtor(),()=>false);
   const pending=useRef(false),recognition=useRef<Recognition|null>(null),voiceOn=useRef(false),log=useRef<HTMLDivElement>(null),input=useRef<HTMLTextAreaElement>(null),atBottom=useRef(true);
   const history=useRef<Message[]>([]),sessionRef=useRef<string|undefined>(undefined);
-  const panel=useRef<HTMLElement>(null),launcher=useRef<HTMLButtonElement>(null),finishSpeech=useRef<(()=>void)|null>(null),voiceEpoch=useRef(0),historySessionRef=useRef<string|undefined>(undefined);
+  const panel=useRef<HTMLElement>(null),launcher=useRef<HTMLButtonElement>(null),finishSpeech=useRef<(()=>void)|null>(null),voiceEpoch=useRef(0),historySessionRef=useRef<string|undefined>(undefined),historyItemRefs=useRef(new Map<string,HTMLDivElement>()),longPressTimer=useRef<number|undefined>(undefined);
   const conversations=useRef(new Map<string,ConversationState>()),activeConversation=useRef<string|undefined>(undefined);
   const requestController=useRef<AbortController|null>(null),conversationEpoch=useRef(0);
   const voiceActive=voice!==null;
@@ -98,6 +103,13 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(()=>{try{setHistoryCollapsed(window.localStorage.getItem(historyCollapsedKey)==='1');}catch{}},[]);
   useEffect(()=>{try{window.localStorage.setItem(historyCollapsedKey,historyCollapsed?'1':'0');}catch{}},[historyCollapsed]);
+  useEffect(()=>{try{const saved=JSON.parse(window.localStorage.getItem(pinsKey(ownerKey))||'[]');setPinnedIds(new Set(Array.isArray(saved)?saved.filter((id):id is string=>typeof id==='string'):[]));}catch{setPinnedIds(new Set());}},[ownerKey]);
+  useEffect(()=>{
+    if(!historyMenu)return;
+    const close=(event:MouseEvent)=>{if(!(event.target as HTMLElement)?.closest('[data-history-menu]'))setHistoryMenu(undefined);};
+    const key=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();setHistoryMenu(undefined);historyItemRefs.current.get(historyMenu.id)?.focus();}};
+    document.addEventListener('mousedown',close);document.addEventListener('keydown',key);return()=>{document.removeEventListener('mousedown',close);document.removeEventListener('keydown',key);};
+  },[historyMenu]);
   useEffect(()=>{
     if(!fullPage)return;
     let cancelled=false;
@@ -106,17 +118,17 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
       if(signedIn){
         try{const response=await fetch('/api/ai/sessions?page=1');if(response.ok){const result=await response.json();serverItems=(result.items||[]).map((item:HistoryItem)=>({...item,time:item.updated_at||item.time}));}}catch{}
       }
-      try{const saved=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');if(Array.isArray(saved)){const localItems=saved.slice(0,20).map((item:HistoryItem)=>({...item,title:maskTitle(item.title)}));serverItems=mergeHistory(serverItems,localItems);}}catch{}
-      if(!cancelled)setHistoryItems(mergeHistory(serverItems));
+      try{const saved=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');if(Array.isArray(saved)){const localItems=saved.map((item:HistoryItem)=>({...item,title:maskTitle(item.title)}));serverItems=retainHistory([...serverItems,...localItems],pinnedIds);}}catch{}
+      if(!cancelled)setHistoryItems(retainHistory(serverItems,pinnedIds));
     };
     void load();return()=>{cancelled=true;};
-  },[fullPage,signedIn,session]);
+  },[fullPage,signedIn,session,pinnedIds]);
   useEffect(()=>{
     if(!fullPage||!messages.length||!session)return;
     const first=messages.find(message=>message.role==='user');if(!first)return;
     const item:HistoryItem={id:activeConversation.current||session,title:maskTitle(first.content),time:new Date().toISOString(),message_count:messages.length,messages};
-    try{const current=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');const next=mergeHistory([item],Array.isArray(current)?current:[]).slice(0,20);window.localStorage.setItem(localHistoryKey,JSON.stringify(next));window.setTimeout(()=>setHistoryItems(existing=>mergeHistory([item],existing).slice(0,20)),0);}catch{}
-  },[fullPage,messages,session]);
+    try{const current=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');const next=retainHistory([item,...(Array.isArray(current)?current:[])],pinnedIds);window.localStorage.setItem(localHistoryKey,JSON.stringify(next));window.setTimeout(()=>setHistoryItems(existing=>retainHistory([item,...existing],pinnedIds)),0);}catch{}
+  },[fullPage,messages,session,pinnedIds]);
   useEffect(()=>{
     if(!restored)return;
     try{window.sessionStorage.setItem(chatStorageKey,JSON.stringify({ownerKey,messages:messages.slice(-30),session_id:session,store,open,draft:text}));}catch{}
@@ -147,8 +159,8 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   const persistLocalHistory=useCallback((key:string,items:Message[])=>{
     const first=items.find(message=>message.role==='user');if(!first)return;
     const item:HistoryItem={id:key,title:maskTitle(first.content),time:new Date().toISOString(),message_count:items.length,messages:items};
-    try{const current=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');const next=mergeHistory([item],Array.isArray(current)?current:[]).slice(0,20);window.localStorage.setItem(localHistoryKey,JSON.stringify(next));setHistoryItems(existing=>mergeHistory([item],existing).slice(0,20));}catch{}
-  },[]);
+    try{const current=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');const next=retainHistory([item,...(Array.isArray(current)?current:[])],pinnedIds);window.localStorage.setItem(localHistoryKey,JSON.stringify(next));setHistoryItems(existing=>retainHistory([item,...existing],pinnedIds));}catch{}
+  },[pinnedIds]);
   const ask=useCallback(async(message:string)=>{
     const content=message.trim();if(!content)return null;
     const key=historySessionRef.current||sessionRef.current||crypto.randomUUID();historySessionRef.current=key;activeConversation.current=key;
@@ -245,6 +257,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   }
   function minimize(){
     stopVoice();
+    setBookingProperty(undefined);setBookingAnchor(undefined);
     let returnPath='/properties';
     try{
       const saved=window.sessionStorage.getItem(returnPathStorageKey);
@@ -287,9 +300,12 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
     try{const response=await fetch(`/api/ai/sessions/${item.id}`);if(!response.ok)throw new Error('Không thể tải lịch sử.');const result=await response.json();const loaded=(result.session?.messages||[]).filter(validMessage);const restored=loaded.length?loaded:(item.messages||[]).filter(validMessage);sessionRef.current=item.id;setSession(item.id);setMessages(restored);setStore(true);conversations.current.set(item.id,{messages:restored,sessionId:item.id,pending:false,error:'',store:true,unread:false});setHistoryOpen(false);setError('');}
     catch(error){if(item.messages?.length){sessionRef.current=item.id;setSession(item.id);setMessages(item.messages);setStore(false);setHistoryOpen(false);return;}setError(error instanceof Error?error.message:'Không thể tải lịch sử.');}
   }
-  function deleteLocalHistory(id:string){try{const current=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');const next=Array.isArray(current)?current.filter((item:HistoryItem)=>item.id!==id):[];window.localStorage.setItem(localHistoryKey,JSON.stringify(next));setHistoryItems(next);}catch{}}
+  function savePins(next:Set<string>){setPinnedIds(next);try{window.localStorage.setItem(pinsKey(ownerKey),JSON.stringify([...next]));}catch{}}
+  function togglePin(item:HistoryItem){const next=new Set(pinnedIds);if(next.has(item.id))next.delete(item.id);else next.add(item.id);savePins(next);setHistoryMenu(undefined);historyItemRefs.current.get(item.id)?.focus();}
+  function openHistoryMenu(item:HistoryItem,x:number,y:number){const width=190,height=84;setHistoryMenu({id:item.id,x:Math.max(6,Math.min(x,window.innerWidth-width-6)),y:Math.max(6,Math.min(y,window.innerHeight-height-6))});}
+  function deleteLocalHistory(id:string){try{const current=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');const next=Array.isArray(current)?current.filter((item:HistoryItem)=>item.id!==id):[];window.localStorage.setItem(localHistoryKey,JSON.stringify(next));setHistoryItems(retainHistory(next,pinnedIds));}catch{}}
   function openBooking(source:Source){setBookingProperty(source);setBookingAnchor(source.id);setBookingConfirmation(undefined);setError('');}
-  async function deleteConversation(item:HistoryItem){const running=conversations.current.get(item.id);running?.controller?.abort();if(signedIn&&!item.messages){try{const response=await fetch(`/api/ai/sessions/${item.id}`,{method:'DELETE'});if(!response.ok)throw new Error('Không thể xoá cuộc trò chuyện.');}catch(e){setError(e instanceof Error?e.message:'Không thể xoá cuộc trò chuyện.');return;}}deleteLocalHistory(item.id);conversations.current.delete(item.id);setConfirmDelete(undefined);if(activeConversation.current===item.id||session===item.id)reset();setHistoryItems(existing=>existing.filter(entry=>entry.id!==item.id));}
+  async function deleteConversation(item:HistoryItem){const running=conversations.current.get(item.id);running?.controller?.abort();if(signedIn&&!item.messages){try{const response=await fetch(`/api/ai/sessions/${item.id}`,{method:'DELETE'});if(!response.ok)throw new Error('Không thể xoá cuộc trò chuyện.');}catch(e){setError(e instanceof Error?e.message:'Không thể xoá cuộc trò chuyện.');return;}}const nextPins=new Set(pinnedIds);nextPins.delete(item.id);savePins(nextPins);deleteLocalHistory(item.id);conversations.current.delete(item.id);setConfirmDelete(undefined);setHistoryMenu(undefined);if(activeConversation.current===item.id||session===item.id)reset();setHistoryItems(existing=>existing.filter(entry=>entry.id!==item.id));}
   function cite(number:number){setCitation(number);const target=panel.current?.querySelector<HTMLElement>(`[data-source-number="${number}"]`);const container=log.current;if(target&&container){container.scrollTo({top:Math.max(0,target.offsetTop-container.clientHeight/2+target.offsetHeight/2),behavior:'smooth'});}window.setTimeout(()=>setCitation(undefined),1800);}
   function renderInline(content:string):ReactNode[]{
     const tokens=content.split(/(\[\d{1,3}\]|\*\*[^*\n]+\*\*|__[^_\n]+__|(?<!\*)\*[^*\n]+\*(?!\*)|(?<!_)_[^_\n]+_(?!_))/g);
@@ -319,16 +335,17 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
   void conversationVersion;
   const liveHistory=[...conversations.current.entries()].filter(([,state])=>state.pending||state.unread).map(([id,state]):HistoryItem=>({id,title:maskTitle(state.messages.find(message=>message.role==='user')?.content||'Cuộc trò chuyện mới'),time:new Date().toISOString(),message_count:state.messages.length,messages:state.messages}));
   const filteredHistory=mergeHistory(historyItems,liveHistory).filter(item=>!historySearch||item.title.toLocaleLowerCase().includes(historySearch.toLocaleLowerCase()));
-  const historyGroups=['Hôm nay','7 ngày qua','Cũ hơn'].map(label=>({label,items:filteredHistory.filter(item=>historyBucket(item)===label)})).filter(group=>group.items.length);
-  void historyGroups;
+  const historyGroups=[{label:'Đã ghim',items:filteredHistory.filter(item=>pinnedIds.has(item.id))},...['Hôm nay','7 ngày qua','Cũ hơn'].map(label=>({label,items:filteredHistory.filter(item=>!pinnedIds.has(item.id)&&historyBucket(item)===label)}))].filter(group=>group.items.length);
   const bookingInMessages=!!bookingAnchor&&messages.some(message=>message.sources?.some(source=>source.id===bookingAnchor));
   const bookingRow=(key:string,content:ReactNode)=><div className="ai-row ai-row-assistant ai-booking-row" data-booking-row={key} key={key}><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><div className="ai-answer">{content}</div></div>;
   return <aside className={`ai-chat${fullPage?' ai-chat-full':''}`}>
     {open && <section ref={panel} id="ai-chat-panel" className="ai-panel" role="dialog" aria-label="Trợ lý AI TERAVA" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close();}if(e.key==='Tab'){const nodes=panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],textarea:not(:disabled),input:not(:disabled)');if(nodes?.length){const first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}}}}>
       {fullPage && <aside className={`ai-history${historyOpen?' is-open':''}${historyCollapsed?' is-collapsed':''}`} aria-label="Lịch sử trò chuyện">
         <div className="ai-history-summary" aria-live="polite"><strong>{historyItems.length} cuộc trò chuyện</strong><small>{signedIn&&store?'Đã lưu vào tài khoản':'Lưu trên thiết bị này'} · Tối đa 20 cuộc, cũ nhất sẽ được loại bỏ.</small></div><span className="sr-only">Hôm nay · 7 ngày qua · Cũ hơn</span><div className="ai-history-head"><strong>Lịch sử</strong><button type="button" className="ai-icon" onClick={()=>setHistoryCollapsed(value=>!value)} aria-label={historyCollapsed?'Mở thanh lịch sử':'Thu gọn thanh lịch sử'}>{historyCollapsed?<ChevronRight size={18}/>:<ChevronLeft size={18}/>}</button></div>
-         {!historyCollapsed && <><button type="button" className="ai-history-new" onClick={()=>{reset();setHistoryOpen(false);}}><Plus size={16}/> Cuộc trò chuyện mới</button><label className="ai-history-search"><Search size={15}/><input value={historySearch} onChange={event=>setHistorySearch(event.target.value)} placeholder="Tìm trong lịch sử" aria-label="Tìm trong lịch sử"/></label><div className="ai-history-list">{filteredHistory.length?filteredHistory.map(item=>{const state=conversations.current.get(item.id);return <div className={`ai-history-item${item.id===session?' is-active':''}`} key={item.id}><button type="button" onClick={()=>void loadHistory(item)}><strong>{item.title}</strong><small>{state?.pending?'Đang trả lời…':state?.unread?'Câu trả lời mới':item.time?new Date(item.time).toLocaleString('vi-VN'):'Mới'}{item.message_count?` · ${item.message_count} tin nhắn`:''}</small></button>{confirmDelete===item.id?<span className="ai-history-confirm" role="group" aria-label="Xác nhận xoá"><small>Xoá?</small><button type="button" onClick={()=>void deleteConversation(item)}>Xoá</button><button type="button" onClick={()=>setConfirmDelete(undefined)}>Huỷ</button></span>:<button type="button" className="ai-history-delete" onClick={()=>setConfirmDelete(item.id)} aria-label={`Xoá cuộc trò chuyện ${item.title}`}><X size={14}/></button>}</div>}):<p className="ai-history-empty">Chưa có cuộc trò chuyện nào.</p>}</div><div className="ai-history-foot"><Link href="/properties">Về trang bất động sản</Link><small>{signedIn&&store?'Lưu lịch sử đang bật':'Lịch sử chỉ lưu trên thiết bị này'}</small></div></>}
+         {!historyCollapsed && <><button type="button" className="ai-history-new" onClick={()=>{reset();setHistoryOpen(false);}}><Plus size={16}/> Cuộc trò chuyện mới</button><label className="ai-history-search"><Search size={15}/><input value={historySearch} onChange={event=>setHistorySearch(event.target.value)} placeholder="Tìm trong lịch sử" aria-label="Tìm trong lịch sử"/></label><div className="ai-history-list">{historyGroups.length?historyGroups.map(group=><section className="ai-history-group" key={group.label}><h3>{group.label}{group.label==='Đã ghim'&&<Pin size={12}/>}</h3>{group.items.map(item=>{const state=conversations.current.get(item.id);return <div className={`ai-history-item${item.id===session?' is-active':''}`} key={item.id} tabIndex={-1} ref={element=>{if(element)historyItemRefs.current.set(item.id,element);else historyItemRefs.current.delete(item.id);}} onContextMenu={event=>{event.preventDefault();openHistoryMenu(item,event.clientX,event.clientY);}} onTouchStart={event=>{longPressTimer.current=window.setTimeout(()=>openHistoryMenu(item,event.touches[0].clientX,event.touches[0].clientY),500);}} onTouchEnd={()=>{if(longPressTimer.current)window.clearTimeout(longPressTimer.current);}}><button type="button" onClick={()=>void loadHistory(item)}><strong>{pinnedIds.has(item.id)&&<Pin size={12}/>} {item.title}</strong><small>{state?.pending?'Đang trả lời…':state?.unread?'Câu trả lời mới':item.time?new Date(item.time).toLocaleString('vi-VN'):'Mới'}{item.message_count?` · ${item.message_count} tin nhắn`:''}</small></button><button type="button" className="ai-history-options" onClick={event=>{event.stopPropagation();const rect=event.currentTarget.getBoundingClientRect();openHistoryMenu(item,rect.right,rect.bottom);}} aria-label="Tuỳ chọn cuộc trò chuyện" aria-haspopup="menu"><MoreHorizontal size={16}/></button></div>})}</section>):<p className="ai-history-empty">Chưa có cuộc trò chuyện nào.</p>}</div><div className="ai-history-foot"><Link href="/properties">Về trang bất động sản</Link><small>{signedIn&&store?'Lưu lịch sử đang bật':'Lịch sử chỉ lưu trên thiết bị này'}</small></div></>}
       </aside>}
+      {historyMenu&&(()=>{const item=filteredHistory.find(entry=>entry.id===historyMenu.id);if(!item)return null;return <div data-history-menu role="menu" className="ai-history-menu" style={{left:historyMenu.x,top:historyMenu.y}} onKeyDown={event=>{if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();const buttons=event.currentTarget.querySelectorAll<HTMLButtonElement>('[role=menuitem]');const index=[...buttons].indexOf(document.activeElement as HTMLButtonElement);buttons[(index+(event.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();}if(event.key==='Escape'){event.preventDefault();setHistoryMenu(undefined);historyItemRefs.current.get(item.id)?.focus();}}}><button type="button" role="menuitem" onClick={()=>togglePin(item)}>{pinnedIds.has(item.id)?'Bỏ ghim':'Ghim cuộc trò chuyện'}</button><button type="button" role="menuitem" className="is-danger" onClick={()=>{setConfirmDelete(item.id);setHistoryMenu(undefined);}}>Xoá cuộc trò chuyện</button></div>})()}
+      {confirmDelete&&(()=>{const item=filteredHistory.find(entry=>entry.id===confirmDelete);if(!item)return null;return <div className="ai-history-confirm-dialog" role="dialog" aria-modal="true" aria-label="Xác nhận xoá"><p>Xoá cuộc trò chuyện này? Hành động này không thể hoàn tác.</p><div><button type="button" onClick={()=>void deleteConversation(item)}>Xoá</button><button type="button" onClick={()=>{setConfirmDelete(undefined);historyItemRefs.current.get(item.id)?.focus();}}>Huỷ</button></div></div>})()}
       
       <header className="ai-panel-head">
         {fullPage && <button type="button" className="ai-history-mobile" onClick={()=>setHistoryOpen(true)}><Menu size={17}/> Lịch sử</button>}
