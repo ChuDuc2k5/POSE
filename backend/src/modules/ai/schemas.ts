@@ -6,8 +6,10 @@ export const SearchFiltersSchema = z.object({
   location: z.string().trim().min(1).max(120).nullable().default(null),
   min_price_vnd: z.number().finite().nonnegative().max(1e15).nullable().default(null),
   max_price_vnd: z.number().finite().nonnegative().max(1e15).nullable().default(null),
+  min_area_m2: z.number().finite().nonnegative().max(1e6).nullable().default(null),
+  max_area_m2: z.number().finite().nonnegative().max(1e6).nullable().default(null),
   bedrooms: z.number().int().nonnegative().max(100).nullable().default(null),
-}).refine(v => v.min_price_vnd === null || v.max_price_vnd === null || v.min_price_vnd <= v.max_price_vnd, 'min_price_vnd must not exceed max_price_vnd');
+}).refine(v => v.min_price_vnd === null || v.max_price_vnd === null || v.min_price_vnd <= v.max_price_vnd, 'min_price_vnd must not exceed max_price_vnd').refine(v => v.min_area_m2 === null || v.max_area_m2 === null || v.min_area_m2 <= v.max_area_m2, 'min_area_m2 must not exceed max_area_m2');
 
 export const SearchQuerySchema = z.object({
   topic: z.enum(['real_estate', 'smalltalk', 'out_of_scope']),

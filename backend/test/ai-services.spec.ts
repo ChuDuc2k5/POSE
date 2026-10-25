@@ -4,6 +4,7 @@ import { injection, toolAllowed } from '../src/modules/ai/guard.js';
 import { providerConfig, SYSTEM_PROMPT, TURN_SCHEMA, validateModel } from '../src/modules/ai/llm.js';
 import { stripPhones } from '../src/modules/ai/privacy.js';
 import { currentAiRequestSession, withAiRequestSession } from '../src/modules/ai/request-log.js';
+import { unsupportedCriteria, ownerRequest } from '../src/modules/ai/unsupported.js';
 const evidence = [{ id: '00000000-0000-4000-8000-000000000001', code: 'RV-A0805', name: 'Căn hộ', price: 3500000000, availability: 'Available', updated_at: '2026-10-14', location: 'Thủ Đức', property_type: 'Apartment' }];
 const field = (value: unknown, quote: string) => ({ value, confidence: 1, evidence: quote });
 describe('M06 services', () => {
@@ -111,5 +112,17 @@ describe('inferSearch', () => {
     expect(inferSearch('Căn hộ dưới 3,5 tỷ ở Thủ Đức')).toEqual({ location: 'Thủ Đức', type: 'Apartment', maxPrice: 3500000000 });
     expect(inferSearch('cho thuê nhà quận 7 từ 10 triệu')).toEqual({ location: 'Quận 7', type: 'House', minPrice: 10000000, transaction_type: 'Rent' });
     expect(inferSearch('xin chào')).toBeNull();
+    expect(inferSearch('diện tích khoảng 80 m²')).toMatchObject({ minArea: 68, maxArea: 92 });
+    expect(inferSearch('trên 100 m2')).toMatchObject({ minArea: 100 });
+    expect(inferSearch('gần trung tâm đi làm Quận 1')).toMatchObject({ locations: expect.arrayContaining(['Quận 1', 'Quận 7']) });
+    expect(inferSearch('có sẵn 2 tỷ và muốn vay ngân hàng')).toMatchObject({ maxPrice: 5e9 });
+    expect(inferSearch('thuê nhà nguyên căn trong 6 tháng')).toMatchObject({ type: 'House', transaction_type: 'Rent' });
+  });
+  it('labels catalogue-unsupported criteria without false positives', () => {
+    expect(unsupportedCriteria('căn hộ có cách Quận 1 khoảng 5 km')).toContain('khoảng cách / thời gian di chuyển');
+    expect(unsupportedCriteria('căn hộ 2 phòng ngủ Quận 7')).toEqual([]);
+    expect(unsupportedCriteria('thuê 10 triệu/tháng')).toEqual([]);
+    expect(unsupportedCriteria('cho thuê được bao nhiêu')).toContain('doanh thu / lợi suất cho thuê');
+    expect(ownerRequest('Tôi có căn nhà muốn cho thuê')).toBe(true);
   });
 });
