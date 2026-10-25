@@ -7,6 +7,7 @@ import { authenticatedSession, authClient, consumeAttempt } from '../auth/sessio
 import { systemClient } from '../supabase/supabase.service.js';
 import { catalogDatabaseError, catalogError, catalogInput, catalogJson } from '../catalog/catalog.service.js';
 import { uuidPattern } from '../../common/catalog.js';
+import { normalizePhone } from '../../common/profile-validation.js';
 import { object } from './extraction.js';
 import { inferSearch, inferTransactionType, centralFormerDistricts, genericHome } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
@@ -381,13 +382,16 @@ async createAppointment(request:NextRequest) {
     if(!session || session.role!=='User')return catalogError('UNAUTHORIZED','Vui lòng đăng nhập.',401);
     const parsed=await catalogInput(request);if(parsed.error)return parsed.error;
     const i=parsed.input as Record<string,unknown>;
-    if(Object.keys(i).some(k=>!['property_id','start','end','sales_id','note','session_id','request_key'].includes(k)) || typeof i.property_id!=='string' || !uuidPattern.test(i.property_id) || typeof i.start!=='string' || !Number.isFinite(Date.parse(i.start)) || i.end!=null && (typeof i.end!=='string'||!Number.isFinite(Date.parse(i.end))) || i.sales_id!=null && (typeof i.sales_id!=='string'||!uuidPattern.test(i.sales_id)) || i.note!=null && (typeof i.note!=='string'||i.note.length>500) || i.session_id!=null && (typeof i.session_id!=='string'||!uuidPattern.test(i.session_id)) || typeof i.request_key!=='string' || !uuidPattern.test(i.request_key))return catalogError('INVALID_INPUT','Kiểm tra thông tin đặt lịch.',400);
-    const result=await authClient(session.access).rpc('pose_ai_create_appointment',{p_property:i.property_id,p_start:i.start,p_end:i.end||null,p_sales:i.sales_id||null,p_note:i.note||null,p_session:i.session_id||null,p_request_key:i.request_key});
+    if(Object.keys(i).some(k=>!['property_id','start','end','sales_id','note','session_id','request_key','phone'].includes(k)) || typeof i.property_id!=='string' || !uuidPattern.test(i.property_id) || typeof i.start!=='string' || !Number.isFinite(Date.parse(i.start)) || i.end!=null && (typeof i.end!=='string'||!Number.isFinite(Date.parse(i.end))) || i.sales_id!=null && (typeof i.sales_id!=='string'||!uuidPattern.test(i.sales_id)) || i.note!=null && (typeof i.note!=='string'||i.note.length>500) || i.session_id!=null && (typeof i.session_id!=='string'||!uuidPattern.test(i.session_id)) || typeof i.request_key!=='string' || !uuidPattern.test(i.request_key))return catalogError('INVALID_INPUT','Kiểm tra thông tin đặt lịch.',400);
+    // Contact number from the booking form, used only when the profile phone is not verified.
+    const phone=i.phone==null||i.phone==='' ? null : normalizePhone(i.phone);
+    if(i.phone!=null&&i.phone!==''&&!phone)return catalogError('INVALID_PHONE','Số điện thoại chưa đúng định dạng, ví dụ 0912345678.',400);
+    const result=await authClient(session.access).rpc('pose_ai_create_appointment',{p_property:i.property_id,p_start:i.start,p_end:i.end||null,p_sales:i.sales_id||null,p_note:i.note||null,p_session:i.session_id||null,p_request_key:i.request_key,p_phone:phone});
     const message=result.error?.message||'';
     if(message.includes('APPOINTMENT_OVERLAP'))return catalogError('APPOINTMENT_OVERLAP','Khung giờ đã có lịch. Vui lòng chọn giờ khác.',409);
     if(message.includes('TIME_WINDOW_INVALID'))return catalogError('TIME_WINDOW_INVALID','Vui lòng chọn thời gian từ 1 giờ tới 60 ngày tới, trong khung 08:00–20:00.',400);
     if(message.includes('SALES_NOT_AVAILABLE'))return catalogError('SALES_NOT_AVAILABLE','Chuyên viên này không còn khả dụng.',409);
-    if(message.includes('PHONE_VERIFICATION_REQUIRED'))return catalogError('PHONE_VERIFICATION_REQUIRED','Vui lòng xác minh số điện thoại trong hồ sơ để chuyên viên có thể liên hệ xác nhận lịch hẹn.',409);
+    if(message.includes('PHONE_VERIFICATION_REQUIRED'))return catalogError('PHONE_VERIFICATION_REQUIRED','Vui lòng nhập số điện thoại để chuyên viên liên hệ xác nhận lịch hẹn.',409);
     if(message.includes('IDENTITY_REVIEW_REQUIRED'))return catalogError('IDENTITY_REVIEW_REQUIRED','Số điện thoại này đã gắn với một khách hàng khác. Vui lòng liên hệ TERAVA để được hỗ trợ.',409);
     if(message.includes('PROPERTY_NOT_FOUND'))return catalogError('PROPERTY_NOT_FOUND','Căn này hiện không còn nhận lịch xem.',404);
     return result.error ? catalogDatabaseError(result.error):catalogJson(result.data);

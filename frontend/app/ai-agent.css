@@ -213,3 +213,4 @@
 .ai-history-confirm{display:flex;align-items:center;gap:4px;flex-shrink:0}.ai-history-confirm small{color:var(--nx-muted)}.ai-history-confirm button{border:1px solid var(--nx-line);background:var(--nx-surface);color:var(--nx-text);border-radius:6px;padding:2px 6px;font-size:.75rem;cursor:pointer}.ai-history-confirm button:first-of-type{color:#b33f3f;border-color:#e9c4c4}
 /* Own class: the full-page chat puts .ai-error in its second grid column, which split the booking form in two. */
 .ai-booking-error{margin:0;padding:7px 9px;border-radius:8px;font-size:.82rem;line-height:1.5;color:var(--nx-danger);background:var(--nx-danger-soft);border:1px solid var(--nx-danger-line)}.ai-booking-error a{color:var(--nx-primary);font-weight:600}
+.ai-booking-hint{color:var(--nx-muted);font-size:.76rem;line-height:1.4}

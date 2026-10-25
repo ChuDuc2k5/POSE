@@ -346,13 +346,14 @@ const provider=createServer(async(req,res)=>{
  }
  if(url.pathname.endsWith('/pose_ai_appointment_options')){
   if(!uid||role!=='User')return error('42501','UNAUTHORIZED',401);
-  const busyStart=input.p_start&&Date.parse(input.p_start);return reply(200,{property:{id:input.p_property,code:'P-1',name:'CÄƒn há»™ Ä‘áº·t lá»‹ch',location:'Há»“ ChÃ­ Minh'},sales:[{id:'f6000000-0000-4000-8000-000000000003',full_name:'ChuyÃªn viÃªn Ä‘Æ°á»£c gÃ¡n',reason:'Phá»¥ trÃ¡ch cÄƒn nÃ y',recommended:true},...(busyStart?[{id:'f6000000-0000-4000-8000-000000000004',full_name:'ChuyÃªn viÃªn trá»‘ng',reason:'Lá»‹ch trá»‘ng nhiá»u nháº¥t tuáº§n nÃ y',recommended:false}]:[])]});
+  const busyStart=input.p_start&&Date.parse(input.p_start);return reply(200,{property:{id:input.p_property,code:'P-1',name:'Căn hộ đặt lịch',location:'Hồ Chí Minh'},sales:[{id:'f6000000-0000-4000-8000-000000000003',full_name:'Chuyên viên được gán',reason:'Phụ trách căn này',recommended:true},...(busyStart?[{id:'f6000000-0000-4000-8000-000000000004',full_name:'Chuyên viên trống',reason:'Lịch trống nhiều nhất tuần này',recommended:false}]:[])]});
  }
  if(url.pathname.endsWith('/pose_ai_create_appointment')){
   if(!uid||role!=='User')return error('42501','UNAUTHORIZED',401);
-  if(!verifiedPhone||who!=='User')return error('22023','PHONE_VERIFICATION_REQUIRED',409);
+  // A verified profile phone, or a contact number entered in the booking form, is required.
+  if(!(verifiedPhone&&who==='User')&&!input.p_phone)return error('22023','PHONE_VERIFICATION_REQUIRED',409);
   const existing=bookingRows.find(row=>row.key===input.p_request_key);if(existing)return reply(200,existing.result);
-  const result={appointment_id:randomUUID(),start:input.p_start,sales_name:'ChuyÃªn viÃªn Ä‘Æ°á»£c gÃ¡n'};bookingRows.push({key:input.p_request_key,result});return reply(200,result);
+  const result={appointment_id:randomUUID(),start:input.p_start,sales_name:'Chuyên viên được gán'};bookingRows.push({key:input.p_request_key,result,phone:input.p_phone??null});return reply(200,result);
  }
  if(url.pathname.endsWith('/pose_ai_delete_session')){
   if(!uid||role!=='User')return error('42501','UNAUTHORIZED',401);
@@ -464,7 +465,9 @@ mode='search';const search=await (await call('/api/ai/chat',base)).json();check(
  verifiedPhone=true;
  const phoneError=await call('/api/ai/appointments',bookingRequest,'pose-access=fixture-User');const phoneErrorBody=await phoneError.json();check(phoneError.status===200&&phoneErrorBody.appointment_id,'Appointment create happy path');
  const replayBooking=await call('/api/ai/appointments',bookingRequest,'pose-access=fixture-User');check(replayBooking.status===200&&(await replayBooking.json()).appointment_id===phoneErrorBody.appointment_id&&bookingRows.length===1,'Appointment request_key is idempotent');
- const unverifiedBooking=await call('/api/ai/appointments',bookingRequest,'pose-access=fixture-Other');const unverifiedBookingBody=await unverifiedBooking.json();check(unverifiedBooking.status===409&&unverifiedBookingBody.code==='PHONE_VERIFICATION_REQUIRED'&&unverifiedBookingBody.message.startsWith('Vui lòng xác minh số điện thoại'),'PHONE_VERIFICATION_REQUIRED maps to 409 with guidance');
+ const unverifiedBooking=await call('/api/ai/appointments',bookingRequest,'pose-access=fixture-Other');const unverifiedBookingBody=await unverifiedBooking.json();check(unverifiedBooking.status===409&&unverifiedBookingBody.code==='PHONE_VERIFICATION_REQUIRED'&&unverifiedBookingBody.message.startsWith('Vui lòng nhập số điện thoại'),'PHONE_VERIFICATION_REQUIRED maps to 409 with guidance');
+ const phoneBooking=await call('/api/ai/appointments',{...bookingRequest,request_key:randomUUID(),phone:'0912 345 678'},'pose-access=fixture-Other');check(phoneBooking.status===200&&(await phoneBooking.json()).appointment_id&&bookingRows.at(-1).phone==='+84912345678','Unverified customer books with a normalized contact phone');
+ const badPhone=await call('/api/ai/appointments',{...bookingRequest,request_key:randomUUID(),phone:'abc'},'pose-access=fixture-Other');check(badPhone.status===400&&(await badPhone.json()).code==='INVALID_PHONE','Invalid contact phone is rejected before booking');
  const deleteFixture=randomUUID();sessions.set(deleteFixture,{id:deleteFixture,user_id:userId,store_transcript:true});messages.push({session_id:deleteFixture,role:'user',content:'delete fixture'});check((await call(`/api/ai/sessions/${deleteFixture}`,null,'pose-access=fixture-Other','DELETE')).status===404,'Another user cannot delete a session');const deleted=await call(`/api/ai/sessions/${deleteFixture}`,null,'pose-access=fixture-User','DELETE');check(deleted.status===200&&!sessions.has(deleteFixture),'Owner can delete a session');
  const collisionId=randomUUID();customers.set(collisionId,{id:collisionId,full_name:'Khách cũ chưa liên kết',phone:'+84901234561',phone_verified_at:null,auth_user_id:null});
  const collision=await call('/api/ai/handoff',handoff,'pose-access=fixture-User');check(collision.status===409 && (await collision.json()).code==='NEEDS_REVIEW' && leads.size===0,'Legacy phone collision not auto-merged');customers.delete(collisionId);

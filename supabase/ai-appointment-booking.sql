@@ -43,9 +43,13 @@ end $$;
 create or replace function public.pose_ai_appointment_options(p_property uuid,p_start timestamptz default null)
 returns jsonb language sql security invoker set search_path='' as $$ select pose_private.ai_appointment_options(p_property,p_start); $$;
 
-create or replace function pose_private.ai_create_appointment(p_property uuid,p_start timestamptz,p_end timestamptz,p_sales uuid,p_note text,p_session uuid,p_request_key text)
+-- p_phone lets a customer without a verified phone leave a contact number; the consultant
+-- confirms by calling it, and the customer keeps phone_verified_at null until verified.
+drop function if exists public.pose_ai_create_appointment(uuid,timestamptz,timestamptz,uuid,text,uuid,text);
+drop function if exists pose_private.ai_create_appointment(uuid,timestamptz,timestamptz,uuid,text,uuid,text);
+create or replace function pose_private.ai_create_appointment(p_property uuid,p_start timestamptz,p_end timestamptz,p_sales uuid,p_note text,p_session uuid,p_request_key text,p_phone text)
 returns jsonb language plpgsql security definer set search_path='' as $$
-declare actor uuid:=pose_private.require_account(); v_customer uuid; v_lead uuid; prop record; v_sales uuid; v_sales_name text; existing record; v_id uuid; opts jsonb; profile jsonb; v_phone text; v_auth auth.users;
+declare actor uuid:=pose_private.require_account(); v_customer uuid; v_lead uuid; prop record; v_sales uuid; v_sales_name text; existing record; v_id uuid; opts jsonb; profile jsonb; v_phone text; v_verified boolean:=false; v_auth auth.users;
 begin
   if (select pose_private.pose_access_context()->>'role') is distinct from 'User' then raise exception 'CUSTOMER_REQUIRED' using errcode='42501'; end if;
   if p_property is null or p_start is null or p_request_key is null or char_length(btrim(p_request_key)) not between 8 and 200 or p_note is not null and char_length(p_note)>500 then raise exception 'INVALID_INPUT' using errcode='22023'; end if;
@@ -57,15 +61,16 @@ begin
   if not found then raise exception 'PROPERTY_NOT_FOUND' using errcode='P0002'; end if;
   perform pg_advisory_xact_lock(hashtextextended(actor::text,3));
   select c.id into v_customer from public.customers c where c.auth_user_id=actor limit 1;
-  -- First booking creates the customer the same way the AI handoff does: a verified phone is required
-  -- so the consultant can reach the customer.
+  -- First booking creates the customer the same way the AI handoff does. A verified profile phone is
+  -- preferred; otherwise the number entered in the booking form is kept as unverified.
   if v_customer is null then
     profile:=pose_private.read_profile(); select * into v_auth from auth.users where id=actor;
-    v_phone:=profile->>'phone';
-    if not coalesce((profile->>'phoneVerified')::boolean,false) or v_phone is null or v_phone !~ '^\+[1-9][0-9]{7,14}$' then raise exception 'PHONE_VERIFICATION_REQUIRED' using errcode='22023'; end if;
+    v_verified:=coalesce((profile->>'phoneVerified')::boolean,false) and coalesce(profile->>'phone','') ~ '^\+[1-9][0-9]{7,14}$';
+    v_phone:=case when v_verified then profile->>'phone' else nullif(btrim(p_phone),'') end;
+    if v_phone is null or v_phone !~ '^\+[1-9][0-9]{7,14}$' then raise exception 'PHONE_VERIFICATION_REQUIRED' using errcode='22023'; end if;
     perform pg_advisory_xact_lock(hashtextextended(v_phone,3));
     if exists(select 1 from public.customers c where ltrim(c.phone,'+')=ltrim(v_phone,'+') or v_phone like '+84%' and c.phone='0'||substring(v_phone from 4)) then raise exception 'IDENTITY_REVIEW_REQUIRED' using errcode='22023'; end if;
-    insert into public.customers(full_name,phone,email,source,auth_user_id,phone_verified_at) values(profile->>'name',v_phone,v_auth.email,'WebChat',actor,v_auth.phone_confirmed_at) returning id into v_customer;
+    insert into public.customers(full_name,phone,email,source,auth_user_id,phone_verified_at) values(profile->>'name',v_phone,v_auth.email,'WebChat',actor,case when v_verified then v_auth.phone_confirmed_at end) returning id into v_customer;
   end if;
   select l.id into v_lead from public.leads l where l.customer_id=v_customer and not l.archived and l.status not in ('CONVERTED','LOST') order by l.created_at limit 1;
   if v_lead is null then insert into public.leads(customer_id,source) values(v_customer,'WebChat') returning id into v_lead; end if;
@@ -79,15 +84,15 @@ begin
     if exists(select 1 from public.appointments a where a.sales_id=v_sales and a.status in ('SCHEDULED','CONFIRMED') and a.appointment_time<p_end and coalesce(a.ends_at,a.appointment_time+interval '60 minutes')>p_start) then raise exception 'APPOINTMENT_OVERLAP' using errcode='23P01'; end if;
   end if;
   insert into public.appointments(lead_id,customer_id,sales_id,property_id,appointment_time,ends_at,location,status,notes,source,idempotency_key)
-  values(v_lead,v_customer,v_sales,p_property,p_start,p_end,prop.location,'SCHEDULED',nullif(btrim(p_note),'') ,'AI',p_request_key)
+  values(v_lead,v_customer,v_sales,p_property,p_start,p_end,prop.location,'SCHEDULED',nullif(concat_ws(E'\n',case when not v_verified and v_phone is not null then 'SĐT chưa xác minh: '||v_phone end,nullif(btrim(p_note),'')),''),'AI',p_request_key)
   returning id into v_id;
   insert into public.property_history(entity_kind,entity_id,actor_id,action,reason,after_data,source)
   values('Appointment',v_id,actor,'appointment_requested','AI chat booking',jsonb_build_object('property_id',p_property,'customer_id',v_customer,'sales_id',v_sales,'appointment_time',p_start,'ends_at',p_end),'AI');
   return jsonb_build_object('appointment_id',v_id,'start',p_start,'sales_name',v_sales_name);
 end $$;
 
-create or replace function public.pose_ai_create_appointment(p_property uuid,p_start timestamptz,p_end timestamptz default null,p_sales uuid default null,p_note text default null,p_session uuid default null,p_request_key text default null)
-returns jsonb language sql security invoker set search_path='' as $$ select pose_private.ai_create_appointment(p_property,p_start,p_end,p_sales,p_note,p_session,p_request_key); $$;
+create or replace function public.pose_ai_create_appointment(p_property uuid,p_start timestamptz,p_end timestamptz default null,p_sales uuid default null,p_note text default null,p_session uuid default null,p_request_key text default null,p_phone text default null)
+returns jsonb language sql security invoker set search_path='' as $$ select pose_private.ai_create_appointment(p_property,p_start,p_end,p_sales,p_note,p_session,p_request_key,p_phone); $$;
 
 create or replace function pose_private.ai_delete_session(p_session uuid)
 returns boolean language plpgsql security definer set search_path='' as $$
@@ -104,7 +109,7 @@ end $$;
 create or replace function public.pose_ai_delete_session(p_session uuid)
 returns boolean language sql security invoker set search_path='' as $$ select pose_private.ai_delete_session(p_session); $$;
 
-revoke all on function pose_private.ai_appointment_options(uuid,timestamptz),public.pose_ai_appointment_options(uuid,timestamptz),pose_private.ai_create_appointment(uuid,timestamptz,timestamptz,uuid,text,uuid,text),public.pose_ai_create_appointment(uuid,timestamptz,timestamptz,uuid,text,uuid,text),pose_private.ai_delete_session(uuid),public.pose_ai_delete_session(uuid) from public,anon;
-grant execute on function pose_private.ai_appointment_options(uuid,timestamptz),pose_private.ai_create_appointment(uuid,timestamptz,timestamptz,uuid,text,uuid,text),pose_private.ai_delete_session(uuid) to authenticated;
-grant execute on function public.pose_ai_appointment_options(uuid,timestamptz),public.pose_ai_create_appointment(uuid,timestamptz,timestamptz,uuid,text,uuid,text),public.pose_ai_delete_session(uuid) to authenticated;
+revoke all on function pose_private.ai_appointment_options(uuid,timestamptz),public.pose_ai_appointment_options(uuid,timestamptz),pose_private.ai_create_appointment(uuid,timestamptz,timestamptz,uuid,text,uuid,text,text),public.pose_ai_create_appointment(uuid,timestamptz,timestamptz,uuid,text,uuid,text,text),pose_private.ai_delete_session(uuid),public.pose_ai_delete_session(uuid) from public,anon;
+grant execute on function pose_private.ai_appointment_options(uuid,timestamptz),pose_private.ai_create_appointment(uuid,timestamptz,timestamptz,uuid,text,uuid,text,text),pose_private.ai_delete_session(uuid) to authenticated;
+grant execute on function public.pose_ai_appointment_options(uuid,timestamptz),public.pose_ai_create_appointment(uuid,timestamptz,timestamptz,uuid,text,uuid,text,text),public.pose_ai_delete_session(uuid) to authenticated;
 commit;
