@@ -102,7 +102,7 @@ export function groundedSummary(evidence:Evidence[]) {
   });
   return `Mình tìm thấy ${properties.length} căn bạn có thể tham khảo:\n${lines.join('\n')}\nBạn muốn mình lọc thêm theo phường/đường, điều chỉnh ngân sách hay hẹn chuyên viên xem căn nào?`;
 }
-export type Evidence={id:string;code:string;name:string;price:number|null;availability:string;updated_at:string;location:string;property_type:string;area?:number|null;bedrooms?:number|null;transaction_type?:'Sale'|'Rent';price_period?:'Total'|'Month';number?:number;source_type?:'Property'|'Faq';reason?:string};
+export type Evidence={id:string;code:string;name:string;price:number|null;availability:string;updated_at:string;location:string;property_type:string;area?:number|null;bedrooms?:number|null;transaction_type?:'Sale'|'Rent';price_period?:'Total'|'Month';number?:number;source_type?:'Property'|'Faq';reason?:string;areaNearCriteria?:boolean};
 const clauses=(text:string)=>text.split(/\n|[;!?]|(?<!\d)[.,](?!\d)/).filter(Boolean);
 function negated(text:string,index:number){
   const prefix=text.slice(Math.max(0,index-90),index).split(/nhưng|tuy nhiên|\bbut\b|\bhowever\b/i).at(-1) || '';

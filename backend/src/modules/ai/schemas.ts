@@ -17,7 +17,7 @@ export const SearchQuerySchema = z.object({
   keywords: z.array(z.string().trim().min(1).max(80)).max(8).default([]),
   filters: SearchFiltersSchema,
   refers_to_previous: z.array(z.number().int().positive().max(100)).max(20),
-  clarify: z.object({ needed: z.boolean(), question: z.string().max(500).nullable(), options: z.array(z.string().max(120)).max(3) }).default({ needed: false, question: null, options: [] }),
+  clarify: z.object({ needed: z.boolean(), question: z.string().max(500).nullable(), options: z.array(z.string().max(120)).max(6) }).default({ needed: false, question: null, options: [] }),
 });
 
 export const AnswerMetaSchema = z.object({

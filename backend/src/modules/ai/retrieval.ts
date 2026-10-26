@@ -3,7 +3,7 @@ import { Injectable, Optional } from '@nestjs/common';
 import { systemClient } from '../supabase/supabase.service.js';
 import { EmbeddingService } from './embeddings.js';
 import { rerank, type RerankModel } from './rerank.js';
-export type RetrievalFilters={transaction_type?:'Sale'|'Rent';type?:string;minPrice?:number;maxPrice?:number;maxPriceExclusive?:boolean;location?:string;locations?:string[];location_aliases?:string[];minArea?:number;maxArea?:number;bedrooms?:number};
+export type RetrievalFilters={transaction_type?:'Sale'|'Rent';type?:string;minPrice?:number;maxPrice?:number;maxPriceExclusive?:boolean;location?:string;locations?:string[];location_aliases?:string[];minArea?:number;maxArea?:number;bedrooms?:number;keywords?:string[];exclude_ids?:string[]};
 export type RetrievalContext={propertyId?:string|null;propertyIds?:string[]};
 export type RetrievalEmbedding={model:string;vector:string};
 export type RankedChunk={chunk_id:string;document_id:string;source_id:string|null;source_type:'Property'|'Faq';header:string;content:string;vector_rank:number|null;text_rank:number|null;similarity:number|null;embed_model?:string|null;rrf?:number;code?:string;name?:string;price?:number|null;availability?:string;updated_at?:string;location?:string;property_type?:string;transaction_type?:string;price_period?:string;area?:number|null;bedrooms?:number|null;cover_id?:string|null;citation_number?:number};

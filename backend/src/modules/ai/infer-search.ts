@@ -39,6 +39,7 @@ const keywordRules: [RegExp, string][] = [
   [/\bview\b/iu, 'view'], [/ho boi/iu, 'hồ bơi'], [/\bgym\b/iu, 'gym'],
   [/thang may/iu, 'thang máy'], [/giam gia|ngop|cat lo|ha gia|chiet khau|gia tot|chi con/iu, 'giảm giá'],
 ];
+keywordRules.push([/o to vao|xe hoi|hem xe hoi/iu, '\u0111\u1eadu \u00f4 t\u00f4']);
 const searchKeywords = (text: string) => {
   const normalized = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').toLocaleLowerCase('vi');
   return [...new Set(keywordRules.filter(([pattern]) => pattern.test(normalized)).map(([, keyword]) => keyword))];
@@ -56,7 +57,7 @@ export function inferSearch(text: string): InferredSearch | null {
   else if (word('mua|bán').test(text)) filters.transaction_type = 'Sale';
   const district = text.match(/\b(?:quận|q\.?)\s*(\d{1,2})\b/i);
   const normalized = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').toLowerCase();
-  const nearCentre = /gan\s+(?:quan\s*1|trung\s*tam)|di\s*lam\s+(?:quan\s*1|trung\s*tam)/i.test(normalized);
+  const nearCentre = /gan\s+(?:quan\s*1|trung\s*tam)|di\s*lam\s+(?:quan\s*1|trung\s*tam)|cach\s+(?:trung\s*tam|quan\s*1)\s+(?:khong\s+qua\s+)?\d+\s*km|\d+\s*km\s+(?:den\s+)?trung\s*tam/i.test(normalized);
   const place = places.find(name => text.toLocaleLowerCase('vi').includes(name.toLocaleLowerCase('vi')));
   if (district) filters.location = `Quận ${district[1]}`;
   else if (place) filters.location = place;
@@ -83,9 +84,21 @@ export function inferSearch(text: string): InferredSearch | null {
     const bareAmount = text.match(/(?<![\p{L}\d])([\d.,]+\s*(?:tỷ|tỉ|ty|triệu|tr))(?![\p{L}])/iu);
     if (bareAmount) { const value = amount(bareAmount[1]); if (value) { filters.minPrice = value; filters.maxPrice = value; } }
   }
+  // Corrections are parsed in source order so the last amount wins. In
+  // particular, “chỉ có X” is always a budget ceiling.
+  const moneyMentions = [...text.matchAll(/([\d.,]+)\s*(tỷ|tỉ|ty|triệu|tr)(?![\p{L}])/giu)];
+  const correction = /(?:nhầm|sửa\s*lại|thật\s*ra|thay\s*vào\s*đó|đổi\s*thành|chỉ\s*có|vẫn\s*muốn|à\s*(?:không|nhầm))|thôi\s*$/iu;
+  for (const mention of moneyMentions) {
+    const start = mention.index || 0;
+    const before = text.slice(Math.max(0, start - 48), start);
+    const after = text.slice(start + mention[0].length, start + mention[0].length + 24);
+    if (!correction.test(`${before} ${after}`) && !/chỉ\s*có/i.test(before)) continue;
+    const value = amount(mention[0]);
+    if (value) { filters.maxPrice = value; delete filters.minPrice; filters.maxPriceExclusive = false; }
+  }
   const area = text.match(/(?:diện\s*tích\s*)?(?:khoảng|tầm)\s*([\d.,]+)\s*(?:m\s*[²2]|mét\s*vuông)/i);
-  const areaAbove = text.match(/(?:trên|từ)\s*([\d.,]+)\s*(?:m\s*[²2]|mét\s*vuông)/i);
-  const areaBelow = text.match(/(?:dưới|tối đa|không quá)\s*([\d.,]+)\s*(?:m\s*[²2]|mét\s*vuông)/i);
+  const areaAbove = [...text.matchAll(/(?:trên|từ|tối\s*thiểu|ít\s*nhất|>=?)\s*([\d.,]+)\s*(?:m\s*[²2]|mét\s*vuông)/giu)].at(-1);
+  const areaBelow = [...text.matchAll(/(?:dưới|tối\s*đa|không\s*quá|<=?)\s*([\d.,]+)\s*(?:m\s*[²2]|mét\s*vuông)/giu)].at(-1);
   const areaValue = (raw: string) => Number(raw.replace(',', '.').replace(/\.(?=\d{3}\b)/g, ''));
   if (area) { const value = areaValue(area[1]); if (Number.isFinite(value)) { filters.minArea = Math.round(value * .85); filters.maxArea = Math.round(value * 1.15); } }
   if (areaAbove) { const value = areaValue(areaAbove[1]); if (Number.isFinite(value)) filters.minArea = value; }

@@ -19,7 +19,7 @@ type ConversationState={messages:Message[];sessionId?:string;pending:boolean;con
 type HistoryMenu={id:string;x:number;y:number};
 const historyCollapsedKey='terava-chat-history-collapsed-v1';
 function validMessage(message:Message){
-  return message && (message.role==='user'||message.role==='assistant') && typeof message.content==='string' && (!message.options || Array.isArray(message.options) && message.options.length<=3 && message.options.every(option=>typeof option==='string')) &&
+  return message && (message.role==='user'||message.role==='assistant') && typeof message.content==='string' && (!message.options || Array.isArray(message.options) && message.options.length<=6 && message.options.every(option=>typeof option==='string')) &&
     (!message.sources || Array.isArray(message.sources) && message.sources.every(source=>source && typeof source.id==='string' && typeof source.name==='string' && typeof source.code==='string' && typeof source.updated_at==='string' && (source.price===null || typeof source.price==='number') && Object.hasOwn(availabilityLabels,source.availability))) && (!message.related || Array.isArray(message.related)) && (!message.action || typeof message.action.id==='string' && typeof message.action.summary_vi==='string');
 }
 type VoiceState='idle'|'listening'|'thinking'|'speaking';
@@ -183,7 +183,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
     const controller=new AbortController();state.controller=controller;requestController.current=controller;state.pending=true;state.error='';state.store=store;
     state.messages=[...state.messages,{role:'user',content}];pending.current=true;setBusy(true);setError('');setMessages(state.messages);refreshConversations();persistLocalHistory(key,state.messages);setHistoryItems(existing=>mergeHistory([{id:key,title:maskTitle(content),time:new Date().toISOString(),message_count:state.messages.length,messages:state.messages}],existing));
     try{
-      const requestHistory=state.messages.slice(0,-1).slice(-10).map(({role,content,sources})=>({role,content:content.slice(0,8000),...(role==='assistant'&&sources?.length?{sources:sources.map(source=>({price:source.price,code:source.code}))}:{})}));
+      const requestHistory=state.messages.slice(0,-1).slice(-10).map(({role,content,sources})=>({role,content:content.slice(0,8000),...(role==='assistant'&&sources?.length?{sources:sources.map(source=>({id:source.id,price:source.price,code:source.code}))}:{})}));
       const response=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',Accept:'text/event-stream'},signal:controller.signal,body:JSON.stringify({session_id:requestSession,message:content,history:requestHistory,store_transcript:store,property_id:propertyId || null})});
 
       if(!response.ok)throw new Error((await response.json()).message);

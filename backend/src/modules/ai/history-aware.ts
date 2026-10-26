@@ -31,6 +31,7 @@ const concreteFeatures: [RegExp, string][] = [
   [/thang may/iu, 'thang máy'],
   [/giam gia|ngop|cat lo|ha gia|chiet khau|gia tot|chi con/iu, 'giảm giá'],
 ];
+concreteFeatures.push([/o to vao|xe hoi|hem xe hoi/iu, '\u0111\u1eadu \u00f4 t\u00f4']);
 export function concreteSearchKeywords(message: string) {
   const text = fold(message);
   return [...new Set(concreteFeatures.filter(([pattern]) => pattern.test(text)).map(([, keyword]) => keyword))];
@@ -51,6 +52,18 @@ export function genericSearchQuestion(message: string) {
   const text = fold(message);
   if (adviceOrServiceQuestion(message) || concreteSearchKeywords(message).length || /(?:\d+\s*(?:ty|trieu|tr)|quan\s*\d+|phuong|thu duc|binh thanh|tan phu|go vap)/iu.test(text)) return false;
   return /(?:gioi thieu|goi y|nhung|vai|co .*(?:can|nha|bat dong san)|can nao|nha nao|bat dong san nao)/iu.test(text);
+}
+export type CatalogueOverviewKind = 'areas' | 'types' | 'projects' | 'prices';
+export function catalogueOverviewIntent(message: string): CatalogueOverviewKind | null {
+  const text = fold(message);
+  if (/(?:nhung|cac)\s+(?:du an|khu do thi)/iu.test(text)) return 'projects';
+  if (/(?:gia|muc gia).*(?:nha|can|bat dong san)|(?:nha|can|bat dong san).*gia.*(?:bao nhieu|khoang)/iu.test(text)) return 'prices';
+  if (/(?:khu vuc|o dau|nhung dau|nhung khu).*(?:bat dong san|bds|nha|can)|bat dong san.*(?:khu vuc|o dau)/iu.test(text)) return 'areas';
+  if (/cho\s+thue/iu.test(text) || /(?:loai|bds|bat dong san)/iu.test(text) && /(?:ban|thue|cho thue|dang)/iu.test(text) || /bat dong san nao/iu.test(text)) return 'types';
+  return null;
+}
+export function isMoreRequest(message: string) {
+  return /(?:co\s+can\s+nao\s+khac|con\s+can\s+nao\s+nua|xem\s+them|can\s+khac|them\s+(?:vai\s+)?can\s+nua)/iu.test(fold(message));
 }
 // "căn hộ này", "nhà đó", "dự án này"… point back at the listing discussed in the previous turn.
 // "quan tâm căn …", "chọn căn …" pick one of the listings just shown.
@@ -193,6 +206,7 @@ export function clarificationFor(message: string, history: { role: string; conte
   const ownerText=message.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').toLowerCase();
   if (/(?:cho\s+thue\s+(?:nha|can)|dang\s+tin|tim\s+nguoi\s+thue|ky\s+gui|ban\s+nha\s+cua\s+toi|muon\s+cho\s+thue|(?:muon|can)\s+ban\s+(?:nha|can|dat|lo)|ban\s+nha\s+qua|nho\s+ban|phi\s+moi\s+gioi|hoa\s+hong)/u.test(ownerText)) return { needed: false, question: null, options: [] };
   if (adviceOrServiceQuestion(message)) return { needed: false, question: null, options: [] };
+  if (isMoreRequest(message)) return { needed: false, question: null, options: [] };
   // A named listing ("Đặt lịch xem căn RVL-…") or a booking/saving request is never a new search.
   // A question about the listing just discussed ("Tiền cọc mấy tháng?") is answered from that listing.
   if (referencedListingCodes(message, history).codes.length) return { needed: false, question: null, options: [] };
