@@ -11,7 +11,7 @@ import { normalizePhone } from '../../common/profile-validation.js';
 import { object } from './extraction.js';
 import { inferSearch, inferTransactionType, centralFormerDistricts, genericHome } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
-import { correctionData, labelMonthlyRent, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, normalizeCitations, discardInvalidCitations, redactListingCodesSafe, isAbusive, abusiveReply, dedupeListings, rewriteUnverifiedAvailability, rewriteAvailabilityLabels, availabilityLabel, removeUnpromptedNegotiation, outputDiagnostic, rewriteUnsupportedPolicy, isValidListingPrice, isRawListingDump, removeUnpromptedOwnerTemplate, type Evidence } from './guard.js';
+import { correctionData, labelMonthlyRent, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, normalizeCitations, discardInvalidCitations, redactListingCodesSafe, isAbusive, abusiveReply, dedupeListings, rewriteUnverifiedAvailability, rewriteAvailabilityLabels, availabilityLabel, removeUnpromptedNegotiation, normalizeFinalReply, outputDiagnostic, rewriteUnsupportedPolicy, isValidListingPrice, isRawListingDump, removeUnpromptedOwnerTemplate, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult, type RankedChunk } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { assistantPrompt, complete, querySearch, checkAnswer, extractNeedsAfterReply, streamAgentStep } from './llm.ts';
@@ -870,15 +870,23 @@ export class AiService {
      const derivedFinance=derivedFinanceAmounts(source,[...evidenceItems,...related].map(item=>item.price).filter((value): value is number => typeof value==='number' && Number.isFinite(value)));
       Object.assign(guardContext,{financeAmounts:[...(financeEvidence?.amounts || []),...derivedFinance,...historicalFinanceAmounts],financeRanges:financeEvidence?.ranges || [],financePresent:Boolean(financeEvidence || derivedFinance.length || historicalFinanceAmounts.length),faqEvidence:faqRows.length>0 || generalKnowledge.length>0});
       result.reply=removeUnpromptedNegotiation(rewriteUnverifiedAvailability(rewriteAvailabilityLabels(removeReplyArtifacts(discardInvalidCitations(normalizeListedPrices(labelMonthlyRent(normalizeCitations(result.reply,evidenceItems),evidenceItems),evidenceItems),evidenceItems),evidenceItems,moreRequest),evidenceItems),source,evidenceItems),source);
-     const foldedLegalQuestion=[...source.normalize('NFD')].filter(char=>{const code=char.codePointAt(0) || 0; return code<0x300 || code>0x36f;}).join('').replace(String.fromCodePoint(0x0111),'d').toLocaleLowerCase('vi');
-     const legalDetail=[...details.values(),...(rag?.chunks || []).map(chunk=>String(chunk.content || '')),...evidenceItems.map(item=>String((item as {description?:unknown}).description || ''))].find(detail=>{const folded=[...detail.normalize('NFD')].filter(char=>{const code=char.codePointAt(0) || 0; return code<0x300 || code>0x36f;}).join('').replace(String.fromCodePoint(0x0111),'d').toLocaleLowerCase('vi'); return folded.includes('so hong') || folded.includes('so do') || folded.includes('san so') || folded.includes('so rieng');});
-     const groundedLegalDetail=legalDetail || (JSON.stringify(evidenceItems[0] || {}).normalize('NFD').toLocaleLowerCase('vi').includes('san so hong') ? 'Tin đăng ghi sẵn sổ hồng' : '');
-     const legalTarget=evidenceItems.find((item,index)=>(item.number ?? index+1)===2) || evidenceItems[0];
+      const legalDetail=[...details.values(),...(rag?.chunks || []).map(chunk=>String(chunk.content || '')),...evidenceItems.map(item=>String((item as {description?:unknown}).description || ''))].find(detail=>{const folded=[...detail.normalize('NFD')].filter(char=>{const code=char.codePointAt(0) || 0; return code<0x300 || code>0x36f;}).join('').replace(String.fromCodePoint(0x0111),'d').toLocaleLowerCase('vi'); return folded.includes('so hong') || folded.includes('so do') || folded.includes('san so') || folded.includes('so rieng');});
+      const legalFactFromText=(detail:string) => {
+        const folded=[...detail.normalize('NFD')].filter(char=>{const code=char.codePointAt(0) || 0; return code<0x300 || code>0x36f;}).join('').replace(String.fromCodePoint(0x0111),'d').toLocaleLowerCase('vi');
+        if(/(?:chua|khong) co so (?:hong|do|rieng)/u.test(folded))return 'được ghi là chưa có sổ hồng';
+        if(/(?:san so|da co so (?:hong|do|rieng)|co so (?:hong|do|rieng))/u.test(folded))return 'được ghi là đã có sổ hồng (sẵn sổ)';
+        return '';
+      };
+      const groundedLegalDetail=legalFactFromText(legalDetail || JSON.stringify(evidenceItems[0] || {}));
+      const legalFactReply=(item:Evidence, fact:string) => {
+        const number=item.number ?? 1;
+        return `Theo tin đăng, căn số ${number} [${number}] ${fact}. Mình không thể xác nhận pháp lý thay cho giấy tờ gốc; bạn nên kiểm tra bản gốc và cơ quan đăng ký đất đai.`;
+      };
+      const legalTarget=evidenceItems.find((item,index)=>(item.number ?? index+1)===2) || evidenceItems[0];
       const legalQuestionDirect=/(?:pháp lý|sổ hồng|sổ đỏ|sổ riêng|giấy tờ|quy hoạch|thế chấp|tranh chấp)/iu.test(source) && !/(?:không tự ý đoán|không đưa ra ý kiến|không cam kết)/iu.test(source);
-     if(legalTarget && legalQuestionDirect && groundedLegalDetail){
-       const legalNumber=legalTarget.number ?? 2;
-       result.reply=`Căn số ${legalNumber} ${shortListingName(legalTarget.name)} [${legalNumber}]. Tin đăng ghi: ${groundedLegalDetail}. Mình không thể xác nhận pháp lý thay cho giấy tờ gốc; bạn nên kiểm tra bản gốc và cơ quan đăng ký đất đai.`;
-     }
+      if(legalTarget && legalQuestionDirect && groundedLegalDetail){
+        result.reply=legalFactReply(legalTarget,groundedLegalDetail);
+      }
      const guardStarted=performance.now();
     if(!violation && evidenceItems.length && !/\[\d{1,3}\]/.test(result.reply)) violation='MISSING_CITATION';
     if(!violation){violation=this.guard.outputReason(result.reply,evidenceItems,source,guardContext);if(violation){const diagnostic=this.guard.outputDiagnostic(result.reply,evidenceItems,source,guardContext);log('output',result.reply,violation);console.warn(JSON.stringify({event:'guard_block',reason:violation,detail:diagnostic.detail,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:evidenceItems.map(x=>x.number??null),preview:result.reply.slice(0,300)}));}}
@@ -984,12 +992,10 @@ export class AiService {
     const handoffLine=searchPerformed && !items.length && Object.keys(queryFilters).length>0 && input.filters===undefined && !input.property_id && !contactOnly && !ownerRequest(source) && !/chuyên viên|nhân viên tư vấn/iu.test(result.reply) ? ` Nếu chưa ưng, mình nhờ chuyên viên tư vấn tìm thêm giúp ${address} nhé.` : '';
     const nearestLine=nearestReason && related.length && !items.length ? `\nMình gửi bên dưới ${related.length} căn gần tiêu chí nhất (${nearestReason.toLocaleLowerCase('vi')}) để ${address} tham khảo nhé.${handoffLine}` : handoffLine ? `\n${handoffLine.trim()}` : '';
        const noMatchPrefix=financeNote ? '' : noMatch && !modelAlreadyNoMatch ? `${noMatchReply(source)}\n` : related.length && !items.length && !modelAlreadyNoMatch ? `${noMatchReply(source).split('. ')[0]}.\n` : '';
-       const postLegalSource=legalTarget ? String((legalTarget as {description?:unknown}).description || '') : '';
-       const postLegalFolded=[...postLegalSource.normalize('NFD')].filter(char=>{const code=char.codePointAt(0) || 0; return code<0x300 || code>0x36f;}).join('').replace(String.fromCodePoint(0x0111),'d').toLocaleLowerCase('vi');
-       const postLegalGrounded=postLegalFolded.includes('san so hong') || postLegalFolded.includes('so hong');
-       const postLegalFact=postLegalGrounded ? 'Tin đăng ghi sẵn sổ hồng' : postLegalSource || groundedLegalDetail;
-       const postLegalReply=legalTarget && (legalQuestionDirect || postLegalGrounded) && postLegalFact && !isRawListingDump(postLegalFact) ? `Căn số ${legalTarget.number ?? 2} ${shortListingName(legalTarget.name)} [${legalTarget.number ?? 2}]. ${postLegalFact}. Mình không thể xác nhận pháp lý thay cho giấy tờ gốc; bạn nên kiểm tra bản gốc và cơ quan đăng ký đất đai.` : '';
-       const finalLegalReply=evidenceItems.length===1 && legalQuestionDirect && groundedLegalDetail ? `Căn số ${evidenceItems[0].number ?? 1} ${shortListingName(evidenceItems[0].name)} [${evidenceItems[0].number ?? 1}]. Tin đăng ghi: ${groundedLegalDetail}. Mình không thể xác nhận pháp lý thay cho giấy tờ gốc; bạn nên kiểm tra bản gốc và cơ quan đăng ký đất đai.` : '';
+        const postLegalSource=legalTarget ? String((legalTarget as {description?:unknown}).description || '') : '';
+        const postLegalFact=legalFactFromText(postLegalSource) || groundedLegalDetail;
+        const postLegalReply=legalTarget && legalQuestionDirect && postLegalFact ? legalFactReply(legalTarget,postLegalFact) : '';
+        const finalLegalReply=evidenceItems.length===1 && legalQuestionDirect && groundedLegalDetail ? legalFactReply(evidenceItems[0],groundedLegalDetail) : '';
        const deterministicListingReply=blocked ? (evidenceItems.length ? groundedSummary(evidenceItems) : safeReply) : result.reply;
       const deterministicRiskPrefix=blocked&&evidenceItems.length&&riskQuestion ? `${investmentRiskLine.trimStart()}\n` : '';
        const reply=deterministicRiskPrefix+(!hasDisclosure && count===0 ? `${disclosure}\n`:'')+criteriaLine+(moreNoNew ? '' : (cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatchPrefix))+(moreNoNew || cheaperNoMatch || blocked && !items.length && noMatch && !modelAlreadyNoMatch ? '' : (postLegalReply || finalLegalReply || (blocked ? deterministicListingReply:result.reply)))+areaToleranceSuffix+moreStatus+unsupportedSuffix+ownerSuffix+loanSuffix+bookingLine+contactLine+nearestLine+availableAreasLine+sameAreaTypesLine+similarLine+appendBudget;
@@ -1030,7 +1036,8 @@ export class AiService {
     // "tầng 12 của tòa nhà có 12 tầng": the unit floor never tells how tall the building is, unless the listing says so.
     const floorsFixed=viewingFixed.replace(/\s*(?:của|trong)\s+tòa(?: nhà)?(?: có)?\s+(\d+)\s+tầng(?=[\s,.;])/giu,(match,floors)=>evidenceItems.some(item=>item.property_type==='Apartment') || !new RegExp(`${floors}\\s*tầng`,'iu').test(listingText.replace(/tầng\s*\d+/giu,'')) ? '' : match);
     // Imported apartment details write the unit floor as "12 tầng", so for apartments the clause is always dropped.
-     const replyWithoutListingCodes=redactListingCodesSafe(scrubOutsideDetailViewing(floorsFixed),evidenceItems).trimStart();
+      const finalNormalisedReply=normalizeFinalReply(scrubOutsideDetailViewing(floorsFixed),source,evidenceItems);
+      const replyWithoutListingCodes=redactListingCodesSafe(finalNormalisedReply,evidenceItems).trimStart();
     // needs_v1 is deliberately not on the response path. The deterministic
     // extraction below remains available for the commit, while the richer LLM
     // extraction runs after the reply has been sent and can never fail the turn.
@@ -1047,18 +1054,27 @@ export class AiService {
     const merged:Record<string,{value:unknown;evidence?:string;confirmed_by?:unknown}>|null=scoring ? {...scoring.needs,...acceptedFields}:null;
     if(merged && scoring)for(const [k,f] of Object.entries(scoring.needs))if(object(f) && Object.hasOwn(f,'confirmed_by'))merged[k]=f;
     const changed=merged && scoring ? Object.keys(acceptedFields).filter(k=>JSON.stringify(merged[k]?.value)!==JSON.stringify(scoring!.needs[k]?.value)):[];
-    let score:object|null=null;
-    if(merged && scoring && changed.length){
-      const interest=safeEvidence(await retrieveIds([...interestIds,...scoring.interest_ids || [],...items.map(p=>p.id)]));
+     const commitSources=items.filter(item=>typeof item.id==='string'&&uuidPattern.test(item.id));
+     if(commitSources.length!==items.length)console.warn(JSON.stringify({event:'chat_commit_sources_filtered',provided:items.length,persisted:commitSources.length}));
+     let score:object|null=null;
+     if(merged && scoring && changed.length){
+       const interest=safeEvidence(await retrieveIds([...interestIds,...scoring.interest_ids || [],...commitSources.map(p=>p.id)]));
       const preserve:Dimension[]=[];
       if(!changed.some(k=>k.startsWith('budget_')))preserve.push('budget');
       if(!changed.some(k=>['locations','property_types'].includes(k)))preserve.push('area_type');
       score={...this.scoring.scoreNeeds(merged,interest,scoring.verified,scoring.score_result,preserve),needs_version:scoring.version};
     }
     const commitStarted=performance.now();
-    const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:replyWithoutListingCodes,p_sources:items,p_actions:actions,p_fields:acceptedFields,p_score:score});
-    timing.commit=performance.now()-commitStarted;
-    if(committed.error)return catalogDatabaseError(committed.error);
+     const commitPayload={p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:replyWithoutListingCodes,p_sources:commitSources,p_actions:actions,p_fields:acceptedFields,p_score:score};
+     let committed=await systemClient().rpc('pose_system_ai_commit_chat',commitPayload);
+     const commitError=committed.error;
+     const internalValidationFailure=commitError && (['22023','22P02','23514','23502','22003'].includes(commitError.code || '') || /INVALID_INPUT|invalid input/i.test(commitError.message || ''));
+     if(internalValidationFailure){
+       console.warn(JSON.stringify({event:'chat_commit_validation_fallback',error:commitError.message || commitError.code || 'INVALID_INPUT'}));
+       committed=await systemClient().rpc('pose_system_ai_commit_chat',{...commitPayload,p_sources:[],p_fields:{},p_score:null});
+     }
+     timing.commit=performance.now()-commitStarted;
+     if(committed.error)return internalValidationFailure ? catalogError('CATALOG_UNAVAILABLE','Không thể lưu hội thoại lúc này.',503) : catalogDatabaseError(committed.error);
     const backgroundNeeds=!blocked ? modelNeedsPromise.then(modelNeeds=>{
       if(!modelNeeds)return;
       for(const entry of modelNeeds.invalid) console.warn(JSON.stringify({event:'invalid_need',entry}));

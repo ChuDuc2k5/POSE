@@ -16,7 +16,7 @@ describe('Hotfix 22 detail regressions', () => {
 
   it('replaces unknown-answer sentences as whole sentences and skips known missing-data wording', () => {
     const spliced = 'Tin đăng chưa có thông tin về pháp lý đó. Mình không tự ý đoán hay nói không biết mà sẽ dựa vào quy định chung.';
-    expect(correctUnknownReply(spliced)).toBe(spliced);
+    expect(correctUnknownReply(spliced)).toBe('Tin đăng chưa có thông tin về pháp lý đó. Tin đăng chưa có thông tin; mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn.');
     expect(correctUnknownReply('Mình không tự ý đoán hay nói không biết.')).toBe('Tin đăng chưa có thông tin; mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn.');
   });
 

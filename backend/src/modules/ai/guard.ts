@@ -375,8 +375,14 @@ export function removeUnpromptedNegotiation(reply:string, question:string) {
 }
 
 export function correctUnknownReply(reply:string) {
-  if (/chưa có thông tin/iu.test(reply)) return reply;
-  return reply.replace(/(^|[.!?\n]\s*)(?:Mình\s+)?không tự ý đoán hay nói không biết(?=[.!?\n]|$)/giu, '$1Tin đăng chưa có thông tin; mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn');
+  return reply.replace(/(^|[.!?\n]\s*)([^.!?\n]*\bkhông(?:\s+\p{L}+){0,12}\s+nói\s+không\s+biết\b[^.!?\n]*[.!?]?)/giu, '$1Tin đăng chưa có thông tin; mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn.');
+}
+
+export function normalizeFinalReply<T extends { availability?: string }>(reply:string, question:string, sources:T[]) {
+  return removeUnpromptedNegotiation(
+    rewriteUnverifiedAvailability(correctUnknownReply(sanitizeReply(reply)), question, sources),
+    question,
+  );
 }
 
 export function isRawListingDump(reply: string) {

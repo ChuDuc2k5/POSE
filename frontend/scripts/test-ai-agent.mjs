@@ -220,13 +220,17 @@ const provider=createServer(async(req,res)=>{
    // The simulated model reacts to what the customer asked, not to words in the system prompt.
    let customerAsk='';try{customerAsk=String(JSON.parse(modelDataText||'{}').customer_text||'');}catch{}
     if(dataText.includes('"injection_suspected":true')){if(!modelData.length)modelData.push({});modelData.at(-1).injection_suspected=true;}
-    if(mode==='hotfix-22' && !hasToolResult){
-      if(/website ghi 2,5|200 triệu/iu.test(customerAsk)){
-        const rawDetail='Căn số 1 Bán Căn Hộ 2pn2wc Chỉ 2,95 Tỷ Tặng Nội Thất Vinhomes Grand Park Thủ Đức [1]. BÁN CĂN HỘ 2PN2WC CHỈ 2 Mã căn: S703 tầng 12 Diện tích tim tường: 61.4m2 Loại căn: 2pn2wc Nội thất có bếp rèm View: nội khu hướng Đông Nam Note: sẵn sổ Tiện ích: chỗ đậu xe hồ bơi phòng gym an ninh/camera ban công sân vườn máy lạnh. 2 phòng tắm. 12 tầng. Hướng Đông Nam. Có nội thất. Nguồn: dữ liệu Revoland.. Bất động sản bán · dữ liệu Revoland. Mình không thể xác nhận pháp lý thay cho giấy tờ gốc; bạn nên kiểm tra bản gốc và cơ quan đăng ký đất đai. Chuyên viên tư vấn của TERAVA có thể liên hệ để hỗ trợ bạn đăng tin và quản lý giao dịch.';
-        if(!regeneration)return reply(200,{choices:[{message:{role:'assistant',content:rawDetail}}]});
-        return reply(200,{choices:[{message:{role:'assistant',content:/website ghi/iu.test(customerAsk)?'Theo dữ liệu công bố, căn này có giá tham khảo và cần xác nhận lại với chuyên viên [1].':'TERAVA không cam kết biến động giá sau giao dịch; bạn nên ghi rõ điều khoản trong hợp đồng [1].'}}]});
-      }
-      if(/giá bán cuối cùng|phát sinh thêm chi phí|ký hợp đồng/iu.test(customerAsk))return reply(200,{choices:[{message:{role:'assistant',content:'Ngoài giá bán còn có lệ phí trước bạ, thuế thu nhập cá nhân, phí công chứng và phí bảo trì [1].'}}]});
+     if(mode==='hotfix-22' && !hasToolResult){
+       if(/website ghi 2,5|200 triệu/iu.test(customerAsk)){
+         const rawDetail='Căn số 1 Bán Căn Hộ 2pn2wc Chỉ 2,95 Tỷ Tặng Nội Thất Vinhomes Grand Park Thủ Đức [1]. BÁN CĂN HỘ 2PN2WC CHỈ 2 Mã căn: S703 tầng 12 Diện tích tim tường: 61.4m2 Loại căn: 2pn2wc Nội thất có bếp rèm View: nội khu hướng Đông Nam Note: sẵn sổ Tiện ích: chỗ đậu xe hồ bơi phòng gym an ninh/camera ban công sân vườn máy lạnh. 2 phòng tắm. 12 tầng. Hướng Đông Nam. Có nội thất. Nguồn: dữ liệu Revoland.. Bất động sản bán · dữ liệu Revoland. Mình không thể xác nhận pháp lý thay cho giấy tờ gốc; bạn nên kiểm tra bản gốc và cơ quan đăng ký đất đai. Chuyên viên tư vấn của TERAVA có thể liên hệ để hỗ trợ bạn đăng tin và quản lý giao dịch.';
+         if(!regeneration)return reply(200,{choices:[{message:{role:'assistant',content:rawDetail}}]});
+         return reply(200,{choices:[{message:{role:'assistant',content:/website ghi/iu.test(customerAsk)?'Theo dữ liệu công bố, căn này có giá tham khảo và cần xác nhận lại với chuyên viên [1].':'TERAVA không cam kết biến động giá sau giao dịch; bạn nên ghi rõ điều khoản trong hợp đồng [1].'}}]});
+       }
+       if(/sổ hồng|giấy tờ/iu.test(customerAsk)){
+         const rawDetail='Căn số 1 Bán Căn Hộ 2pn2wc Chỉ 2,95 Tỷ Tặng Nội Thất Vinhomes Grand Park Thủ Đức [1]. BÁN CĂN HỘ 2PN2WC CHỈ 2 Mã căn: S703 tầng 12 Diện tích tim tường: 61.4m2 Note: sẵn sổ Nguồn: dữ liệu Revoland.. Bất động sản bán · dữ liệu Revoland.';
+         return reply(200,{choices:[{message:{role:'assistant',content:regeneration?'Mình không thể xác nhận giấy tờ gốc của căn này [1].':rawDetail}}]});
+       }
+       if(/giá bán cuối cùng|phát sinh thêm chi phí|ký hợp đồng/iu.test(customerAsk))return reply(200,{choices:[{message:{role:'assistant',content:'Ngoài giá bán còn có lệ phí trước bạ, thuế thu nhập cá nhân, phí công chứng và phí bảo trì [1].'}}]});
       if(/thực sự kiểm tra|còn trống|còn bán/iu.test(customerAsk))return reply(200,{choices:[{message:{role:'assistant',content:'Căn này đang được ghi là còn mở bán trên hệ thống TERAVA, tức là tin đăng đang cập nhật tình trạng tin đăng đang ghi là còn bán [1].'}}]});
       if(/không có thông tin về pháp lý/iu.test(customerAsk))return reply(200,{choices:[{message:{role:'assistant',content:'Tin đăng chưa có thông tin về pháp lý đó. Mình không tự ý đoán hay nói không biết mà sẽ dựa vào quy định chung.'}}]});
       if(/không muốn chịu(?: bất kỳ)? rủi ro|chắc chắn sinh lời/iu.test(customerAsk))return reply(200,{choices:[{message:{role:'assistant',content:'Lô đất này có giá 999 tỷ [1].'}}]});
@@ -677,6 +681,9 @@ try{
   const detail103=await (await call('/api/ai/chat',{...base,property_id:hf22DetailId,message:'Giá trên website ghi 2,5 tỷ, nhưng lúc liên hệ nhân viên lại báo 2,7 tỷ. Vậy thông tin của bên bạn có đáng tin không?',history:[]})).json();
   const detail104=await (await call('/api/ai/chat',{...base,property_id:hf22DetailId,message:'Nếu tôi mua căn hộ này hôm nay mà tháng sau giá giảm 200 triệu thì bên bạn có chịu trách nhiệm không?',history:[]})).json();
   for(const [data,label] of [[detail103,'103'],[detail104,'104']])check(data.sources.length===1&&/\[1\]/.test(data.reply)&&!/Mã căn:|Nguồn: dữ liệu|đăng tin|Bất động sản bán ·/iu.test(data.reply),`Hotfix 22 detail ${label} answers from cited context without a raw dump`);
+  const detail107=await (await call('/api/ai/chat',{...base,property_id:hf22DetailId,message:'Bạn nói căn hộ này có sổ hồng rồi, vậy bạn có thể chứng minh bằng giấy tờ cụ thể không?',history:[]})).json();
+  const detail111=await (await call('/api/ai/chat',{...base,property_id:hf22DetailId,message:'Căn hộ này chưa có sổ hồng nhưng nhân viên tư vấn nói chắc chắn sẽ có trong năm nay. Bạn có dám xác nhận điều đó không?',history:[]})).json();
+  for(const [data,label] of [[detail107,'107'],[detail111,'111']])check(data.sources.length===1&&/\[1\]/.test(data.reply)&&!/Tin đăng ghi:|Mã căn:|Nguồn: dữ liệu|BÁN CĂN HỘ/iu.test(data.reply),`Hotfix 24 legal detail ${label} keeps only the legal fact`);
   const exact106=await (await call('/api/ai/chat',{...base,property_id:hf22DetailId,message:'Bạn có chắc đây là giá bán cuối cùng không, hay đến lúc ký hợp đồng lại phát sinh thêm chi phí?',history:[]})).json();
   check(/lệ phí trước bạ 0,5%/iu.test(exact106.reply)&&/thuế TNCN 2%/iu.test(exact106.reply),'106 keeps both fee percentages next to their labels');
   const exact114=await (await call('/api/ai/chat',{...base,property_id:hf22DetailId,message:'Bạn có thực sự kiểm tra được căn hộ này còn trống không, hay chỉ đang đọc lại thông tin cũ trên website?',history:[]})).json();
@@ -686,8 +693,8 @@ try{
   const exact124=await (await call('/api/ai/chat',{...base,property_id:hf22Mode.title_id,message:'Tôi muốn mua đất để đầu tư nhưng không muốn chịu bất kỳ rủi ro nào. Bạn có thể giới thiệu cho tôi một lô đất chắc chắn sinh lời không?',history:[]})).json();
   check(exact124.reply.startsWith('Không có khoản đầu tư nào không có rủi ro')&&!/999 tỷ/iu.test(exact124.reply),'124 starts a deterministic no-risk detail reply with the risk sentence');
   const textOnlyHistory=[{role:'user',content:'Tìm căn hộ mua ở Thủ Đức khoảng 2-3 tỷ'},{role:'assistant',content:'Mình gợi ý 3 căn hộ: [1] căn 2PN 65m² giá 2,5 tỷ; [2] căn 2PN 70m² giá 2,8 tỷ; [3] căn 1PN 50m² giá 2,1 tỷ.'}];
-   const textOnly127=await (await call('/api/ai/chat',{...base,message:'Trong ba căn hộ bạn vừa giới thiệu, căn nào có tổng chi phí sở hữu trong 5 năm nếu tính cả tiền vay, phí quản lý và chi phí bảo trì?',history:textOnlyHistory})).json();
-  check(textOnly127.sources.length===3&&textOnly127.related.length===0&&/70%|8–10%/iu.test(textOnly127.reply)&&/chưa có dữ liệu|chưa cho biết/iu.test(textOnly127.reply)&&/2,1 tỷ|50m²/iu.test(textOnly127.reply),'127 uses text-only history numbers with explicit finance and missing-fee assumptions');
+    const textOnly127=await (await call('/api/ai/chat',{...base,message:'Trong ba căn hộ bạn vừa giới thiệu, căn nào có tổng chi phí sở hữu trong 5 năm thấp nhất nếu tính cả tiền vay, phí quản lý và chi phí bảo trì?',history:textOnlyHistory})).json();
+  check(textOnly127.sources.length===3&&textOnly127.related.length===0&&!/Tiêu chí:/iu.test(textOnly127.reply)&&/70%|8–10%/iu.test(textOnly127.reply)&&/chưa có dữ liệu|chưa cho biết/iu.test(textOnly127.reply)&&/2,1 tỷ|50m²/iu.test(textOnly127.reply),'127 uses text-only history numbers with explicit finance and missing-fee assumptions');
   await (await fetch('http://localhost:3301/fixture/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'hotfix-20'})})).json();
   const affordability=await (await call('/api/ai/chat',{...base,message:'Tôi có 800 triệu, thu nhập 20 triệu mỗi tháng, muốn mua căn hộ 3 tỷ. Bạn có dám khuyên tôi vay ngân hàng để mua không?'})).json();
   check(!affordability.clarify?.needed&&affordability.sources.length===0&&affordability.related.length===0&&!/Tiêu chí:/iu.test(affordability.reply)&&/Khả năng chi trả/iu.test(affordability.reply),'119 finance advice answers directly without criteria or cards');
