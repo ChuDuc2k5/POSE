@@ -20,6 +20,15 @@ export type FinanceEvidence = {
   ratios: number[];
 };
 
+/** Amounts derived from a customer's stated loan percentage and a cited listing price. */
+export function derivedFinanceAmounts(text: string, listingPrices: number[]): number[] {
+  const ratios=[...text.matchAll(/(?:vay|borrow)\s*(?:khoảng\s*)?(\d+(?:[.,]\d+)?)\s*%/giu)]
+    .map(match=>Number(match[1].replace(',', '.'))/100)
+    .filter(ratio=>ratio>0&&ratio<=1);
+  const amounts=ratios.flatMap(ratio=>listingPrices.filter(price=>price>0).map(price=>Math.round(price*ratio)));
+  return [...new Set(amounts)];
+}
+
 const monthlyRate = (annualRate: number) => annualRate / 100 / 12;
 const numberWords: Record<string, number> = { một: 1, hai: 2, ba: 3, bốn: 4, năm: 5, sáu: 6, bảy: 7, tám: 8, chín: 9, mười: 10 };
 const smallNumber = (value: string) => Number.isFinite(Number(value)) ? Number(value) : numberWords[value.toLocaleLowerCase('vi')] || 0;

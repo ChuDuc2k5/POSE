@@ -11,6 +11,11 @@ function numeric(raw: string) {
   const value = grouped ? raw.replace(/[., ]/g, '') : decimalGroups ? decimalGroups[1].replace(/[., ]/g, '') + '.' + decimalGroups[2].slice(1) : raw.replace(/ /g, '').replace(',', '.');
   return Number(value);
 }
+// With a tỷ/triệu unit, a single separator is Vietnamese decimal notation even
+// when it has three fractional digits (for example 2,093 tỷ).
+function unitNumeric(raw: string) {
+  return /^\d{1,3}[.,]\d{3}$/.test(raw) ? Number(raw.replace(',', '.')) : numeric(raw);
+}
 function multiplier(unit: string) {
   if (/^(tỷ|tỉ|ty|billion)$/i.test(unit)) return 1e9;
   if (/^(triệu|tr|million)$/i.test(unit)) return 1e6;
@@ -24,7 +29,7 @@ export function moneyAmounts(text: string): number[] {
   const source = stripPhones(text).replace(/[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}/gi, '').replace(new RegExp(wordPattern, 'giu'), (_, word: string, unit: string) => words[word.toLowerCase()] + ' ' + unit);
   const add = (start: number, end: number, value: number) => { if (Number.isFinite(value)) { amounts.push(Math.round(value * 100) / 100); consumed.push([start, end]); } };
   const billion = new RegExp('(?<![\\p{L}\\p{N}_])(' + numberPattern + ')\\s*(tỷ|tỉ|ty)(?:\\s*(' + numberPattern + ')\\s*(triệu|tr)|\\s+(' + numberPattern + ')(?=\\s|$))?', 'giu');
-  for (const match of source.matchAll(billion)) add(match.index!, match.index! + match[0].length, numeric(match[1]) * 1e9 + (match[4] ? numeric(match[4]) * 1e6 : match[7] ? numeric(match[7]) * 1e8 : 0));
+  for (const match of source.matchAll(billion)) add(match.index!, match.index! + match[0].length, unitNumeric(match[1]) * 1e9 + (match[4] ? unitNumeric(match[4]) * 1e6 : match[7] ? unitNumeric(match[7]) * 1e8 : 0));
   const million = new RegExp('(?<![\\p{L}\\p{N}_])(' + numberPattern + ')\\s*(triệu|tr(?![\\p{L}_]))\\s*(' + numberPattern + ')\\s*(nghìn|ngàn|k)?(?![\\p{L}\\p{N}_])', 'giu');
   for (const match of source.matchAll(million)) if (!consumed.some(([start, end]) => match.index! >= start && match.index! < end)) add(match.index!, match.index! + match[0].length, numeric(match[1]) * 1e6 + numeric(match[4]) * (match[6] ? multiplier(match[6]) : 1e5));
   const pattern = new RegExp('(?<![A-Za-z0-9_])(' + numberPattern + ')\\s*(' + unitPattern + ')?(?![\\p{L}\\p{N}_])', 'giu');

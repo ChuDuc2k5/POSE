@@ -1,6 +1,14 @@
 import { object, propertyTypes } from './extraction.ts';
 import { moneyAmounts, priceLabel } from './money.ts';
-export function sanitizeReply(reply:string) { return reply.replace(/\[n\]/gi,'').replace(/\s*\[FAQ\s*\d+\]/gi,'').replace(/\bDATA\b/g,'dữ liệu').replace(/[ \t]{2,}/g,' ').trim(); }
+export function sanitizeReply(reply:string) {
+  return reply
+    .replace(/\[n\]/gi,'')
+    .replace(/\s*\[[^\]\r\n]*\]/giu, token => /^\s*\[\d+\]\s*$/u.test(token) ? token : '')
+    .replace(/\bDATA\b/g,'dữ liệu')
+    .replace(/([.!?]){2,}/gu,'$1')
+    .replace(/[ \t]{2,}/g,' ')
+    .trim();
+}
 export function redactListingCodes<T extends { code?: string; name?: string }>(reply:string, sources:T[]) {
   let result=reply;
   for(const source of sources.filter(item=>item.code)) {
@@ -103,6 +111,11 @@ export function groundedSummary(evidence:Evidence[]) {
   return `Mình tìm thấy ${properties.length} căn bạn có thể tham khảo:\n${lines.join('\n')}\nBạn muốn mình lọc thêm theo phường/đường, điều chỉnh ngân sách hay hẹn chuyên viên xem căn nào?`;
 }
 export type Evidence={id:string;code:string;name:string;price:number|null;availability:string;updated_at:string;location:string;property_type:string;area?:number|null;bedrooms?:number|null;transaction_type?:'Sale'|'Rent';price_period?:'Total'|'Month';number?:number;source_type?:'Property'|'Faq';reason?:string;areaNearCriteria?:boolean};
+export function isValidListingPrice(item:{price?:number|null;transaction_type?:string}) {
+  if(item.price === null || item.price === undefined) return true;
+  if(!Number.isFinite(item.price)) return false;
+  return item.transaction_type === 'Rent' ? item.price >= 500_000 : item.price >= 50_000_000;
+}
 const clauses=(text:string)=>text.split(/\n|[;!?]|(?<!\d)[.,](?!\d)/).filter(Boolean);
 function negated(text:string,index:number){
   const sentencePrefix=text.slice(0,index).split(/[.!?;\n]/u).at(-1) || '';
@@ -152,7 +165,8 @@ function moneyText(text:string,evidence:Evidence[]){
   for(const e of evidence)result=result.replace(new RegExp(`(?<![a-z0-9_-])${e.code.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?![a-z0-9_-])`,'gi'),'');
   return result;
 }
-export function outputReason(reply:string,evidence:Evidence[],customerText='',context?:{retrievalFound?:boolean;faqOnly?:boolean;filterAmounts?:number[];previousPrices?:number[];financeAmounts?:number[];financeRanges?:[number,number][];financePresent?:boolean;faqEvidence?:boolean;sourceText?:string;listingText?:string;practice?:boolean}) {
+export type GuardContext = {retrievalFound?:boolean;faqOnly?:boolean;filterAmounts?:number[];previousPrices?:number[];financeAmounts?:number[];financeRanges?:[number,number][];financePresent?:boolean;faqEvidence?:boolean;sourceText?:string;listingText?:string;practice?:boolean};
+export function outputReason(reply:string,evidence:Evidence[],customerText='',context?:GuardContext) {
   const returned=new Set(evidence.map(e=>e.number).filter((n):n is number=>typeof n==='number'));
   for(const match of reply.matchAll(/\[(\d+)\]/g))if(returned.size&&!returned.has(Number(match[1])))return 'INVALID_CITATION';
   const customerAmounts=moneyAmounts(customerText);
@@ -188,7 +202,7 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
   const perSquareMetre=evidence.flatMap(e=>e.price!==null&&e.area ? [e.price/e.area] : []);
   const sourceAmounts=moneyAmounts(context?.sourceText||'');
   const sourced=(amount:number)=>sourceAmounts.includes(amount)||perSquareMetre.some(value=>Math.abs(value-amount)<=value*0.03)||financeAmountGrounded(amount);
-  const allowed=[...customerAmounts,...effectiveLimits,...evidence.flatMap(e=>e.price===null ? []:[e.price])];
+  const allowed=[...customerAmounts,...effectiveLimits,...(context?.previousPrices || []),...evidence.flatMap(e=>e.price===null ? []:[e.price])];
   // A listing price rounded for reading (5.199.900.000 → "5,2 tỷ") is still that price.
   const listed=(amount:number)=>evidence.some(p=>p.price!==null&&Math.abs(p.price-amount)<=p.price*0.01);
   const grounds=(amount:number)=>allowed.includes(amount)||listed(amount)||sourced(amount);
@@ -226,12 +240,50 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
     // budget figures are only allowed when the clause talks about the budget.
     // "giá dưới 15 triệu/tháng" repeats the customer's own limit, not a listing price.
     const echoesLimit=(amount:number)=>(customerAmounts.includes(amount)||effectiveLimits.has(amount)) && /dưới|trên|tối đa|tối thiểu|không quá|khoảng|tầm|từ|đến|mức/i.test(clause);
-    if(/giá|price/i.test(clause) && !/ngân sách|bạn (?:đề nghị|nêu|có)|theo yêu cầu/i.test(clause) && moneyAmounts(moneyText(clause,evidence)).some(amount=>!echoesLimit(amount) && !(mentioned.length ? mentioned:evidence).some(p=>p.price!==null&&Math.abs(p.price-amount)<=p.price*0.01) && !sourced(amount)))return 'UNSUPPORTED_PRICE';
+    const priorPrice=(amount:number)=>(context?.previousPrices || []).some(value=>Math.abs(value-amount)<=value*0.01);
+    if(/giá|price/i.test(clause) && !/ngân sách|bạn (?:đề nghị|nêu|có)|theo yêu cầu/i.test(clause) && moneyAmounts(moneyText(clause,evidence)).some(amount=>!echoesLimit(amount) && !priorPrice(amount) && !(mentioned.length ? mentioned:evidence).some(p=>p.price!==null&&Math.abs(p.price-amount)<=p.price*0.01) && !sourced(amount)))return 'UNSUPPORTED_PRICE';
     const availability=[...clause.matchAll(/\bAvailable\b|còn (?:bán|hàng|để bán|cho thuê)|đang (?:mở bán|bán|cho thuê)|mở bán|chào bán|sẵn hàng|có sẵn|có thể (?:mua|thuê)|for (?:sale|rent)/gi)].filter(m=>!negated(clause,m.index!));
     if(!availability.length)continue;
     if(related.some(e=>e.availability!=='Available'))return 'UNSUPPORTED_AVAILABILITY';
   }
   return null;
+}
+
+/** Return the guard code plus the concrete token that caused a preview to be blocked. */
+export function outputDiagnostic(reply:string,evidence:Evidence[],customerText='',context?:GuardContext) {
+  const reason=outputReason(reply,evidence,customerText,context);
+  if(!reason)return {reason:null as null, detail:null as null};
+  if(reason==='UNSUPPORTED_COMMITMENT') {
+    const phrase=clauses(reply).find(clause=>commitment(clause,{legal:/sổ hồng|sổ đỏ|sẵn sổ|sổ riêng|có sổ|pháp lý/iu.test(context?.listingText||'') || !!context?.faqEvidence,practice:!!context?.practice}));
+    return {reason,detail:phrase ? `commitment: "${phrase.trim()}"` : 'commitment: unknown'};
+  }
+  if(reason==='UNSUPPORTED_PRICE') {
+    const customerAmounts=moneyAmounts(customerText);
+    const effectiveLimits=new Set([...(context?.filterAmounts || []), ...(context?.previousPrices || [])]);
+    const allowed=[...customerAmounts,...effectiveLimits,...evidence.flatMap(e=>e.price===null ? []:[e.price])];
+    const listed=(amount:number)=>evidence.some(p=>p.price!==null&&Math.abs(p.price-amount)<=p.price*0.01);
+    const unsupported=moneyAmounts(moneyText(reply,evidence)).find(amount=>!allowed.includes(amount)&&!listed(amount));
+    return {reason,detail:unsupported === undefined ? 'unsupported: unknown amount' : `unsupported: "${priceLabel(unsupported)}"`};
+  }
+  return {reason,detail:null as null};
+}
+
+export function rewriteUnsupportedPolicy(text:string,faqKnowledge:string,fallback:string) {
+  const faqText=faqKnowledge.normalize('NFC').toLocaleLowerCase('vi');
+  const policyPattern=/(?:TERAVA|bên\s+TERAVA)\s+(?:không\s+có|có|chưa\s+có)\s+chính\s+sách\s+([^.!?\n]+)/iu;
+  if(!policyPattern.test(text))return text;
+  const protect=(value:string)=>value
+    .replace(/\b(?:TP|Tp|Q|P)\./gu,match=>`${match}\uE000`)
+    .replace(/\bv\.v\./giu,match=>`${match}\uE001`)
+    .replace(/(?<=\d)[.,](?=\d)/gu,match=>`${match}\uE002`);
+  const restore=(value:string)=>value.replace(/\uE000/gu,'').replace(/\uE001/gu,'').replace(/\uE002/gu,'');
+  return restore(protect(text).split(/(\n|(?<=[.!?])\s+)/gu).map(part=>{
+    if(part==='\n'||/^\s+$/u.test(part))return part;
+    const match=part.match(policyPattern);
+    if(!match)return part;
+    const terms=match[1].normalize('NFC').toLocaleLowerCase('vi').split(/[^\p{L}\p{N}]+/u).filter(term=>term.length>=4).slice(0,3);
+    return terms.length&&terms.every(term=>faqText.includes(term)) ? part : fallback;
+  }).join(''));
 }
 
 export function removeReplyArtifacts<T extends { number?: number; name?: string; availability?: string }>(reply:string, sources:T[], allowMore=false) {
@@ -264,10 +316,13 @@ export function rewriteUnverifiedAvailability(reply:string, question:string, sou
     .replace(/căn(?:\s+này)?\s+hiện\s+trạng(?:\s+là)?\s+còn\s+trống/giu,'căn này vẫn được tin đăng ghi là còn bán')
     .replace(/hiện\s+trạng(?:\s+là)?\s+còn\s+trống/giu,'tin đăng đang ghi là còn bán')
     .replace(/căn(?:\s+này)?(?:\s+vẫn)?\s+còn\s+trống/giu,'căn này vẫn được tin đăng ghi là còn bán');
-  return result.replace(/còn\s+trống/giu,(match,index,whole:string)=>{
+  result=result.replace(/tin đăng (?:đang|được) ghi là còn\s+trống/giu,'tin đăng đang ghi là còn bán');
+  result=result.replace(/còn\s+trống/giu,(match,index,whole:string)=>{
     const prefix=whole.slice(0,index);
     return /tin\s+đăng(?:\s+\p{L}+){0,4}\s*$/iu.test(prefix) ? match : 'tin đăng đang ghi là còn bán';
   });
+  const canonical='tin đăng đang ghi là còn bán';
+  return result.replace(new RegExp(`(${canonical})([^.!?\\n]*?)(?:,?\\s*(?:tức là|nghĩa là)[^.!?\\n]*?${canonical})`,'giu'),'$1$2');
 }
 
 export function removeUnpromptedNegotiation(reply:string, question:string) {

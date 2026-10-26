@@ -11,7 +11,7 @@ import { normalizePhone } from '../../common/profile-validation.js';
 import { object } from './extraction.js';
 import { inferSearch, inferTransactionType, centralFormerDistricts, genericHome } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
-import { correctionData, labelMonthlyRent, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, normalizeCitations, discardInvalidCitations, redactListingCodesSafe, isAbusive, abusiveReply, dedupeListings, rewriteUnverifiedAvailability, removeUnpromptedNegotiation, type Evidence } from './guard.js';
+import { correctionData, labelMonthlyRent, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, normalizeCitations, discardInvalidCitations, redactListingCodesSafe, isAbusive, abusiveReply, dedupeListings, rewriteUnverifiedAvailability, removeUnpromptedNegotiation, outputDiagnostic, rewriteUnsupportedPolicy, isValidListingPrice, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult, type RankedChunk } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { assistantPrompt, complete, querySearch, checkAnswer, extractNeedsAfterReply, streamAgentStep } from './llm.ts';
@@ -27,7 +27,7 @@ import { hcmWards } from './hcm-wards.js';
 import { inquiryEvents } from '../../common/inquiry-events.js';
 import { displayListingName } from './display.js';
 import { areaAdviceQuestion, areaSummary, landPriceQuestion, marketSummary, priceComparisonQuestion, rentLevelQuestion } from './market.js';
-import { financeNoteForQuestion, financeEvidenceForQuestion } from './finance.js';
+import { financeNoteForQuestion, financeEvidenceForQuestion, derivedFinanceAmounts } from './finance.js';
 import { answerCriteriaLine, showCriteriaLine } from './answer-rules.js';
 import { correctUnknownReply, removeReplyArtifacts } from './guard.js';
 import { nearestRelaxationStages } from './nearest.js';
@@ -55,6 +55,9 @@ async function retrieve(filters:Record<string,unknown>,context:string|null):Prom
   const locations=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations:[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases:[])].map(value=>String(value).replace(/[%_\\]/g,'\\$&'));
   if(locations.length)query=query.or(locations.map(value=>`location.ilike.%${value}%`).join(','));
   if(filters.transaction_type)query=query.eq('transaction_type',filters.transaction_type);
+  if(filters.transaction_type==='Rent')query=query.gte('price',500_000);
+  else if(filters.transaction_type==='Sale')query=query.gte('price',50_000_000);
+  else query=query.or('and(transaction_type.eq.Sale,price.gte.50000000),and(transaction_type.eq.Rent,price.gte.500000)');
   if(filters.type)query=query.eq('property_type',filters.type);
   if(filters.minPrice!==undefined)query=query.gte('price',filters.minPrice);
   if(filters.maxPrice!==undefined)query=filters.maxPriceExclusive ? query.lt('price',filters.maxPrice) : query.lte('price',filters.maxPrice);
@@ -64,7 +67,7 @@ async function retrieve(filters:Record<string,unknown>,context:string|null):Prom
   if(Array.isArray(filters.exclude_ids)&&filters.exclude_ids.length)query=query.not('id','in',`(${filters.exclude_ids.map(value=>String(value).replace(/[(),]/g,'')).join(',')})`);
   const result=await query.order('updated_at',{ascending:false}).order('id').limit(5);
   if(result.error)throw new Error('RETRIEVAL_UNAVAILABLE');
-  return (result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[];
+  return (result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})).filter(isValidListingPrice) as Evidence[];
 }
 type StructuredCatalogueResult = { items: Evidence[]; count: number };
 async function retrieveStructured(filters:Record<string,unknown>,context:string|null):Promise<StructuredCatalogueResult> {
@@ -74,6 +77,9 @@ async function retrieveStructured(filters:Record<string,unknown>,context:string|
   const locations=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations:[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases:[])].map(value=>String(value).replace(/[%_\\]/g,'\\$&'));
   if(locations.length)query=query.or(locations.map(value=>`location.ilike.%${value}%`).join(','));
   if(filters.transaction_type)query=query.eq('transaction_type',filters.transaction_type);
+  if(filters.transaction_type==='Rent')query=query.gte('price',500_000);
+  else if(filters.transaction_type==='Sale')query=query.gte('price',50_000_000);
+  else query=query.or('and(transaction_type.eq.Sale,price.gte.50000000),and(transaction_type.eq.Rent,price.gte.500000)');
   if(filters.type)query=query.eq('property_type',filters.type);
   if(filters.minPrice!==undefined)query=query.gte('price',filters.minPrice);
   if(filters.maxPrice!==undefined)query=filters.maxPriceExclusive ? query.lt('price',filters.maxPrice) : query.lte('price',filters.maxPrice);
@@ -83,21 +89,22 @@ async function retrieveStructured(filters:Record<string,unknown>,context:string|
   if(Array.isArray(filters.exclude_ids)&&filters.exclude_ids.length)query=query.not('id','in',`(${filters.exclude_ids.map(value=>String(value).replace(/[(),]/g,'')).join(',')})`);
   const result=await query.order('updated_at',{ascending:false}).order('id').limit(25);
   if(result.error)throw new Error('RETRIEVAL_UNAVAILABLE');
-  return { items:(result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[], count:Number(result.count ?? 0) };
+  const items=(result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})).filter(isValidListingPrice) as Evidence[];
+  return { items, count:items.length < 25 ? items.length : Number(result.count ?? 0) };
 }
 async function retrieveIds(ids:string[]):Promise<Evidence[]> {
   if(!ids.length)return [];
   const result=await authClient().from('property_public_catalog').select('id,code,name,cover_id,area,bedrooms,price,availability,updated_at,location,property_type,transaction_type,price_period').in('id',[...new Set(ids)].slice(0,100)).limit(100);
   if(result.error)throw new Error('RETRIEVAL_UNAVAILABLE');
   const order=new Map(ids.map((id,index)=>[id,index]));
-  return (result.data || []).sort((a,b)=>(order.get(a.id)??Number.MAX_SAFE_INTEGER)-(order.get(b.id)??Number.MAX_SAFE_INTEGER)).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[];
+  return (result.data || []).sort((a,b)=>(order.get(a.id)??Number.MAX_SAFE_INTEGER)-(order.get(b.id)??Number.MAX_SAFE_INTEGER)).map(p=>({...p,price:p.price===null ? null:Number(p.price)})).filter(isValidListingPrice) as Evidence[];
 }
 async function retrieveCodes(codes:string[]):Promise<Evidence[]> {
   if(!codes.length)return [];
   const result=await authClient().from('property_public_catalog').select('id,code,name,cover_id,area,bedrooms,price,availability,updated_at,location,property_type,transaction_type,price_period').in('code',[...new Set(codes)].slice(0,5)).limit(5);
   if(result.error)throw new Error('RETRIEVAL_UNAVAILABLE');
   const order=new Map(codes.map((code,index)=>[code.toLowerCase(),index]));
-  return (result.data || []).sort((a,b)=>(order.get(a.code.toLowerCase())??Number.MAX_SAFE_INTEGER)-(order.get(b.code.toLowerCase())??Number.MAX_SAFE_INTEGER)).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[];
+  return (result.data || []).sort((a,b)=>(order.get(a.code.toLowerCase())??Number.MAX_SAFE_INTEGER)-(order.get(b.code.toLowerCase())??Number.MAX_SAFE_INTEGER)).map(p=>({...p,price:p.price===null ? null:Number(p.price)})).filter(isValidListingPrice) as Evidence[];
 }
 async function retrieveSimilar(propertyId:string):Promise<Evidence[]> {
   const result=await authClient().rpc('pose_similar_properties',{p_property:propertyId,p_limit:3});
@@ -255,11 +262,11 @@ export class AiService {
     const contactOnly=contactRequest(source) && !inferSearch(source) && !moneyAmounts(source).length;
      const explicitSearch=inferSearch(source);
      const hasSearchCriteria=Boolean(explicitSearch&&['location','locations','type','minPrice','maxPrice','minArea','maxArea','bedrooms','transaction_type'].some(key=>explicitSearch[key as keyof typeof explicitSearch]!==undefined));
-     const adviceOnly=(adviceOrServiceQuestion(source) || historyReferenceQuestion(source,sanitizedHistory)) && !hasSearchCriteria;
+     const adviceOnly=(adviceOrServiceQuestion(source) || historyReferenceQuestion(source,sanitizedHistory)) && !hasSearchCriteria && !input.property_id;
      const cashAmounts=moneyAmounts(source);
      const loanBudget=inferLoanBudget(source);
      const strictCashBudget=noLoanWords(source) && typeof inferSearch(source)?.maxPrice==='number' ? inferSearch(source)?.maxPrice as number : null;
-    let searchPerformed=input.filters!==undefined || !!input.property_id,rag:RetrievalResult|null=null;
+    let searchPerformed=(input.filters!==undefined || !!input.property_id) && !adviceOnly,rag:RetrievalResult|null=null;
     let structuredRemainingCount:number|null=null;
     const filterAmounts:number[]=[];
     let items:Evidence[]=[],related:Record<string,unknown>[]=[];
@@ -358,11 +365,11 @@ export class AiService {
     // `inferSearch` is only an input to the validated query step below.
     const actions:{tool:string;args_hash:string;decision:string;reason:string;rule_version:string}[]=[];
     const log=(tool:string,args:unknown,reason:string|null,decision?:'flagged')=>actions.push({tool,args_hash:hash(JSON.stringify(args) || 'null'),decision:decision || (reason ? 'blocked':'allowed'),reason:reason || 'VALIDATED',rule_version:GUARD_VERSION});
-    const safeEvidence=(list:Evidence[])=>list.filter(item=>{const reason=this.guard.evidenceReason(item);if(reason)log('retrieval',{id:item.id},reason);return !reason;});
-     items=dedupeListings(safeEvidence(items)).filter(item=>item.price===null||item.price===undefined||typeof item.price!=='number'||item.price>0);
+    const safeEvidence=(list:Evidence[])=>list.filter(item=>{const reason=this.guard.evidenceReason(item);if(reason)log('retrieval',{id:item.id},reason);if(!isValidListingPrice(item)){log('retrieval',{id:item.id,code:item.code,price:item.price,transaction_type:item.transaction_type},'INVALID_PRICE_FLOOR');return false;}return !reason;});
+    items=dedupeListings(safeEvidence(items)).filter(isValidListingPrice);
     const locationTextIsConsistent=(item:{name?:unknown;location?:unknown})=>!(String(item.name||'')).match(/Lạc Thủy/iu)||/Lạc Thủy/iu.test(String(item.location||''));
     items=items.filter(locationTextIsConsistent);
-    related=related.filter(locationTextIsConsistent);
+    related=related.filter(locationTextIsConsistent).filter(isValidListingPrice);
     const suspected=this.guard.injection(input.message) || sanitizedHistory.some(t=>this.guard.injection(t.content));
     if(suspected)log('input',source,'PROMPT_INJECTION','flagged');
     // Query understanding is a separate, validated step. The deterministic
@@ -499,14 +506,14 @@ export class AiService {
     let cheaperNoMatch=false;
      if(budgetAdjustment && !items.length && !input.property_id){
       const relaxedBudget=Object.fromEntries(Object.entries(budgetAdjustment.filters).filter(([key])=>key!=='minPrice'&&key!=='maxPrice'));
-      const closest=await search(relaxedBudget,null,referenceIds,[standalone,...queryKeywords].join(' '));
+      const closest=(await search(relaxedBudget,null,referenceIds,[standalone,...queryKeywords].join(' '))).filter(isValidListingPrice);
       const shownPrices=sanitizedHistory.slice().reverse().find(turn=>turn.role==='assistant'&&Array.isArray(turn.sources))?.sources?.map(source=>source.price).filter((value):value is number=>typeof value==='number'&&Number.isFinite(value))||[];
       const budgetCeiling=typeof budgetAdjustment.filters.maxPrice==='number' ? budgetAdjustment.filters.maxPrice : undefined;
       const closestCandidates=closest.filter(item=>item.price!==null && (budgetAdjustment.direction==='cheaper' ? true : item.price>Math.max(...shownPrices,0)));
       const inBudget=budgetCeiling===undefined ? closestCandidates : closestCandidates.filter(item=>typeof item.price==='number'&&item.price<=budgetCeiling);
       const overBudget=budgetCeiling===undefined ? [] : closestCandidates.filter(item=>typeof item.price==='number'&&item.price>budgetCeiling);
       items=inBudget.sort((a,b)=>(b.price??-Infinity)-(a.price??-Infinity)).slice(0,3);
-      related.push(...overBudget.sort((a,b)=>Math.abs((budgetCeiling||0)-(a.price||0))-Math.abs((budgetCeiling||0)-(b.price||0))).slice(0,3).map(item=>({...item,number:undefined,relaxed_reason:'Ngoài ngân sách đã nêu',reason:'Ngoài ngân sách đã nêu',related:true})));
+       related.push(...overBudget.filter(isValidListingPrice).sort((a,b)=>Math.abs((budgetCeiling||0)-(a.price||0))-Math.abs((budgetCeiling||0)-(b.price||0))).slice(0,3).map(item=>({...item,number:undefined,relaxed_reason:'Ngoài ngân sách đã nêu',reason:'Ngoài ngân sách đã nêu',related:true})));
       cheaperNoMatch=budgetAdjustment.direction==='cheaper' && !items.length;
        if(items.length) console.info(JSON.stringify({event:'budget_closest',direction:budgetAdjustment.direction,found:items.length}));
      }
@@ -521,7 +528,7 @@ export class AiService {
        const nearestSearch=async (filters:Record<string,unknown>) => {
          const found=await search(filters,null,referenceIds,query);
          const fallback=found.length ? found : await retrieve(filters,null).catch(()=>[] as Evidence[]);
-         return fallback.filter(item=>typeof item.price==='number'&&Number.isFinite(item.price)&&item.price>0);
+         return fallback.filter(isValidListingPrice).filter(item=>typeof item.price==='number'&&Number.isFinite(item.price)&&item.price>0);
        };
       let near:Evidence[]=[];
        for(const stage of nearestRelaxationStages(queryFilters)){
@@ -533,7 +540,7 @@ export class AiService {
          near=(await retrieve(finalFilters,null).catch(()=>[] as Evidence[])).filter(item=>typeof item.price==='number'&&Number.isFinite(item.price)&&item.price>0);
          if(near.length)nearestReason='Nới ngân sách, diện tích, phòng ngủ và khu vực';
        }
-      related=near.filter(item=>typeof item.price==='number'&&Number.isFinite(item.price)&&item.price>0).sort((left,right)=>{
+      related=near.filter(isValidListingPrice).filter(item=>typeof item.price==='number'&&Number.isFinite(item.price)&&item.price>0).sort((left,right)=>{
         if(typeof queryFilters.maxPrice!=='number') return 0;
         const leftIn=left.price!<=queryFilters.maxPrice, rightIn=right.price!<=queryFilters.maxPrice;
         if(leftIn!==rightIn) return leftIn ? -1 : 1;
@@ -596,7 +603,7 @@ export class AiService {
           const sourceDistrict=districtKey(sourceItem.location||'');
            similar=candidates.filter(candidate=>candidate.id!==sourceItem.id && candidate.transaction_type===sourceItem.transaction_type && candidate.property_type===sourceItem.property_type && typeof candidate.price==='number' && candidate.price>0 && candidate.price>=sourceItem.price!*.7 && candidate.price<=sourceItem.price!*1.3 && districtKey(candidate.location||'')===sourceDistrict).slice(0,3);
          }
-         related=similar.filter(item=>typeof item.price==='number'&&Number.isFinite(item.price)&&item.price>0).slice(0,3).map(item=>({...item,number:undefined,reason:'Căn tương tự cùng loại, cùng giao dịch và cùng khu vực',related:true}));
+         related=similar.filter(isValidListingPrice).filter(item=>typeof item.price==='number'&&Number.isFinite(item.price)&&item.price>0).slice(0,3).map(item=>({...item,number:undefined,reason:'Căn tương tự cùng loại, cùng giao dịch và cùng khu vực',related:true}));
       }catch(error){console.warn(JSON.stringify({event:'similar_retrieval_failed',error:error instanceof Error?error.message:'RETRIEVAL_UNAVAILABLE'}));}
     }
     const similarLine=similarQuestion && related.length ? `\nMình gửi bên dưới ${related.length} căn tương tự (cùng loại, cùng khu vực, giá gần bằng) để ${address} tham khảo nhé.` : '';
@@ -729,13 +736,16 @@ export class AiService {
     const finalRag=rag as RetrievalResult|null;if(finalRag){const rendered=renderRetrievedContextWithCards(finalRag.chunks,new Set(items.map(x=>x.id)));rag={...finalRag,...rendered};items=items.map(item=>({...item,number:((rendered.sources.find(s=>(s as {id?:string}).id===item.id) as {number?:number}|undefined)?.number),source_type:'Property'}));}else items=items.map((item,index)=>({...item,number:index+1,source_type:'Property'}));
     const evidenceItems=items;
     const previousPrices=sanitizedHistory.flatMap(turn=>turn.role==='assistant'&&Array.isArray(turn.sources)?turn.sources.map(source=>source.price).filter((value):value is number=>typeof value==='number'&&Number.isFinite(value)):[]);
+    const relatedPrices=related.map(item=>item.price).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
     const rememberedBudgetAmounts=[rememberedCriteria.minPrice,rememberedCriteria.maxPrice].filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
-    const guardContext={retrievalFound:rag?.found??evidenceItems.length>0,faqOnly:evidenceItems.length>0&&evidenceItems.every(x=>x.source_type==='Faq'),filterAmounts:[...new Set([...filterAmounts,...rememberedBudgetAmounts])],previousPrices:[...new Set(previousPrices)],sourceText:`${rag?.context||''}\n${generalKnowledge}\n${marketNote}\n${[...details.values()].join('\n')}`,listingText:[...details.values()].join('\n'),practice:generalKnowledge.length>0};
-     Object.assign(guardContext,{financeAmounts:financeEvidence?.amounts || [],financeRanges:financeEvidence?.ranges || [],financePresent:Boolean(financeEvidence),faqEvidence:faqRows.length>0 || generalKnowledge.length>0});
+    const currentBudgetAmounts=['minPrice','maxPrice'].map(key=>queryFilters[key]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    const guardContext={retrievalFound:rag?.found??evidenceItems.length>0,faqOnly:evidenceItems.length>0&&evidenceItems.every(x=>x.source_type==='Faq'),filterAmounts:[...new Set([...filterAmounts,...rememberedBudgetAmounts,...currentBudgetAmounts])],previousPrices:[...new Set([...previousPrices,...relatedPrices])],sourceText:`${rag?.context||''}\n${generalKnowledge}\n${marketNote}\n${[...details.values()].join('\n')}`,listingText:[...details.values()].join('\n'),practice:generalKnowledge.length>0};
+     const derivedFinance=derivedFinanceAmounts(source,[...evidenceItems,...related].map(item=>item.price).filter((value): value is number => typeof value==='number' && Number.isFinite(value)));
+     Object.assign(guardContext,{financeAmounts:[...(financeEvidence?.amounts || []),...derivedFinance],financeRanges:financeEvidence?.ranges || [],financePresent:Boolean(financeEvidence || derivedFinance.length),faqEvidence:faqRows.length>0 || generalKnowledge.length>0});
      result.reply=removeUnpromptedNegotiation(rewriteUnverifiedAvailability(removeReplyArtifacts(discardInvalidCitations(labelMonthlyRent(normalizeCitations(result.reply,evidenceItems),evidenceItems),evidenceItems),evidenceItems,moreRequest),source,evidenceItems),source);
     const guardStarted=performance.now();
     if(!violation && evidenceItems.length && !/\[\d{1,3}\]/.test(result.reply)) violation='MISSING_CITATION';
-    if(!violation){violation=this.guard.outputReason(result.reply,evidenceItems,source,guardContext);if(violation){log('output',result.reply,violation);console.warn(JSON.stringify({event:'guard_block',reason:violation,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:evidenceItems.map(x=>x.number??null),preview:result.reply.slice(0,300)}));}}
+    if(!violation){violation=this.guard.outputReason(result.reply,evidenceItems,source,guardContext);if(violation){const diagnostic=this.guard.outputDiagnostic(result.reply,evidenceItems,source,guardContext);log('output',result.reply,violation);console.warn(JSON.stringify({event:'guard_block',reason:violation,detail:diagnostic.detail,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:evidenceItems.map(x=>x.number??null),preview:result.reply.slice(0,300)}));}}
     timing.guard=performance.now()-guardStarted;
     let blocked=false;
     if(violation){
@@ -744,7 +754,7 @@ export class AiService {
        agent=actionRequest || !compactAnswer ? await run(retryMessages) : await complete({question:standalone,history:sanitizedHistory,market_summary:marketNote||undefined,finance_calculation:financeNote||undefined,viewed_listing:viewedPropertyId?'Khách đang xem căn [1] trên trang chi tiết; "căn này" là căn [1].':undefined,properties:modelProperties(evidenceItems),general_knowledge:generalKnowledge||undefined,customer_text:source,customer_name:customerName||undefined,search_performed:searchPerformed,budget_follow_up:budgetAdjustment ? `${budgetAdjustment.direction}; ${JSON.stringify(budgetAdjustment.filters)}` : undefined}).then(model=>({text:model.reply,messages:[],pending:[],blocked:[],steps:1}));
        result.reply=removeUnpromptedNegotiation(rewriteUnverifiedAvailability(removeReplyArtifacts(discardInvalidCitations(labelMonthlyRent(normalizeCitations(correctUnknownReply(sanitizeReply(agent.text || safeReply)),evidenceItems),evidenceItems),evidenceItems),evidenceItems,moreRequest),source,evidenceItems),source);
       const retryViolation=this.guard.outputReason(result.reply,evidenceItems,source,guardContext);
-      if(retryViolation){log('regeneration',result.reply,retryViolation);console.warn(JSON.stringify({event:'guard_block',phase:'regeneration',reason:retryViolation,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:items.map(x=>x.number??null),preview:result.reply.slice(0,300)}));blocked=true;}
+      if(retryViolation){const diagnostic=this.guard.outputDiagnostic(result.reply,evidenceItems,source,guardContext);log('regeneration',result.reply,retryViolation);console.warn(JSON.stringify({event:'guard_block',phase:'regeneration',reason:retryViolation,detail:diagnostic.detail,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:items.map(x=>x.number??null),preview:result.reply.slice(0,300)}));blocked=true;}
       else { violation=null; log('regeneration',{},null); }
     }
     // Tool calls can mix result sets; the grounded summary and its cards share one fresh 1..n numbering.
@@ -752,7 +762,9 @@ export class AiService {
     const referencedAnswer=(!!input.property_id || codeReference.codes.length>0 || pureReference) && modelTopic!=='smalltalk' && modelTopic!=='out_of_scope';
     if(blocked)items=evidenceItems.map((item,index)=>({...item,number:index+1}));
     else items=sourcesFromCitations(result.reply,evidenceItems,referencedAnswer);
-     items=items.map(item=>({...item,name:displayListingName(item.name)}));related=related.map(item=>({...item,name:displayListingName(String(item.name||''))}));
+     items=items.map(item=>({...item,name:displayListingName(item.name)}));related=related.map(item=>({...item,name:displayListingName(String(item.name||''))})).filter(item=>isValidListingPrice(item as {price?:number|null;transaction_type?:string}));
+     const turnTransaction=(queryFilters.transaction_type==='Sale'||queryFilters.transaction_type==='Rent' ? queryFilters.transaction_type : inferTransactionType(source));
+     related=searchPerformed ? related.filter(item=>!turnTransaction || item.transaction_type===turnTransaction) : [];
      const areaToleranceItems=evidenceItems.filter(item=>item.areaNearCriteria&&typeof item.area==='number');
      const areaToleranceSuffix=areaToleranceItems.length ? `\nLưu ý: ${areaToleranceItems.map(item=>`Diện tích gần tiêu chí (${item.area} m²)`).join('; ')}.` : '';
      const moreStatus=moreRequest ? (structuredRemainingCount===0 ? '\nMình đã hiển thị tất cả căn phù hợp; bạn có thể nới diện tích/khu vực, tăng ngân sách 10%, hoặc nhờ chuyên viên tìm thêm.' : structuredRemainingCount!==null&&structuredRemainingCount<=5 ? `\nMình chỉ còn ${structuredRemainingCount} căn khác đúng tiêu chí trong dữ liệu hiện có.` : structuredRemainingCount!==null ? `\nMình gửi 5 căn khác đúng tiêu chí; dữ liệu còn ${structuredRemainingCount} căn phù hợp.` : evidenceItems.length ? `\nMình gửi ${evidenceItems.length} căn khác đúng tiêu chí trong dữ liệu hiện có.` : '\nMình đã hiển thị tất cả căn phù hợp; bạn có thể nới diện tích/khu vực, tăng ngân sách 10%, hoặc nhờ chuyên viên tìm thêm.') : '';
@@ -819,7 +831,8 @@ export class AiService {
     const nearestLine=nearestReason && related.length && !items.length ? `\nMình gửi bên dưới ${related.length} căn gần tiêu chí nhất (${nearestReason.toLocaleLowerCase('vi')}) để ${address} tham khảo nhé.${handoffLine}` : handoffLine ? `\n${handoffLine.trim()}` : '';
      const noMatchPrefix=financeNote ? '' : noMatch && !modelAlreadyNoMatch ? `${noMatchReply(source)}\n` : related.length && !items.length && !modelAlreadyNoMatch ? `${noMatchReply(source).split('. ')[0]}.\n` : '';
       const deterministicListingReply=blocked ? (evidenceItems.length ? groundedSummary(evidenceItems) : safeReply) : result.reply;
-      const reply=(!hasDisclosure && count===0 ? `${disclosure}\n`:'')+criteriaLine+(cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatchPrefix)+(cheaperNoMatch || blocked && !items.length && noMatch && !modelAlreadyNoMatch ? '' : (blocked ? deterministicListingReply:result.reply))+areaToleranceSuffix+moreStatus+unsupportedSuffix+ownerSuffix+loanSuffix+bookingLine+contactLine+nearestLine+availableAreasLine+similarLine+appendBudget;
+      const deterministicRiskPrefix=blocked&&evidenceItems.length&&riskQuestion ? `${investmentRiskLine.trimStart()}\n` : '';
+      const reply=deterministicRiskPrefix+(!hasDisclosure && count===0 ? `${disclosure}\n`:'')+criteriaLine+(cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatchPrefix)+(cheaperNoMatch || blocked && !items.length && noMatch && !modelAlreadyNoMatch ? '' : (blocked ? deterministicListingReply:result.reply))+areaToleranceSuffix+moreStatus+unsupportedSuffix+ownerSuffix+loanSuffix+bookingLine+contactLine+nearestLine+availableAreasLine+similarLine+appendBudget;
       const premiseCorrection=/chưa có sổ|chưa có sổ hồng/iu.test(source) && /sẵn sổ|sổ hồng/iu.test(listingText) ? '\nTheo dữ liệu tin đăng, căn này được ghi là đã có sổ hồng; mình không thể xác nhận lời hứa của bên thứ ba. Bạn nên xem bản gốc giấy chứng nhận và kiểm tra tại cơ quan đăng ký đất đai.' : '';
       const freshnessCorrection=/(?:bán rồi|đã bán|còn bán không|cập nhật lần cuối)/iu.test(source) && items[0]?.updated_at ? `\nMình xin lỗi vì tin có thể đã chậm so với thực tế. Dữ liệu tin đăng này cập nhật ngày ${String(items[0].updated_at).slice(0,10)}; mình có thể nhờ chuyên viên kiểm tra lại và gửi các căn tương tự.` : '';
       const externalSiteCorrection=/(?:bên khác|website khác|trang khác|nơi khác)/iu.test(source) && !/không thể kiểm tra|không kiểm chứng|không xác minh/iu.test(result.reply) ? '\nTERAVA không thể kiểm tra hoặc xác minh trực tiếp các tin đăng trên website khác; chuyên viên có thể xác nhận lại giá với chủ nhà.' : '';
@@ -828,12 +841,20 @@ export class AiService {
        const policyFallback='Mình chưa có thông tin về chính sách của TERAVA cho trường hợp này; chuyên viên sẽ giải thích cụ thể giúp bạn.';
        const policyFixed=(text:string)=>{
          const faqText=generalKnowledge.normalize('NFC').toLocaleLowerCase('vi');
-         return text.split(/(?<=[.!?])\s+|\n/gu).map(sentence=>{
-           const match=sentence.match(/(?:TERAVA|bên\s+TERAVA)\s+(?:không\s+có|có|chưa\s+có)\s+chính\s+sách\s+([^.!?\n]+)/iu);
-           if(!match)return sentence;
+         const policyPattern=/(?:TERAVA|bên\s+TERAVA)\s+(?:không\s+có|có|chưa\s+có)\s+chính\s+sách\s+([^.!?\n]+)/iu;
+         if(!policyPattern.test(text))return text;
+         const protect=(value:string)=>value
+           .replace(/\b(?:TP|Tp|Q|P)\./gu,match=>`${match}\uE000`)
+           .replace(/\bv\.v\./giu,match=>`${match}\uE001`)
+           .replace(/(?<=\d)[.,](?=\d)/gu,match=>`${match}\uE002`);
+         const restore=(value:string)=>value.replace(/\uE000/gu,'').replace(/\uE001/gu,'').replace(/\uE002/gu,'');
+         return restore(protect(text).split(/(\n|(?<=[.!?])\s+)/gu).map(part=>{
+           if(part==='\n'||/^\s+$/u.test(part))return part;
+           const match=part.match(policyPattern);
+           if(!match)return part;
            const terms=match[1].normalize('NFC').toLocaleLowerCase('vi').split(/[^\p{L}\p{N}]+/u).filter(term=>term.length>=4).slice(0,3);
-           return terms.length&&terms.every(term=>faqText.includes(term)) ? sentence : policyFallback;
-         }).join('\n');
+           return terms.length&&terms.every(term=>faqText.includes(term)) ? part : policyFallback;
+         }).join(''));
        };
        const neighbourFixed=(text:string)=>{
          const known=`${availableAreasLine} ${related.map(item=>withFormerDistrict(String(item.location||''))).join(' ')}`.normalize('NFC').toLocaleLowerCase('vi');
@@ -843,7 +864,7 @@ export class AiService {
            return districts.every(district=>known.includes(district.normalize('NFC').toLocaleLowerCase('vi'))) ? whole : `${fallback}${punctuation}`;
          });
        };
-       const enrichedReply=neighbourFixed(policyFixed(dedupeNoMatchReply(reply+areaDeviationSuffix+financeSuffix+investmentRiskLine+premiseCorrection+freshnessCorrection+externalSiteCorrection+extraCostsSuffix)));
+       const enrichedReply=neighbourFixed(policyFixed(dedupeNoMatchReply(reply+areaDeviationSuffix+financeSuffix+(deterministicRiskPrefix ? '' : investmentRiskLine)+premiseCorrection+freshnessCorrection+externalSiteCorrection+extraCostsSuffix)));
      // Only a detail-page chat may say the customer "is viewing" a listing (also covers regenerated answers).
      const viewingFixed=viewedPropertyId ? enrichedReply : enrichedReply.replace(/(^|[.!?\n]\s*)Bạn đang xem(?: có)?(?: các| những)? (?=(?:hai|ba|\d+)?\s*(?:căn|nhà|lô|đất))/gu,'$1Mình gợi ý ');
     // "tầng 12 của tòa nhà có 12 tầng": the unit floor never tells how tall the building is, unless the listing says so.

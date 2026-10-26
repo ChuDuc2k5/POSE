@@ -18,7 +18,9 @@ with catalogue as (
       else coalesce(nullif(btrim(p.location),''),'Chưa rõ')
     end as area_label
   from public.property_public_catalog p
-  where p_transaction_type is null or p.transaction_type=p_transaction_type
+  where (p_transaction_type is null or p.transaction_type=p_transaction_type)
+    and p.price is not null
+    and p.price >= case when p.transaction_type='Rent' then 500000 else 50000000 end
 ), areas as (
   select area_label as label,count(*)::bigint as count from catalogue group by area_label order by count desc,label
 ), types as (

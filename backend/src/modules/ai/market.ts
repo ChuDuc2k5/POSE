@@ -24,7 +24,10 @@ async function rows(filters: { transaction_type: 'Sale' | 'Rent'; type?: string;
     query = query.gte('area', filters.area * 0.8).lte('area', filters.area * 1.2);
   }
   const result = await query.limit(400);
-  return result.error ? [] : (result.data || []) as Row[];
+  return result.error ? [] : (result.data || []).filter(row => {
+    const price=Number(row.price);
+    return Number.isFinite(price) && price >= (row.transaction_type === 'Rent' ? 500_000 : 50_000_000);
+  }) as Row[];
 }
 
 /** Reuse the catalogue overview aggregate for budgeted area advice. */

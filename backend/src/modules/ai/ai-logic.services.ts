@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { complete } from './llm.js';
-import { outputReason, evidenceReason, injection, toolAllowed } from './guard.js';
+import { outputReason, outputDiagnostic, evidenceReason, injection, toolAllowed } from './guard.js';
 import { extractNeeds } from './extraction.js';
 import { scoreNeeds } from './lead-scoring.js';
 import { stripPhones, hasPhone } from './privacy.js';
@@ -10,6 +10,7 @@ export class AiLlmService { complete = complete; }
 @Injectable()
 export class AiGuardService {
   outputReason = outputReason;
+  outputDiagnostic = outputDiagnostic;
   evidenceReason = evidenceReason;
   injection = injection;
   toolAllowed = toolAllowed;
