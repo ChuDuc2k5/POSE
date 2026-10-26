@@ -1,10 +1,11 @@
 'use client';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { History, LoaderCircle, LockKeyhole, UserPlus, Users, X } from 'lucide-react';
+import { History, LoaderCircle, LockKeyhole, Map, UserPlus, Users, X } from 'lucide-react';
 import { CatalogRequestError, catalogRequest } from '@/lib/catalog-client';
 import { normalizePhone } from '@/lib/profile-validation';
 import { salesActionLabels, salesDate, type SalesAccount, type SalesHistory } from '@/lib/sales';
 import styles from './admin-sales.module.css';
+import { SalesTerritoryDialog } from './admin-sales-territories';
 
 type Changed = (message: string) => void;
 function useModal() {
@@ -15,6 +16,7 @@ function useModal() {
 
 export function SalesEditor({ item, onClose, onChanged }: { item: SalesAccount | null; onClose: () => void; onChanged: Changed }) {
   const ref = useModal(), creating = !item;
+  const [territoriesOpen, setTerritoriesOpen] = useState(false);
   const [name, setName] = useState(item?.name || ''), [phone, setPhone] = useState(item?.phone || ''), [email, setEmail] = useState(item?.email || '');
   const [password, setPassword] = useState(''), [confirmPassword, setConfirmPassword] = useState(''), [reason, setReason] = useState(''), [showPassword, setShowPassword] = useState(false);
   const [requestKey] = useState(() => crypto.randomUUID());
@@ -46,11 +48,12 @@ export function SalesEditor({ item, onClose, onChanged }: { item: SalesAccount |
           <label className={styles.field}>Số liên hệ<input type="tel" value={phone} onChange={e => setPhone(e.target.value)} maxLength={30} placeholder="0912345678 hoặc +84912345678" autoComplete="off" aria-invalid={!!fields.phone}/>{fields.phone && <small className={styles.fieldError}>{fields.phone}</small>}</label>
           <label className={`${styles.field} ${styles.full}`}>Email đăng nhập<input type="email" value={email} onChange={e => setEmail(e.target.value)} readOnly={!creating} required maxLength={254} autoComplete="off" aria-invalid={!!fields.email}/>{fields.email && <small className={styles.fieldError}>{fields.email}</small>}</label>
           {creating ? <><label className={styles.field}>Mật khẩu ban đầu<input type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} minLength={12} maxLength={128} required autoComplete="new-password" aria-invalid={!!fields.password}/>{fields.password && <small className={styles.fieldError}>{fields.password}</small>}</label><label className={styles.field}>Xác nhận mật khẩu<input type={showPassword ? 'text' : 'password'} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} minLength={12} maxLength={128} required autoComplete="new-password" aria-invalid={!!fields.confirmPassword}/>{fields.confirmPassword && <small className={styles.fieldError}>{fields.confirmPassword}</small>}</label><label className={styles.check}><input type="checkbox" checked={showPassword} onChange={e => setShowPassword(e.target.checked)}/>Hiện mật khẩu</label></> : <label className={`${styles.field} ${styles.full}`}>Lý do cập nhật<textarea value={reason} onChange={e => setReason(e.target.value)} required minLength={3} maxLength={1000} rows={3} aria-invalid={!!fields.reason}/>{fields.reason && <small className={styles.fieldError}>{fields.reason}</small>}</label>}
+          {!creating && <button type="button" className="button secondary" onClick={() => setTerritoriesOpen(true)}><Map size={16}/>Khu vực phụ trách</button>}
         </fieldset>
         {error && <div className="form-alert error" role="alert">{error}</div>}
       </div><div className="catalog-editor-footer"><button type="button" className="button secondary" onClick={onClose} disabled={busy}>Hủy</button><button className="button primary" disabled={busy}>{busy && <LoaderCircle size={16} className="spin"/>}{creating ? 'Tạo tài khoản' : 'Lưu thông tin'}</button></div>
     </form>
-  </dialog>;
+    {territoriesOpen && item && <SalesTerritoryDialog item={item} onClose={() => setTerritoriesOpen(false)} onChanged={message => { setTerritoriesOpen(false); onChanged(message); }}/>}</dialog>;
 }
 
 export function SalesStatusDialog({ item, onClose, onChanged }: { item: SalesAccount; onClose: () => void; onChanged: Changed }) {

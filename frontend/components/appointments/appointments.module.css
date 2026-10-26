@@ -113,6 +113,11 @@
 .dialogHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 22px 24px; border-bottom: 1px solid #e8eae4; }
 .dialogHeader h2 { font-size: 19px; margin: 0; }
 .dialogHeader p { color: #858c91; font-size: 11px; margin: 6px 0 0; }
+.salesSuggestion { display: grid; gap: 5px; padding: 12px; border: 1px solid #e6e1f0; border-radius: 10px; background: #faf9fd; }
+.salesSuggestion label { margin: 0; }
+.salesSuggestion select { margin-top: 5px; }
+.suggestionReason { color: #77708d; font-size: 10px; }
+.notice { padding: 9px 11px; border-radius: 7px; background: #fff8e9; color: #8d6b32; font-size: 11px; }
 @media (max-width: 1100px) { .page { padding-inline: 24px; } .filters .search { flex-basis: 100%; } }
 @media (max-width: 700px) {
   .page { padding: 25px 16px; }

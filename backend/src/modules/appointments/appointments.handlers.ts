@@ -2,6 +2,8 @@ import { uuidPattern } from '../../common/catalog.js';
 import { validOrigin, type WebRequest } from '../../common/http.js';
 import { authenticatedSession, authClient } from '../auth/session.js';
 import { catalogError, catalogInput, catalogJson } from '../catalog/catalog.service.js';
+import { formerDistrictFromLocation } from '../ai/ward-label.js';
+import { scoreSalesSuggestions, type SalesSuggestionFact } from './sales-suggestions.js';
 import { appointmentQuery, validateAppointment } from './appointments.validation.js';
 type Context = { params: Promise<{ id: string }> };
 export function appointmentError(error: { code?: string; message?: string }) {
@@ -53,6 +55,24 @@ export async function options(request: WebRequest) {
     return await call(a, 'pose_appointment_options', { p_kind: q.filters.kind, p_query: q.filters.q || '', p_lead: q.filters.lead_id || null, p_page: q.page });
   } catch { return catalogError('UNAVAILABLE', 'Chưa thể tải danh mục lịch hẹn.', 503); }
 }
+export async function salesSuggestions(request: WebRequest) {
+  try {
+    const a = await access(request); if ('error' in a) return a.error;
+    if (a.role !== 'Admin') return catalogError('FORBIDDEN', 'Only Admin can view Sales suggestions.', 403);
+    const params = request.nextUrl.searchParams, leadId = params.get('lead_id'), propertyId = params.get('property_id');
+    if (!leadId || !uuidPattern.test(leadId) || propertyId && !uuidPattern.test(propertyId) || [...params.keys()].some(key => !['lead_id', 'property_id'].includes(key))) {
+      return catalogError('INVALID_INPUT', 'Lead and property identifiers are invalid.', 400);
+    }
+    const result = await a.client.rpc('pose_admin_sales_suggestion_facts', { p_lead: leadId, p_property: propertyId || null });
+    if (result.error) return appointmentError(result.error);
+    const facts = result.data as { property_location?: string | null; history_location?: string | null; preference_location?: string | null; property_keeper_id?: string | null; candidates?: SalesSuggestionFact[] };
+    const sources = [[facts.property_location, 'property'], [facts.history_location, 'history'], [facts.preference_location, 'preference']] as const;
+    const found = sources.find(([location]) => formerDistrictFromLocation(location));
+    const area = found ? formerDistrictFromLocation(found[0]) : null;
+    const scored = scoreSalesSuggestions(facts.candidates || [], area, facts.property_keeper_id || null);
+    return catalogJson({ area, area_source: found ? found[1] : null, suggestions: scored });
+  } catch { return catalogError('UNAVAILABLE', 'Sales suggestions are unavailable.', 503); }
+}
 export async function detail(request: WebRequest, context: Context) {
   try {
     const a = await access(request); if ('error' in a) return a.error;
@@ -67,7 +87,9 @@ export async function save(request: WebRequest, context: Context, create = false
     const id = create ? null : (await context.params).id;
     if (!create && !uuidPattern.test(id!)) return catalogError('NOT_FOUND', 'Không tìm thấy lịch hẹn.', 404);
     const parsed = await catalogInput(request); if ('error' in parsed) return parsed.error;
-    const input = parsed.input, fields = validateAppointment(input, create);
+    const input = parsed.input;
+    if (create && a.role === 'Sales' && input.data && typeof input.data === 'object' && !Array.isArray(input.data) && 'sales_id' in input.data) return catalogError('FORBIDDEN', 'Sales cannot choose another Sales user.', 403);
+    const fields = validateAppointment(input, create, a.role === 'Admin' ? 'Admin' : 'Sales');
     if (Object.keys(fields).length) return catalogError('INVALID_INPUT', 'Kiểm tra thông tin lịch hẹn.', 400, fields);
     if (a.role !== 'Admin' && input.action === 'correct') return catalogError('FORBIDDEN', 'Chỉ Admin được sửa sai lịch đã kết thúc.', 403);
     if (a.role === 'Admin' && !create && (typeof input.reason !== 'string' || input.reason.trim().length < 3)) return catalogError('INVALID_INPUT', 'Admin cần ghi lý do chỉnh sửa.', 400, { reason: 'Nhập lý do từ 3 đến 1.000 ký tự.' });

@@ -57,7 +57,7 @@ describe('Manual appointment HTTP access', () => {
     const data = { lead_id: id, request_key: id, title: 'Tư vấn căn hộ', starts_at: '2027-01-01T09:00:00+07:00', ends_at: '2027-01-01T10:00:00+07:00', channel: 'Phone', location: '', notes: '', property_id: null };
     await request(app.getHttpServer()).post('/api/appointments').set('Cookie', 'pose-access=valid').set('Origin', origin).send({ data }).expect(200);
     expect(calls[0].body).toEqual({ p_id: null, p_version: null, p_action: 'create', p_data: data, p_reason: '' });
-    await request(app.getHttpServer()).post('/api/appointments').set('Cookie', 'pose-access=valid').set('Origin', origin).send({ data: { ...data, sales_id: id } }).expect(400);
+    await request(app.getHttpServer()).post('/api/appointments').set('Cookie', 'pose-access=valid').set('Origin', origin).send({ data: { ...data, sales_id: id }, reason: 'Admin phân công' }).expect(200);
   });
   it('maps overlap, locked Lead, stale version and missing migration clearly', async () => {
     for (const [code, message, expected, status] of [['23P01', 'APPOINTMENT_OVERLAP', 'APPOINTMENT_OVERLAP', 409], ['55000', 'APPOINTMENT_LEAD_LOCKED', 'LEAD_LOCKED', 409], ['55000', 'APPOINTMENT_INCOMPLETE', 'APPOINTMENT_INCOMPLETE', 409], ['40001', 'VERSION_CONFLICT', 'VERSION_CONFLICT', 409], ['42883', 'missing function', 'APPOINTMENTS_NOT_READY', 503]] as const) {

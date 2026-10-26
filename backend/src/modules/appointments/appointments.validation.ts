@@ -26,7 +26,7 @@ export function appointmentQuery(params: URLSearchParams, lookup = false) {
   if (lookup && (!['leads', 'properties', 'sales'].includes(filters.kind) || filters.kind === 'properties' && !filters.lead_id)) fields.kind = 'Chọn danh mục và Lead hợp lệ.';
   return { filters, page, pageSize, fields };
 }
-export function validateAppointment(input: Record<string, unknown>, create = false) {
+export function validateAppointment(input: Record<string, unknown>, create = false, role: 'Admin' | 'Sales' = 'Sales') {
   const fields: Record<string, string> = {}, action = create ? 'create' : input.action;
   if (Object.keys(input).some(k => !['action', 'data', 'reason', 'version'].includes(k))) fields.form = 'Dữ liệu chứa trường không được phép.';
   if (create && input.action !== undefined && input.action !== 'create' || create && input.version !== undefined) fields.action = 'Yêu cầu tạo lịch không hợp lệ.';
@@ -36,7 +36,7 @@ export function validateAppointment(input: Record<string, unknown>, create = fal
   if (['reschedule', 'cancel', 'correct'].includes(String(action)) && !text(input.reason, 3, 1000)) fields.reason = 'Nhập lý do từ 3 đến 1.000 ký tự.';
   if (!object(input.data)) return { ...fields, form: 'Thông tin lịch hẹn không hợp lệ.' };
   const d = input.data, full = ['title', 'channel', 'location', 'property_id', 'notes'];
-  const keys = action === 'create' ? [...full, 'lead_id', 'starts_at', 'ends_at', 'request_key'] : action === 'edit' ? full : action === 'reschedule' ? ['starts_at', 'ends_at'] : action === 'complete' ? ['result'] : action === 'cancel' ? [] : [...full, 'starts_at', 'ends_at', 'status', 'result', 'cancel_reason'];
+  const keys = action === 'create' ? [...full, 'lead_id', 'starts_at', 'ends_at', 'request_key', ...(role === 'Admin' ? ['sales_id'] : [])] : action === 'edit' ? full : action === 'reschedule' ? ['starts_at', 'ends_at'] : action === 'complete' ? ['result'] : action === 'cancel' ? [] : [...full, 'starts_at', 'ends_at', 'status', 'result', 'cancel_reason'];
   if (Object.keys(d).some(k => !keys.includes(k))) fields.form = 'Chỉ cập nhật các trường của thao tác đã chọn.';
   if (create && (!id(d.lead_id) || !id(d.request_key))) fields.lead_id = 'Chọn Lead và mã lần lưu hợp lệ.';
   if (['create', 'edit', 'correct'].includes(String(action))) {

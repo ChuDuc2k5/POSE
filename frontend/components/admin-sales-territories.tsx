@@ -1,0 +1,20 @@
+'use client';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { LoaderCircle, X } from 'lucide-react';
+import { CatalogRequestError, catalogRequest } from '@/lib/catalog-client';
+import type { SalesAccount } from '@/lib/sales';
+import styles from './admin-sales.module.css';
+
+type TerritoryResponse = { districts: string[]; backup: string[]; available: string[] };
+export function SalesTerritoryDialog({ item, onClose, onChanged }: { item: SalesAccount; onClose: () => void; onChanged: (message: string) => void }) {
+  const ref = useRef<HTMLDialogElement>(null), [data, setData] = useState<TerritoryResponse | null>(null), [districts, setDistricts] = useState<string[]>([]), [backup, setBackup] = useState<string[]>([]), [search, setSearch] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  useEffect(() => { ref.current?.showModal(); const controller = new AbortController(); catalogRequest<TerritoryResponse>(`/api/admin/sales/${item.id}/territories`, { signal: controller.signal }).then(result => { setData(result); setDistricts(result.districts); setBackup(result.backup); }).catch(cause => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Không thể tải khu vực Sales.'); }); return () => { controller.abort(); ref.current?.close(); }; }, [item.id]);
+  const visible = useMemo(() => (data?.available || []).filter(district => district.toLocaleLowerCase('vi').includes(search.trim().toLocaleLowerCase('vi'))), [data, search]);
+  async function save() { setBusy(true); setError(''); try { await catalogRequest(`/api/admin/sales/${item.id}/territories`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ districts, backup }) }); onChanged('Đã cập nhật khu vực phụ trách Sales.'); } catch (cause) { setError(cause instanceof CatalogRequestError ? cause.message : 'Không thể lưu khu vực Sales.'); } finally { setBusy(false); } }
+  function toggle(list: string[], setList: (value: string[]) => void, district: string) { setList(list.includes(district) ? list.filter(value => value !== district) : [...list, district]); }
+  return <dialog ref={ref} className={`catalog-editor ${styles.dialog} ${styles.territoryDialog}`} onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
+    <div className="catalog-editor-header"><span className="catalog-editor-symbol">⌖</span><h2>Khu vực phụ trách · {item.name}</h2><button type="button" className="catalog-icon-button" onClick={onClose} disabled={busy} aria-label="Đóng"><X size={21}/></button></div>
+    <div className="catalog-editor-body"><p className={styles.help}>Chọn khu vực chính và khu vực hỗ trợ (dự phòng) từ danh sách quận/huyện cũ.</p><label className={styles.field}>Tìm khu vực<input value={search} onChange={event => setSearch(event.target.value)} placeholder="Nhập tên quận/huyện…" maxLength={80}/></label>{!data && !error ? <p role="status"><LoaderCircle size={18} className="spin"/> Đang tải khu vực…</p> : error ? <div className="form-alert error" role="alert">{error}</div> : <><fieldset className={styles.territoryList} disabled={busy}><legend>Khu vực phụ trách</legend>{visible.map(district => <label key={district}><input type="checkbox" checked={districts.includes(district)} onChange={() => toggle(districts, setDistricts, district)}/>{district}</label>)}</fieldset><fieldset className={styles.territoryList} disabled={busy}><legend>Khu vực hỗ trợ (dự phòng)</legend>{visible.map(district => <label key={district}><input type="checkbox" checked={backup.includes(district)} onChange={() => toggle(backup, setBackup, district)}/>{district}</label>)}</fieldset></>}</div>
+    <div className="catalog-editor-footer"><button type="button" className="button secondary" onClick={onClose} disabled={busy}>Hủy</button><button type="button" className="button primary" onClick={() => void save()} disabled={busy || !data}>{busy && <LoaderCircle size={16} className="spin"/>}Lưu khu vực</button></div>
+  </dialog>;
+}

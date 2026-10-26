@@ -180,8 +180,8 @@ begin
     with eligible as materialized (
       select l.id,c.full_name as name,c.phone,a.sales_id,u.full_name as sales_name,l.status,l.archived
       from public.leads l join public.customers c on c.id=l.customer_id
-      join public.lead_assignments a on a.lead_id=l.id and a.is_active join public.users u on u.id=a.sales_id
-      where pose_private.lead_sales_valid(a.sales_id) and (staff_role='Admin' or (a.sales_id=pose_private.lead_directory() and not l.archived and l.status not in ('CONVERTED','LOST')))
+      left join public.lead_assignments a on a.lead_id=l.id and a.is_active left join public.users u on u.id=a.sales_id
+      where (staff_role='Admin' and (a.id is null or pose_private.lead_sales_valid(a.sales_id)) or staff_role='Sales' and pose_private.lead_sales_valid(a.sales_id) and a.sales_id=pose_private.lead_directory() and not l.archived and l.status not in ('CONVERTED','LOST'))
         and position(pose_private.lead_fold(p_query) in pose_private.lead_fold(c.full_name||' '||coalesce(c.phone,'')))>0
     ) select (select count(*) from eligible),(select coalesce(jsonb_agg(to_jsonb(x) order by x.name,x.id),'[]') from
       (select * from eligible order by name,id limit 20 offset (p_page-1)*20) x) into total,items;
@@ -233,7 +233,7 @@ create or replace function pose_private.appointment_mutate(p_id uuid,p_version i
 language plpgsql security definer set search_path='' as $$
 declare
   staff_role text:=pose_private.lead_staff(); actor uuid:=auth.uid(); directory uuid:=pose_private.lead_directory();
-  ap public.appointments; previous jsonb; l public.leads; target_sales uuid; prop uuid;
+  ap public.appointments; previous jsonb; l public.leads; target_sales uuid; chosen_sales uuid; prop uuid;
   start_time timestamptz; end_time timestamptz; fingerprint text; request_id text; keys text[];
 begin
   p_reason:=btrim(coalesce(p_reason,''));
@@ -243,8 +243,9 @@ begin
     raise exception 'APPOINTMENT_REASON_REQUIRED' using errcode='22023';
   end if;
   if p_action='correct' and staff_role<>'Admin' then raise exception 'APPOINTMENT_FORBIDDEN' using errcode='42501'; end if;
+  if p_action='create' and staff_role<>'Admin' and p_data ? 'sales_id' then raise exception 'APPOINTMENT_FORBIDDEN' using errcode='42501'; end if;
   keys:=case p_action
-    when 'create' then array['lead_id','title','starts_at','ends_at','channel','location','property_id','notes','request_key']
+    when 'create' then array['lead_id','title','starts_at','ends_at','channel','location','property_id','notes','request_key']||case when staff_role='Admin' then array['sales_id'] else array[]::text[] end
     when 'edit' then array['title','channel','location','property_id','notes']
     when 'reschedule' then array['starts_at','ends_at']
     when 'complete' then array['result']
@@ -266,7 +267,19 @@ begin
       return jsonb_build_object('item',pose_private.appointment_item(ap.id));
     end if;
     select * into l from public.leads where id=(p_data->>'lead_id')::uuid for share;
-    select a.sales_id into target_sales from public.lead_assignments a where a.lead_id=l.id and a.is_active for share;
+    select a.sales_id into target_sales from public.lead_assignments a where a.lead_id=l.id and a.is_active for update;
+    chosen_sales:=case when staff_role='Admin' and p_data ? 'sales_id' then nullif(p_data->>'sales_id','')::uuid end;
+    if chosen_sales is not null and not pose_private.lead_sales_valid(chosen_sales) then raise exception 'APPOINTMENT_NO_SALES' using errcode='22023'; end if;
+    if chosen_sales is not null and chosen_sales is distinct from target_sales then
+      if char_length(p_reason)<3 then raise exception 'APPOINTMENT_REASON_REQUIRED' using errcode='22023'; end if;
+      if target_sales is not null then
+        update public.lead_assignments set is_active=false where lead_id=l.id and is_active;
+        insert into public.lead_events(lead_id,actor_id,actor_kind,action,reason,before_data,after_data)
+          values(l.id,actor,staff_role,'lead_unassigned',p_reason,jsonb_build_object('sales_id',target_sales),jsonb_build_object('sales_id',chosen_sales));
+      end if;
+      perform pose_private.lead_assign(l.id,chosen_sales, (p_data->>'property_id')::uuid, actor, staff_role, coalesce(nullif(p_reason,''),'Phân công khi tạo lịch hẹn'), false);
+      target_sales:=chosen_sales;
+    end if;
     if target_sales is null or not pose_private.lead_sales_valid(target_sales) then raise exception 'APPOINTMENT_NO_SALES' using errcode='22023'; end if;
     if staff_role='Sales' and target_sales is distinct from directory then raise exception 'APPOINTMENT_FORBIDDEN' using errcode='42501'; end if;
     if (l.archived or l.status in ('CONVERTED','LOST')) then

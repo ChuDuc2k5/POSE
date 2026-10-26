@@ -7,6 +7,18 @@ import { accountEvents } from '../../common/account-events.js';
 import { authenticatedSession, authClient, consumeAttempt } from '../auth/session.js';
 import { systemClient } from '../supabase/supabase.service.js';
 import { catalogError, catalogInput, catalogJson } from '../catalog/catalog.service.js';
+import { formerDistricts } from '../ai/ward-label.js';
+
+function territoryInput(input: Record<string, unknown>) {
+  const fields: Record<string, string> = {};
+  const districts = input.districts, backup = input.backup;
+  if (Object.keys(input).some(key => !['districts', 'backup'].includes(key))) fields.form = 'Only valid territory fields are accepted.';
+  for (const [key, value] of [['districts', districts], ['backup', backup]] as const) {
+    if (!Array.isArray(value) || value.length > 100 || value.some(item => typeof item !== 'string' || !formerDistricts.includes(item))) fields[key] = 'Territory is invalid.';
+    else if (new Set(value).size !== value.length) fields[key] = 'Territories must be unique.';
+  }
+  return { fields, districts: districts as string[], backup: backup as string[] };
+}
 
 async function admin(request?: WebRequest) {
   if (request && !validOrigin(request)) return { error: catalogError('INVALID_ORIGIN', 'Yêu cầu không hợp lệ.', 403) } as const;
@@ -49,6 +61,27 @@ export async function HISTORY(request: WebRequest, context: { params: Promise<{ 
     const result = await access.client.rpc('pose_admin_sales_history', { p_id: id, p_page: page });
     return result.error ? databaseError(result.error) : catalogJson(result.data);
   } catch { return catalogError('UNAVAILABLE', 'Chưa thể tải lịch sử Sales.', 503); }
+}
+export async function TERRITORIES(_request: WebRequest, context: { params: Promise<{ id: string }> }) {
+  try {
+    const access = await admin(); if (access.error) return access.error;
+    const { id } = await context.params;
+    if (!uuidPattern.test(id)) return catalogError('INVALID_ID', 'Sales identifier is invalid.', 400);
+    const result = await access.client.rpc('pose_admin_sales_territories', { p_sales: id });
+    return result.error ? databaseError(result.error) : catalogJson({ ...result.data, available: formerDistricts });
+  } catch { return catalogError('UNAVAILABLE', 'Sales territories are unavailable.', 503); }
+}
+export async function SET_TERRITORIES(request: WebRequest, context: { params: Promise<{ id: string }> }) {
+  try {
+    const access = await admin(request); if (access.error) return access.error;
+    const { id } = await context.params;
+    if (!uuidPattern.test(id)) return catalogError('INVALID_ID', 'Sales identifier is invalid.', 400);
+    const body = await catalogInput(request); if (body.error) return body.error;
+    const value = territoryInput(body.input);
+    if (Object.keys(value.fields).length) return catalogError('INVALID_INPUT', 'Check Sales territories.', 400, value.fields);
+    const result = await access.client.rpc('pose_admin_set_sales_territories', { p_sales: id, p_districts: value.districts, p_backup: value.backup });
+    return result.error ? databaseError(result.error) : catalogJson(result.data);
+  } catch { return catalogError('UNAVAILABLE', 'Sales territories could not be saved.', 503); }
 }
 export async function CREATE(request: WebRequest) {
   try {
