@@ -12,7 +12,7 @@ for(const candidate of [process.env.CHROME_PATH,process.env.PROGRAMFILES&&join(p
 assert.ok(chrome,'Chrome executable required');
 const root=join(tmpdir(),'pose-admin-shell');await mkdir(root,{recursive:true});
 const routes=['/admin?kind=properties','/admin?kind=projects','/admin?kind=subdivisions','/admin/inquiries','/admin/leads','/admin/reports','/admin/appointments','/admin/campaigns','/admin/calls','/admin/ai-dashboard','/admin/sales'];
-const order=['Sản phẩm','Dự án','Phân khu','Yêu cầu tư vấn','Quản lý Lead','Không gian Sales','Báo cáo Lead','Lịch hẹn','Chiến dịch gọi','Cuộc gọi','AI Platform','Quản lý Sales'];
+const order=['Không gian Sales','Sản phẩm','Dự án','Phân khu','Yêu cầu tư vấn','Quản lý Lead','Báo cáo Lead','Lịch hẹn','Chiến dịch gọi','Cuộc gọi','AI Platform','Quản lý Sales'];
 let server,child,ws,send,checks=0;const problems=[];let current='';
 const check=(value,label)=>{assert.ok(value,label);checks++;};
 try{
@@ -89,6 +89,10 @@ const stubs=[[/\/api\/admin\/sales\?/,{items:[],total:0,page:1,pageSize:20,stats
   await wait(`location.pathname==='${href}'&&document.querySelector('.admin-sidebar a[aria-current="page"]')?.getAttribute('href')==='${href}'`,href+' active in admin shell');
   check(await evaluate(`window.__sidebar?.isConnected`),`${href} keeps the admin sidebar`);
  }
+ await send('Emulation.setDeviceMetricsOverride',{width:1280,height:560,deviceScaleFactor:1,mobile:false});await delay(300);
+ const scroll=await evaluate(`(()=>{const s=document.querySelector('.admin-sidebar');s.scrollTop=s.scrollHeight;const last=document.querySelector('.admin-sidebar .catalog-sidebar-bottom').getBoundingClientRect();const nav=document.querySelector('.admin-sidebar nav a[href="/admin/leads"]').getBoundingClientRect().height;const sw=document.querySelector('.admin-sidebar nav a[href="/sales"]').getBoundingClientRect().height;const bottom=document.querySelector('.admin-sidebar .catalog-sidebar-bottom a').getBoundingClientRect().height;return {sw,overflow:getComputedStyle(s).overflowY,scrolled:s.scrollTop>0,page:scrollY,lastVisible:last.bottom<=innerHeight+1,nav,bottom};})()`);
+ check(scroll.overflow==='auto'&&scroll.scrolled&&scroll.page===0&&scroll.lastVisible,`Short screen: admin sidebar scrolls on its own ${JSON.stringify(scroll)}`);
+ check(Math.abs(scroll.nav-scroll.bottom)<=1&&Math.abs(scroll.nav-scroll.sw)<=1,`Profile and home links are the same size as the menu items ${JSON.stringify(scroll)}`);
  await send('Emulation.setDeviceMetricsOverride',{width:375,height:800,deviceScaleFactor:1,mobile:true});await delay(300);
  check(await evaluate(`document.documentElement.scrollWidth<=innerWidth`),'No horizontal overflow at 375px');
  await evaluate(`document.querySelector('.admin-menu-button').click()`);

@@ -45,9 +45,11 @@
 .navigation a:hover { background: var(--nx-surface, #fff); color: var(--nx-ink, #202b39); }
 .navigation .active { background: var(--nx-primary-soft, #f2f0fc); border-color: var(--nx-primary-line, #e3e3f2); color: var(--nx-primary, #202b39); }
 .navigation .active > svg:last-child { opacity: 1; }
-.sidebarBottom { display: flex; flex-direction: column; gap: 19px; margin-top: auto; padding: 26px 7px 0; border-top: 1px solid var(--nx-line, #e8eae4); }
-.sidebarBottom > a { display: flex; align-items: center; gap: 10px; color: var(--nx-muted, #6b7078); font-size: 11px; text-decoration: none; }
-.sidebarBottom > a > svg:last-child { margin-left: auto; opacity: .5; }
+.sidebarBottom { display: flex; flex-direction: column; flex-shrink: 0; gap: 7px; margin-top: auto; padding: 14px 0 0; border-top: 1px solid var(--nx-line, #e8eae4); }
+.sidebarBottom > a { display: flex; align-items: center; gap: 12px; padding: 14px 12px; border: 1px solid transparent; border-radius: 10px; color: var(--nx-muted, #6b7078); font-size: 12px; line-height: 1.5; text-decoration: none; transition: background .15s, color .15s; }
+.sidebarBottom > a > svg { flex-shrink: 0; }
+.sidebarBottom > a > svg:last-child { margin-left: auto; opacity: .4; }
+.sidebarBottom > a:hover { background: var(--nx-surface, #fff); color: var(--nx-ink, #202b39); }
 .main { flex: 1; min-width: 0; }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 83px; padding: 16px 35px; border-bottom: 1px solid var(--nx-line, #e8eae4); background: var(--nx-surface, #fff); }
 .topbarStart { display: flex; align-items: center; gap: 14px; min-width: 0; }
