@@ -38,6 +38,24 @@ export function labelMonthlyRent(reply:string, sources:{price:number|null;transa
   if(!rents.size)return reply;
   return reply.replace(/\d+(?:[.,]\d+)?\s*(?:triệu|tr)(?![\p{L}])(?:\s*đồng)?(?!\s*(?:đồng|\/\s*tháng|mỗi tháng|một tháng|hàng tháng|\/m|mỗi m|một m))/giu,match=>moneyAmounts(match).some(amount=>rents.has(amount)) ? `${match}/tháng` : match);
 }
+/** Convert raw grouped-digit prices that quote a cited listing to the UI priceLabel format. */
+export function normalizeListedPrices(reply:string, sources:{price:number|null;transaction_type?:string;price_period?:string}[]) {
+  const actualRaw=/(?<![\p{L}\d])\d{1,3}(?:[., ]\d{3})+(?![\p{L}\d])(?:\s*(?:đồng|VND)(?:\s*\/\s*tháng)?|\s*\/\s*tháng)?/giu;
+  return reply.replace(actualRaw,whole=>{
+    const amount=moneyAmounts(whole)[0];
+    const source=sources.find(item=>item.price!==null&&item.price===amount);
+    return source?.price===null || !source ? whole : priceLabel(source.price,source.transaction_type==='Rent'||source.price_period==='Month');
+  });
+  /*
+  const rawAmount=/(?<![\p{L}\d])\d{1,3}(?:[., ]\d{3})+(?![\p{L}\d])(?:\s*(?:đồng|VND)(?:\s*\/\s*tháng)?|\s*\/\s*tháng)?/giu;
+  return reply.replace(rawAmount,whole=>{
+    const amount=moneyAmounts(whole)[0];
+    const source=sources.find(item=>item.price!==null&&item.price===amount);
+    if(!source||source.price===null)return whole;
+    return priceLabel(source.price,source.transaction_type==='Rent'||source.price_period==='Month');
+  });
+  */
+}
 export function normalizeCitations<T extends { number?: number; code?: string }>(reply:string, sources:T[]) {
   const byCode = new Map(sources.filter(source => source.code && source.number != null).map(source => [source.code!.toLowerCase(), source.number!]));
   return reply.replace(/\[([^\]\n]{2,80})\]/g, (whole, value:string) => {

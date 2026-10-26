@@ -142,6 +142,17 @@ export function referencedListingCodes(message: string, history: { role: string;
   const direct = listingCodes(message);
   if (direct.length) return { codes: direct, ambiguous: false };
   if (newSearch.test(message)) return { codes: [] as string[], ambiguous: false };
+  // Any newly stated search criterion is a refinement, not a question about
+  // the last card.  This includes budget-only changes such as "giờ tôi
+  // chỉ còn 2,5 tỷ thôi"; only explicit card language may keep the
+  // previous listing reference.
+  const inferredCriteria = inferSearch(message) || {};
+  const hasNewCriteria = Object.entries(inferredCriteria).some(([key, value]) =>
+    key === 'keywords' ? Array.isArray(value) && value.length > 0 : value !== undefined,
+  );
+  const refinementSignal = /\d|quận|q\.?\s*\d|thủ\s+đức|phòng|m2|diện|ngân\s+sách|chỉ\s+còn|tầm|dưới|trên|đổi\s+sang|chuyển\s+sang|muốn\s+(?:mua|thuê)|cần\s+(?:mua|thuê)/iu.test(message);
+  const explicitListingReference = /(?:căn|can|nhà|nha)\s+(?:này|nay|đó|do|vừa\s+rồi|vua\s+roi|bạn\s+đang\s+xem|ban\s+dang\s+xem|đang\s+xem|dang\s+xem)/iu.test(message);
+  if (hasNewCriteria && refinementSignal && !backReference.test(message) && !historyReferenceQuestion(message, history)) return { codes: [] as string[], ambiguous: false };
   const turns = history as HistoryTurn[];
   const listed = [...turns].reverse().find(turn => turn.role === 'assistant' && Array.isArray(turn.sources) && turn.sources.length)?.sources || [];
   const sourceCodes = listed.map(source => source.code).filter((code): code is string => typeof code === 'string');

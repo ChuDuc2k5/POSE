@@ -19,7 +19,7 @@ import { setAiRequestSession, logAiRequest } from './request-log.js';
 import { questionPreview } from './privacy.js';
 import { adviceOrServiceQuestion, budgetFollowUp, catalogueOverviewIntent, clarificationFor, customerNameFromHistory, genericSearchQuestion, historyReferenceQuestion, isAreaOnlyRefinement, isMoreRequest, listingCodes, missingBudgetQuestion, outsideCataloguePlace, referencedListingCodes, searchCriteriaFromHistory, textListingReferences } from './history-aware.js';
 import { catalogueOverview, typeLabels } from './catalogue-overview.js';
-import { sanitizeReply } from './guard.js';
+import { sanitizeReply, normalizeListedPrices } from './guard.js';
 import { withFormerDistrict } from './ward-label.js';
 import { moneyAmounts, priceLabel } from './money.js';
 import { contactRequest, loanAssumption, loanBudget as inferLoanBudget, loanWords, noLoanWords, noMatchReply, hasNoMatchReply, dedupeNoMatchReply, cheaperFallbackReply, listingFollowUpFallback, ownerRequest, ownerValuationQuestion, unsupportedCriteria, unsupportedLine } from './unsupported.js';
@@ -513,7 +513,8 @@ export class AiService {
     if(typeof queryFilters.minPrice==='number' && queryFilters.minPrice===queryFilters.maxPrice && (directCriteria?.location || directCriteria?.locations || queryFilters.location || queryFilters.locations || /(?:quận|quan|q\.?\s*\d|district|thủ\s*đức|thu\s*duc)/iu.test(source))) delete queryFilters.minPrice;
     const catalogueCriteriaLocation=directCriteria?.location || directCriteria?.locations?.[0];
     const structuredCriteriaAlias=typeof catalogueCriteriaLocation==='string' && /(?:quận\s*9|q\.?\s*9|thủ\s*đức|district\s*9)/iu.test(catalogueCriteriaLocation);
-    structuredCatalogueSearch=structuredCatalogueSearch || extremePriceRequest || Boolean(directCriteria?.type==='Apartment' && structuredCriteriaAlias);
+    const explicitStructuredCriteria=Boolean(directCriteria?.type === 'Apartment' && structuredCriteriaAlias);
+    structuredCatalogueSearch=structuredCatalogueSearch || extremePriceRequest || explicitStructuredCriteria;
     if(!input.property_id && sanitizedHistory.some(turn=>turn.role==='user' && genericSearchQuestion(turn.content)) && !inferSearch(source)?.type) delete queryFilters.type;
     if (budgetAdjustment?.direction === 'cheaper') {
       items.sort((left, right) => {
@@ -822,8 +823,10 @@ export class AiService {
      result.reply=sanitizeReply(agent.text || result.reply);
      result.reply=correctUnknownReply(result.reply);
      result.reply=removeUnpromptedOwnerTemplate(result.reply,explicitWriteIntent(source));
+    const scrubOutsideDetailViewing=(text:string)=>text.replace(/(?:c\u0103n|can)(?:\s+(?:h\u1ed9|ho))?\s+(?:b\u1ea1n|ban)\s+(?:\u0111ang|dang)\s+xem/giu,'c\u0103n n\u00e0y');
     // Only a detail-page chat may say the customer "is viewing" a listing.
     if(!viewedPropertyId)result.reply=result.reply.replace(/(^|[.!?]\s+)Bạn đang xem(?: các| những)? (?=căn|nhà|lô|đất)/gu,'$1Mình gợi ý ');
+    if(!viewedPropertyId)result.reply=scrubOutsideDetailViewing(result.reply);
     // Models occasionally put the raw catalogue code in brackets. Convert it
     // to the stable [n] citation before C3, the guard, and card selection.
      result.reply=normalizeCitations(result.reply,items);
@@ -866,7 +869,7 @@ export class AiService {
      const guardContext={retrievalFound:rag?.found??evidenceItems.length>0,faqOnly:evidenceItems.length>0&&evidenceItems.every(x=>x.source_type==='Faq'),filterAmounts:[...new Set([...filterAmounts,...rememberedBudgetAmounts,...currentBudgetAmounts])],previousPrices:[...new Set([...previousPrices,...relatedPrices])],sourceText:`${rag?.context||''}\n${generalKnowledge}\n${marketNote}\n${listingTextForGuard}`,listingText:listingTextForGuard,practice:generalKnowledge.length>0};
      const derivedFinance=derivedFinanceAmounts(source,[...evidenceItems,...related].map(item=>item.price).filter((value): value is number => typeof value==='number' && Number.isFinite(value)));
       Object.assign(guardContext,{financeAmounts:[...(financeEvidence?.amounts || []),...derivedFinance,...historicalFinanceAmounts],financeRanges:financeEvidence?.ranges || [],financePresent:Boolean(financeEvidence || derivedFinance.length || historicalFinanceAmounts.length),faqEvidence:faqRows.length>0 || generalKnowledge.length>0});
-      result.reply=removeUnpromptedNegotiation(rewriteUnverifiedAvailability(rewriteAvailabilityLabels(removeReplyArtifacts(discardInvalidCitations(labelMonthlyRent(normalizeCitations(result.reply,evidenceItems),evidenceItems),evidenceItems),evidenceItems,moreRequest),evidenceItems),source,evidenceItems),source);
+      result.reply=removeUnpromptedNegotiation(rewriteUnverifiedAvailability(rewriteAvailabilityLabels(removeReplyArtifacts(discardInvalidCitations(normalizeListedPrices(labelMonthlyRent(normalizeCitations(result.reply,evidenceItems),evidenceItems),evidenceItems),evidenceItems),evidenceItems,moreRequest),evidenceItems),source,evidenceItems),source);
      const foldedLegalQuestion=[...source.normalize('NFD')].filter(char=>{const code=char.codePointAt(0) || 0; return code<0x300 || code>0x36f;}).join('').replace(String.fromCodePoint(0x0111),'d').toLocaleLowerCase('vi');
      const legalDetail=[...details.values(),...(rag?.chunks || []).map(chunk=>String(chunk.content || '')),...evidenceItems.map(item=>String((item as {description?:unknown}).description || ''))].find(detail=>{const folded=[...detail.normalize('NFD')].filter(char=>{const code=char.codePointAt(0) || 0; return code<0x300 || code>0x36f;}).join('').replace(String.fromCodePoint(0x0111),'d').toLocaleLowerCase('vi'); return folded.includes('so hong') || folded.includes('so do') || folded.includes('san so') || folded.includes('so rieng');});
      const groundedLegalDetail=legalDetail || (JSON.stringify(evidenceItems[0] || {}).normalize('NFD').toLocaleLowerCase('vi').includes('san so hong') ? 'Tin đăng ghi sẵn sổ hồng' : '');
@@ -899,7 +902,8 @@ export class AiService {
            evidenceItems,
          ),
           source,
-        );
+       );
+       result.reply=normalizeListedPrices(result.reply,evidenceItems);
        result.reply=removeUnpromptedOwnerTemplate(result.reply,explicitWriteIntent(source));
        const retryViolation=this.guard.outputReason(result.reply,evidenceItems,source,guardContext) || ((viewedPropertyId || codeReference.codes.length===1) && isRawListingDump(result.reply) ? 'RAW_LISTING_DUMP' : null);
       if(retryViolation){const diagnostic=this.guard.outputDiagnostic(result.reply,evidenceItems,source,guardContext);log('regeneration',result.reply,retryViolation);console.warn(JSON.stringify({event:'guard_block',phase:'regeneration',reason:retryViolation,detail:diagnostic.detail,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:items.map(x=>x.number??null),preview:result.reply.slice(0,300)}));blocked=true;}
@@ -1026,7 +1030,7 @@ export class AiService {
     // "tầng 12 của tòa nhà có 12 tầng": the unit floor never tells how tall the building is, unless the listing says so.
     const floorsFixed=viewingFixed.replace(/\s*(?:của|trong)\s+tòa(?: nhà)?(?: có)?\s+(\d+)\s+tầng(?=[\s,.;])/giu,(match,floors)=>evidenceItems.some(item=>item.property_type==='Apartment') || !new RegExp(`${floors}\\s*tầng`,'iu').test(listingText.replace(/tầng\s*\d+/giu,'')) ? '' : match);
     // Imported apartment details write the unit floor as "12 tầng", so for apartments the clause is always dropped.
-     const replyWithoutListingCodes=redactListingCodesSafe(floorsFixed,evidenceItems).trimStart();
+     const replyWithoutListingCodes=redactListingCodesSafe(scrubOutsideDetailViewing(floorsFixed),evidenceItems).trimStart();
     // needs_v1 is deliberately not on the response path. The deterministic
     // extraction below remains available for the commit, while the richer LLM
     // extraction runs after the reply has been sent and can never fail the turn.
