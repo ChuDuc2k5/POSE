@@ -679,10 +679,10 @@ export const hcmWards: HcmWard[] = [
   {
     "ward": "Hòa Lợi",
     "formerDistricts": [
-      "Quận 1"
+      "Thị xã Bến Cát"
     ],
     "formerWards": [
-      "Tân Định"
+      "Hòa Lợi"
     ]
   },
   {
@@ -980,8 +980,8 @@ export const hcmWards: HcmWard[] = [
   {
     "ward": "Bắc Tân Uyên",
     "formerDistricts": [
-      "Quận 1",
-      "Quận Tân Phú"
+      "Huyện Bắc Tân Uyên",
+      "Thị xã Tân Uyên"
     ],
     "formerWards": [
       "Tân Thành",

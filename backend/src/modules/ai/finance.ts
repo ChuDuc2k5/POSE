@@ -76,6 +76,7 @@ export function safeMonthlyPayment(income: number, ratio = 0.4): number {
 
 const money = (value: number, digits = 1) => `${(value / 1_000_000).toLocaleString('vi-VN', { maximumFractionDigits: digits })} triệu đồng`;
 const percent = (value: number, digits = 1) => `${(value * 100).toLocaleString('vi-VN', { maximumFractionDigits: digits })}%`;
+const typicalLoanRateRange = '8–10%/năm';
 
 function amountsWithUnit(text: string, unit: 'month' | 'year' = 'year') {
   const pattern = unit === 'month'
@@ -107,7 +108,7 @@ function formatAffordability(text: string): string | null {
   const low = annuityPayment(loan, 8, 20).monthlyPayment;
   const high = annuityPayment(loan, 10, 20).monthlyPayment;
   const safe = safeMonthlyPayment(income);
-  return `Khả năng chi trả: giá ${money(price, 0)} trừ tiền có sẵn ${money(cash, 0)} cần vay khoảng ${money(loan, 0)}. Với 8–10%/năm trong 20 năm, khoản trả đều khoảng ${money(low)}–${money(high)} mỗi tháng; quy tắc tham khảo phổ biến là tiền trả nợ không quá 40% thu nhập, tức khoảng ${money(safe)} với thu nhập ${money(income, 0)}/tháng. Vì vậy khoản vay này không an toàn với mức thu nhập đã nêu; nên chọn ngân sách có khoản trả trong mức tham khảo và nhờ chuyên viên/ngân hàng lập bảng cụ thể.`;
+  return `Khả năng chi trả: giá ${money(price, 0)} trừ tiền có sẵn ${money(cash, 0)} cần vay khoảng ${money(loan, 0)}. Với ${typicalLoanRateRange} trong 20 năm, khoản trả đều khoảng ${money(low)}–${money(high)} mỗi tháng; quy tắc tham khảo phổ biến là tiền trả nợ không quá 40% thu nhập, tức khoảng ${money(safe)} với thu nhập ${money(income, 0)}/tháng. Vì vậy khoản vay này không an toàn với mức thu nhập đã nêu; nên chọn ngân sách có khoản trả trong mức tham khảo và nhờ chuyên viên/ngân hàng lập bảng cụ thể.`;
 }
 
 function formatYield(text: string, listingPrice?: number, marketNote?: string): string | null {
@@ -115,7 +116,10 @@ function formatYield(text: string, listingPrice?: number, marketNote?: string): 
   const prices = amountsWithUnit(text, 'year').filter(value => value >= 500_000_000);
   if (monthly.length && prices.length >= 2) {
     const yields = prices.slice(0, monthly.length).map((price, index) => grossRentalYield(monthly[index], price));
-    return `Lợi suất cho thuê gộp theo công thức tiền thuê × 12 / giá mua là ${yields.map(value => percent(value, 1)).join(' và ')}. Đây chưa trừ thời gian trống, phí quản lý, sửa chữa, thuế hoặc chi phí vay.`;
+    const note = `Lợi suất cho thuê gộp theo công thức tiền thuê × 12 / giá mua là ${yields.map(value => percent(value, 1)).join(' và ')}. Đây chưa trừ thời gian trống, phí quản lý, sửa chữa, thuế hoặc chi phí vay.`;
+    return /(?:chi\s+phí\s+vay|chi\s+phí\s+vốn|lãi\s+suất|vay)/iu.test(text)
+      ? `${note} Nếu khoản vay áp dụng lãi suất tham khảo khoảng ${typicalLoanRateRange}, các mức lợi suất gộp này thấp hơn mức lãi suất đó; đây chỉ là so sánh sơ bộ, chưa tính các chi phí khác.`
+      : note;
   }
   if (listingPrice && marketNote) {
     const median = marketNote.match(/phổ biến khoảng\s+([^.]*)/iu)?.[1];

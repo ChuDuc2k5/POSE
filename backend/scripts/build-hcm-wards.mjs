@@ -50,7 +50,12 @@ const requiredLegacyRows = [
   { ward: 'Tân Hưng', formerDistricts: ['Quận 7'], formerWards: ['Tân Phong', 'Tân Quy', 'Tân Kiểng', 'Tân Hưng'] },
   { ward: 'Vĩnh Hội', formerDistricts: ['Quận 4'], formerWards: ['Phường 1', 'Phường 3'] },
 ];
-const rows = [...(baseRows || []), ...requiredLegacyRows.filter(extra => !(baseRows || []).some(row => row.ward === extra.ward))];
+const correctedExternalRows = {
+  'Hòa Lợi': { ward: 'Hòa Lợi', formerDistricts: ['Thị xã Bến Cát'], formerWards: ['Hòa Lợi'] },
+  'Bắc Tân Uyên': { ward: 'Bắc Tân Uyên', formerDistricts: ['Huyện Bắc Tân Uyên', 'Thị xã Tân Uyên'], formerWards: ['Tân Thành', 'Tân Định'] },
+};
+const rows = [...(baseRows || []), ...requiredLegacyRows.filter(extra => !(baseRows || []).some(row => row.ward === extra.ward))]
+  .map(row => correctedExternalRows[row.ward] || row);
 if (!baseRows?.length) throw new Error('No complete mapping source found. Pass NQ1685_HTML and DVHCVN_JSON, or HCM_WARD_MAP.');
 const districtAliasesMap = {
   'Q7': 'Quận 7', 'Q.7': 'Quận 7', 'Q2': 'Quận 2', 'Q.2': 'Quận 2', 'Q9': 'Quận 9', 'Q.9': 'Quận 9', 'Q12': 'Quận 12', 'Q.12': 'Quận 12',

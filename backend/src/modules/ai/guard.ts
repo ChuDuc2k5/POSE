@@ -105,15 +105,18 @@ export function groundedSummary(evidence:Evidence[]) {
 export type Evidence={id:string;code:string;name:string;price:number|null;availability:string;updated_at:string;location:string;property_type:string;area?:number|null;bedrooms?:number|null;transaction_type?:'Sale'|'Rent';price_period?:'Total'|'Month';number?:number;source_type?:'Property'|'Faq';reason?:string;areaNearCriteria?:boolean};
 const clauses=(text:string)=>text.split(/\n|[;!?]|(?<!\d)[.,](?!\d)/).filter(Boolean);
 function negated(text:string,index:number){
-  const prefix=text.slice(Math.max(0,index-90),index).split(/nhưng|tuy nhiên|\bbut\b|\bhowever\b/i).at(-1) || '';
+  const sentencePrefix=text.slice(0,index).split(/[.!?;\n]/u).at(-1) || '';
+  const prefix=sentencePrefix.slice(Math.max(0,sentencePrefix.length-240)).split(/nhưng|tuy nhiên|\bbut\b|\bhowever\b/i).at(-1) || '';
   if(/(?:không|chưa)\s+(?:có\s+(?:thông tin(?:\s+xác nhận)?|xác nhận)|thể\s+(?:cung cấp|chia sẻ)|được phép\s+(?:cung cấp|chia sẻ))\s*$/iu.test(prefix))return true;
   if(/(?:không|chưa)\s+có\s+(?:thông tin(?:\s+xác nhận)?|xác nhận)(?:\s+\p{L}+){0,12}\s*$/iu.test(prefix))return true;
   if(/(?:không|chưa|chẳng)\s*$/iu.test(prefix))return true;
   if(/không\s+thể(?:\s+\p{L}+){0,12}\s*$/iu.test(prefix))return true;
   if(/không\s+còn\s*$/iu.test(prefix))return true;
   if(/không\s+có(?:\s+\p{L}+){0,8}\s+nào(?:\s+\p{L}+){0,12}\s*$/iu.test(prefix))return true;
+  if(/không\s+có(?:\s+\p{L}+|\s*[,]){0,32}\s+nào(?:\s+\p{L}+|\s*[,]){0,32}\s*$/iu.test(prefix))return true;
   if(/không\s+phải\s+lúc\s+nào\s+cũng\s*$/iu.test(prefix))return true;
   if(/không\s+(?:cam\s+kết|bảo\s+đảm|chắc\s+chắn)\s*$/iu.test(prefix))return true;
+  if(/không\s+nên\s+xem(?:\s+\p{L}+){0,8}\s+là\s*$/iu.test(prefix))return true;
   return /có\s+thể\s+chỉ(?:\s+được)?\s*$/iu.test(prefix);
 }
 // `grounded.legal`: the cited listing text itself states its papers (sổ hồng, sẵn sổ…).
@@ -232,7 +235,7 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
 
 export function removeReplyArtifacts<T extends { number?: number; name?: string; availability?: string }>(reply:string, sources:T[], allowMore=false) {
   let result=reply.replace(/\[market_summary\]/giu,'');
-  if(!allowMore) result=result.replace(/(?:^|\n)\s*Mình (?:chỉ còn \d+ căn khác đúng tiêu chí trong dữ liệu hiện có|gửi 5 căn khác đúng tiêu chí; dữ liệu còn \d+ căn phù hợp|gửi \d+ căn khác đúng tiêu chí trong dữ liệu hiện có)\.\s*/giu,'');
+  if(!allowMore) result=result.replace(/(?:^|\n)\s*Mình (?:chỉ còn \d+ căn khác đúng tiêu chí trong dữ liệu hiện có|gửi \d+ căn khác đúng tiêu chí trong dữ liệu hiện có|gửi 5 căn khác đúng tiêu chí; dữ liệu còn \d+ căn phù hợp)\.\s*/giu,'');
   const sourceNumbers=new Set(sources.map(source=>source.number).filter((number):number is number=>typeof number==='number'));
   return result.split(/\n/u).map(line=>{
     // Only a bare "[n] title – price" line (a raw citation title) is replaced; descriptive lines stay.
@@ -242,6 +245,26 @@ export function removeReplyArtifacts<T extends { number?: number; name?: string;
     const status=source?.availability==='Sold' ? 'Đã bán, không còn mở bán' : source?.availability==='Reserved' ? 'Đã giữ chỗ, không còn mở bán' : source?.availability==='Unavailable' ? 'Chưa khả dụng, không còn mở bán' : source?.availability==='Available' ? 'Đang mở bán' : '';
     return `[${match[1]}]${status ? ` ${status}.` : ''}`;
   }).join('\n').replace(/\n{3,}/gu,'\n\n').trim();
+}
+
+export function dedupeListings<T extends { name?: string; price?: number|null; area?: number|null }>(list:T[]) {
+  const seen=new Set<string>();
+  return list.filter(item=>{
+    const key=[item.name?.normalize('NFC').trim().toLocaleLowerCase('vi') || '',item.price ?? '',item.area ?? ''].join('|');
+    if(seen.has(key))return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function rewriteUnverifiedAvailability(reply:string, question:string, sources:{ availability?: string }[]) {
+  if(!sources.some(source=>source.availability==='Available') || !/(?:còn\s+trống|thực\s+sự|kiểm\s+tra.*còn)/iu.test(question))return reply;
+  return reply.replace(/hiện\s+trạng\s+còn\s+trống|còn\s+trống/giu,'tin đăng đang ghi là còn bán');
+}
+
+export function removeUnpromptedNegotiation(reply:string, question:string) {
+  if(/(?:thương\s+lượng|chiết\s+khấu|giảm\s+giá|giá\s+chốt)/iu.test(question))return reply;
+  return reply.replace(/(?:nếu\s+)?bạn\s+thanh\s+toán\s+(?:nhanh|một\s+lần)[^.?!\n]*(?:thương\s+lượng|chiết\s+khấu)[^.?!\n]*[.!]?/giu,'').replace(/\n{3,}/gu,'\n\n').trim();
 }
 
 export function correctUnknownReply(reply:string) {

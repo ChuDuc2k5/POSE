@@ -81,13 +81,14 @@ export function noMatchReply(text: string): string {
   // Quote the customer's own words (with accents), not the accent-folded form.
   const original = text.normalize('NFC');
   const district = original.match(/(?<![\p{L}])(?:quận\s+\d{1,2}|thủ đức|bình thạnh|phú nhuận|gò vấp|tân bình|tân phú|bình tân)(?![\p{L}\d])/iu)?.[0];
-  const budget = original.match(/\d+(?:[.,]\d+)?\s*(?:tỷ|tỉ|triệu)(?:\s*\/\s*tháng)?/iu)?.[0];
+  const budget = original.match(/(?:mua|giá|ngân\s+sách|dưới|tối\s+đa|khoảng|trong\s+khoảng)[^\d]{0,30}(\d+(?:[.,]\d+)?\s*(?:tỷ|tỉ|triệu)(?:\s*\/\s*tháng)?)/iu)?.[1]
+    || original.match(/\d+(?:[.,]\d+)?\s*(?:tỷ|tỉ|triệu)(?:\s*\/\s*tháng)?/iu)?.[0];
   const criteriaText = [district && `ở ${district}`, budget && `trong khoảng ${budget}`].filter(Boolean).join(' ');
   return `Hiện chưa có căn phù hợp ${criteriaText || 'với các tiêu chí bạn nêu'} trong dữ liệu đã công bố. Bạn có thể nới ngân sách/khu vực, hoặc để chuyên viên tư vấn tìm thêm giúp bạn.`;
 }
 
 export function hasNoMatchReply(text: string): boolean {
-  return /(?:chưa\s+(?:tìm\s+thấy|có)|không\s+có\s+(?:căn|bất động sản)|không\s+tìm\s+thấy|no\s+match)/iu.test(text);
+  return /(?:chưa\s+(?:tìm\s+(?:thấy|được)|có)|không\s+có\s+(?:căn|bất động sản)|không\s+tìm\s+(?:thấy|được)|no\s+match)/iu.test(text);
 }
 
 export function dedupeNoMatchReply(text: string): string {
