@@ -1,7 +1,20 @@
 import { object, propertyTypes } from './extraction.ts';
 import { moneyAmounts, priceLabel } from './money.ts';
 export function sanitizeReply(reply:string) { return reply.replace(/\[n\]/gi,'').replace(/\bDATA\b/g,'dữ liệu').replace(/[ \t]{2,}/g,' ').trim(); }
+export function redactListingCodes<T extends { code?: string; name?: string }>(reply:string, sources:T[]) {
+  let result=reply;
+  for(const source of sources.filter(item=>item.code)) {
+    const escaped=source.code!.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    result=result.replace(new RegExp(`(?<![\\p{L}\\d])${escaped}(?![\\p{L}\\d])`,'giu'), source.name || 'căn này');
+  }
+  return result.replace(/(?<![\\p{L}\\d])(?:CFR|CFL|RVL|P)-[A-Z\\d][A-Z\\d_-]*(?![\\p{L}\\d])/giu,'căn này');
+}
 const word = (source:string) => new RegExp(`(?<![\\p{L}])(?:${source})(?![\\p{L}])`,'iu');
+export function redactListingCodesSafe<T extends { code?: string; name?: string }>(reply:string, sources:T[]) {
+  let result=reply;
+  for(const source of sources.filter(item=>item.code)) result=result.replace(source.code!,source.name||'căn này');
+  return result.replace(/(?:CFR|CFL|RVL|P)-[A-Z0-9][A-Z0-9_-]*/gi,'căn này');
+}
 export function explicitWriteIntent(text:string) {
   const normalized=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\u0111/g,'d').toLowerCase();
   return word('luu(?: can| lai)|yeu thich|dat lich|hen xem|xem (?:nha|can)|xem truc tiep|di xem|lich xem|goi lai|lien he(?: voi| lai)?(?: toi|minh|em|anh|chi)|gap chuyen vien|nhan vien tu van|chuyen vien tu van|dang tin|tim nguoi thue|ky gui|cho thue nha|ban nha cua toi').test(normalized);

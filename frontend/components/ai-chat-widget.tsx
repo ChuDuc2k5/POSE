@@ -14,7 +14,7 @@ type Source={id:string;code:string;name:string;updated_at:string;price:number|nu
 type PendingAction={id:string;tool:string;summary_vi:string;status?:string;requires_verified_phone?:boolean};
 type BookingAction={type:'booking_form';property:BookingProperty;requires_sign_in?:boolean};
 type Message={role:'user'|'assistant';content:string;sources?:Source[];related?:Source[];action?:PendingAction;booking?:BookingAction;options?:string[]};
-type HistoryItem={id:string;title:string;time:string;updated_at?:string;message_count?:number;messages?:Message[]};
+type HistoryItem={id:string;title:string;time:string;updated_at?:string;message_count?:number;messages?:Message[];store_transcript?:boolean};
 type ConversationState={messages:Message[];sessionId?:string;pending:boolean;controller?:AbortController;error:string;store:boolean;unread:boolean;};
 type HistoryMenu={id:string;x:number;y:number};
 const historyCollapsedKey='terava-chat-history-collapsed-v1';
@@ -44,7 +44,8 @@ function mergeHistory(...lists:HistoryItem[][]){
     const priorCompleted=priorMessages.some(message=>message.role==='assistant'&&message.content);
     const nextCompleted=nextMessages.some(message=>message.role==='assistant'&&message.content);
     const messages=nextMessages.length>priorMessages.length || nextCompleted&&!priorCompleted ? nextMessages : priorMessages;
-    merged.set(item.id,{...previous,...item,messages,message_count:messages.length,time:messages===priorMessages?previous.time:item.time,updated_at:messages===priorMessages?previous.updated_at:item.updated_at});
+    const richer=nextMessages.length>priorMessages.length || nextCompleted&&!priorCompleted;
+    merged.set(item.id,{...previous,...item,title:richer&&item.title?item.title:previous.title,messages,message_count:messages.length,time:previous.updated_at||previous.time||item.time,updated_at:previous.updated_at||item.updated_at});
   }
   return [...merged.values()].sort((a,b)=>historyTimestamp(b)-historyTimestamp(a)||b.id.localeCompare(a.id));
 }
@@ -121,7 +122,7 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
     const load=async()=>{
       let serverItems:HistoryItem[]=[];
       if(signedIn){
-        try{const response=await fetch('/api/ai/sessions?page=1');if(response.ok){const result=await response.json();serverItems=(result.items||[]).map((item:HistoryItem)=>({...item,time:item.updated_at||item.time}));}}catch{}
+        try{const response=await fetch('/api/ai/sessions?page=1');if(response.ok){const result=await response.json();serverItems=(result.items||[]).filter((item:HistoryItem)=>item.store_transcript!==false || !!item.messages?.length).map((item:HistoryItem)=>({...item,time:item.updated_at||item.time}));}}catch{}
       }
       try{const saved=JSON.parse(window.localStorage.getItem(localHistoryKey)||'[]');if(Array.isArray(saved)){const localItems=saved.map((item:HistoryItem)=>({...item,title:maskTitle(item.title)}));serverItems=retainHistory([...serverItems,...localItems],pinnedIds);}}catch{}
       if(!cancelled)setHistoryItems(retainHistory(serverItems,pinnedIds));
@@ -384,7 +385,6 @@ export function AiChatWidget({signedIn=false,propertyId,propertyName,ownerKey,vi
           ? <div className="ai-row ai-row-user" key={i}><p className="ai-bubble">{m.content}</p></div>
           : <Fragment key={i}><div className="ai-row ai-row-assistant"><span className="ai-avatar ai-avatar-small"><TeravaMark size={18}/></span><div className="ai-answer"><div className="ai-answer-text">{renderReply(m.content)}</div>{m.action && <div className="ai-action-card"><strong>{m.action.summary_vi}</strong><div><button type="button" disabled={busy} onClick={()=>void decide(m.action!.id,true)}>Xác nhận</button><button type="button" disabled={busy} onClick={()=>void decide(m.action!.id,false)}>Huỷ</button></div></div>}
               {m.options?.length && <div className="ai-clarify-options" role="group" aria-label="Chọn khu vực">{m.options.map(option=><button type="button" key={option} disabled={busy} onClick={()=>void ask(option)}>{option}</button>)}</div>}
-              {!!m.sources?.length && <div className="ai-sources">{m.sources.map(s=><Link className="ai-source" href={`/properties/${s.id}`} key={s.id}><strong>{s.name}</strong><span>{s.code} · {s.price===null ? 'Giá chưa công bố':`${new Intl.NumberFormat('vi-VN').format(s.price)} VND${s.price_period==='Month' ? '/tháng':''}`}</span><em className={`ai-status ai-status-${s.availability}`}>{s.transaction_type==='Rent'&&s.availability==='Available' ? 'Còn cho thuê':availabilityLabels[s.availability]}</em><small>Cập nhật {new Date(s.updated_at).toLocaleString('vi-VN')}</small></Link>)}</div>}
                 {!!m.sources?.length && <div className="ai-property-list">{m.sources.slice(0,5).map(s=><div key={s.id} data-source-number={s.number} className={citation===s.number?'is-citation-target':''}><RecommendationCard source={s} related={false} onAsk={message=>message.startsWith('Đặt lịch')?openBooking(s):void ask(message)} signedIn={signedIn} saved={favorites.has(s.id)} customer={favorites.customer} ready={favorites.ready&&!favorites.error}/></div>)}</div>}
                 {!!m.related?.length && <section className="ai-related"><h3>Có thể bạn quan tâm</h3><div className="ai-property-list">{m.related.slice(0,3).map(s=><RecommendationCard key={s.id} source={s} related onAsk={message=>void ask(message)} signedIn={signedIn} saved={favorites.has(s.id)} customer={favorites.customer} ready={favorites.ready&&!favorites.error}/>)}</div></section>}
              </div></div>{bookingProperty&&m.sources?.some(source=>source.id===bookingAnchor)&&bookingRow(`booking-form-${i}`,<BookingForm property={bookingProperty} signedIn={signedIn} sessionId={session} onClose={()=>{setBookingProperty(undefined);setBookingAnchor(undefined);}} onSuccess={message=>{setBookingConfirmation({propertyId:bookingProperty.id,message});setBookingProperty(undefined);setNotice(message);}}/>)}{bookingConfirmation&&m.sources?.some(source=>source.id===bookingConfirmation.propertyId)&&bookingRow(`booking-confirmation-${i}`,<p className="ai-booking-confirmation" role="status">{bookingConfirmation.message}</p>)}</Fragment>)}

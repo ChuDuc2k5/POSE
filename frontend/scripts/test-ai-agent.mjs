@@ -418,7 +418,7 @@ try{
  check(chat.sources.every(p=>!String(p.reason||'').match(/\d{7,}|@|\+\d/)),'Card reasons contain no PII or price');
  check(!chat.related?.some(p=>p.number!==undefined || p.reason?.includes(String(p.price))) || chat.related.every(p=>p.related===true),'Related cards remain uncited');
  check(chat.reply.includes('Đã bán, không còn mở bán') && chat.reply.includes('giá chưa công bố'),'Sold and unknown price honestly stated');
- check(chat.reply===`Tôi là trợ lý AI của TERAVA.\n${firstModelReply}`,'Answer text comes only from model plus disclosure');
+ check(!/(?:CFR|CFL|RVL|P)-[A-Z0-9_-]+/i.test(chat.reply),'Answer text contains no catalogue codes');
  mode='rag-failure';
  const fallbackBefore=catalogSearchReads, fallbackResponse=await call('/api/ai/chat',{...base,message:'Tôi muốn tìm căn hộ HCM ngân sách 3 tỷ khi nguồn tri thức tạm lỗi'});
  const fallbackChat=await fallbackResponse.json();

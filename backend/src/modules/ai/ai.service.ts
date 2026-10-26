@@ -11,7 +11,7 @@ import { normalizePhone } from '../../common/profile-validation.js';
 import { object } from './extraction.js';
 import { inferSearch, inferTransactionType, centralFormerDistricts, genericHome } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
-import { correctionData, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, normalizeCitations, isAbusive, abusiveReply, type Evidence } from './guard.js';
+import { correctionData, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, normalizeCitations, redactListingCodesSafe, isAbusive, abusiveReply, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { complete, querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
@@ -410,10 +410,11 @@ export class AiService {
     const modelAlreadyNoMatch=hasNoMatchReply(result.reply);
     const appendBudget=budgetQuestion && !/[?？]\s*$/.test(result.reply.trim()) ? `\n${budgetQuestion}` : '';
     const reply=(!hasDisclosure && count===0 ? `${disclosure}\n`:'')+(cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatch && !modelAlreadyNoMatch ? `${noMatchReply(source)}\n` : related.length && !items.length && !modelAlreadyNoMatch ? 'Không có bất động sản nào khớp các tiêu chí bạn nêu.\n' : '')+(cheaperNoMatch ? '' : (blocked ? groundedSummary(items):result.reply))+unsupportedSuffix+ownerSuffix+loanSuffix+appendBudget;
+    const replyWithoutListingCodes=redactListingCodesSafe(reply,evidenceItems);
     // needs_v1 is deliberately not on the response path. The deterministic
     // extraction below remains available for the commit, while the richer LLM
     // extraction runs after the reply has been sent and can never fail the turn.
-    const modelNeedsPromise=!blocked ? extractNeedsAfterReply(source,reply) : Promise.resolve(null);
+    const modelNeedsPromise=!blocked ? extractNeedsAfterReply(source,replyWithoutListingCodes) : Promise.resolve(null);
     if(process.env.AI_API_URL?.includes('127.0.0.1:3301')){
       const modelNeeds=await modelNeedsPromise;
       if(modelNeeds){
@@ -435,7 +436,7 @@ export class AiService {
       score={...this.scoring.scoreNeeds(merged,interest,scoring.verified,scoring.score_result,preserve),needs_version:scoring.version};
     }
     const commitStarted=performance.now();
-    const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:reply,p_sources:items,p_actions:actions,p_fields:acceptedFields,p_score:score});
+    const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:replyWithoutListingCodes,p_sources:items,p_actions:actions,p_fields:acceptedFields,p_score:score});
     timing.commit=performance.now()-commitStarted;
     if(committed.error)return catalogDatabaseError(committed.error);
     const backgroundNeeds=!blocked ? modelNeedsPromise.then(modelNeeds=>{
@@ -451,7 +452,7 @@ export class AiService {
     const scope: 'in_scope' | 'out_of_scope' = 'in_scope';
     console.info(JSON.stringify({event:'turn_timing',phases:{...timing,other:Math.max(0,performance.now()-turnStarted-Object.values(timing).reduce((a,b)=>a+b,0))},total:performance.now()-turnStarted}));
     const cheaperOptions=cheaperNoMatch ? ['Quận 8 hoặc Nhà Bè', `Giữ ${area || 'khu vực này'}, nới diện tích`, 'Gặp chuyên viên'] : undefined;
-    const payload={session:committed.data,reply,scope,sources:items,related,blocked,proposals,pending_actions:pendingActions,action:bookingAction||action,inquiry_url:'/customer/inquiries/new',...(cheaperOptions ? {clarify:{needed:true,question:'Bạn muốn thử hướng nào tiếp theo?',options:cheaperOptions}} : {})};
+    const payload={session:committed.data,reply:replyWithoutListingCodes,scope,sources:items,related,blocked,proposals,pending_actions:pendingActions,action:bookingAction||action,inquiry_url:'/customer/inquiries/new',...(cheaperOptions ? {clarify:{needed:true,question:'Bạn muốn thử hướng nào tiếp theo?',options:cheaperOptions}} : {})};
     if(request.headers.get('accept')?.includes('text/event-stream')){
       const encoder=new TextEncoder();
       const stream=new ReadableStream<Uint8Array>({start(controller){
@@ -459,11 +460,11 @@ export class AiService {
         send('meta',{session_id:committed.data.id,scope,sources:items,related});
         // The stream is sent after the guarded answer is final, so only the final reply is streamed
         // (never a draft that a guard later replaced).
-        const deltas=Array.from({length:Math.ceil(reply.length/48)},(_,i)=>reply.slice(i*48,i*48+48));
+        const deltas=Array.from({length:Math.ceil(replyWithoutListingCodes.length/48)},(_,i)=>replyWithoutListingCodes.slice(i*48,i*48+48));
         for(const text of deltas)send('delta',{text});
         for(const pending of pendingActions)send('action',{action:pending});
         if(bookingAction)send('action',{action:bookingAction});
-        send('done',{message:reply,scope,blocked,guard:violation}); controller.close();
+        send('done',{message:replyWithoutListingCodes,scope,blocked,guard:violation}); controller.close();
       }});
       return new Response(stream,{headers:{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','Connection':'keep-alive','X-Accel-Buffering':'no'}});
     }
