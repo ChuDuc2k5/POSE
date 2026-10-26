@@ -146,7 +146,11 @@ const hotfixProperties=[
  {id:randomUUID(),code:'Q12-B01',name:'Nhà phố ngân sách Quận 12',price:1500000000,availability:'Available',updated_at:'2026-10-15T01:00:00Z',location:'Phường Thới An, Thành phố Hồ Chí Minh',property_type:'House',publication:'Published',archived:false,area:72,bedrooms:3,project_name:'TERAVA',subdivision_name:null,amenities:'',cover_id:null,transaction_type:'Sale',price_period:'Total',description:'Nhà phố bán công bố để kiểm thử hotfix 10d.'},
  {id:randomUUID(),code:'BD-B01',name:'Đất nền ngân sách Bình Dương',price:900000000,availability:'Available',updated_at:'2026-10-15T01:00:00Z',location:'Bình Dương',property_type:'Land',publication:'Published',archived:false,area:90,bedrooms:null,project_name:'TERAVA',subdivision_name:null,amenities:'',cover_id:null,transaction_type:'Sale',price_period:'Total',description:'Đất nền bán công bố để kiểm thử hotfix 10d.'},
 ];
-const catalogueRows=()=>mode==='hotfix-10d' ? [...properties,...hotfixProperties] : properties;
+const hotfix15Prices=[2990000000,2850000000,2750000000,2650000000,2550000000,2450000000,2350000000,2200000000,2000000000];
+const hotfix15Properties=hotfix15Prices.map((price,index)=>({id:randomUUID(),code:`TD-15-${index+1}`,name:`Căn hộ Thủ Đức ${String(price/1e9).replace('.',',')} tỷ`,price,availability:'Available',updated_at:`2026-10-${String(16+index).padStart(2,'0')}T01:00:00Z`,location:'Phường Long Bình, Quận 9, Thành phố Hồ Chí Minh',property_type:'Apartment',publication:'Published',archived:false,area:65+index,bedrooms:2,project_name:'TERAVA',subdivision_name:null,amenities:'',cover_id:null,transaction_type:'Sale',price_period:'Total',description:'Căn hộ bán công bố để kiểm thử hotfix 15.'}));
+hotfix15Properties.push({id:randomUUID(),code:'TD-15-HOUSE',name:'Nhà phố Thủ Đức vượt ngân sách',price:4500000000,availability:'Available',updated_at:'2026-10-25T01:00:00Z',location:'Phường Long Bình, Quận 9, Thành phố Hồ Chí Minh',property_type:'House',publication:'Published',archived:false,area:90,bedrooms:3,project_name:'TERAVA',subdivision_name:null,amenities:'',cover_id:null,transaction_type:'Sale',price_period:'Total',description:'Nhà phố bán công bố để kiểm thử hotfix 15.'});
+let hotfix15Enabled=false;
+const catalogueRows=()=>mode==='hotfix-10d' ? [...properties,...hotfixProperties] : mode==='hotfix-15' || hotfix15Enabled ? [...properties,...hotfix15Properties] : properties;
 if(previewOnly || live){
  properties[0]={...properties[0],code:'TD-A01',name:'Căn hộ Thủ Đức',location:'Thủ Đức',price:3200000000,transaction_type:'Sale',price_period:'Total'};
  properties[2]={...properties[2],code:'Q7-R01',name:'Căn hộ 2 phòng ngủ Quận 7',location:'Quận 7',price:25000000,availability:'Available',transaction_type:'Rent',price_period:'Month'};
@@ -157,7 +161,7 @@ const provider=createServer(async(req,res)=>{
   const reply=(status,body)=>{if(body?.choices?.length && !body.usage){body.usage={prompt_tokens:11,completion_tokens:7,total_tokens:18};body.choices[0].usage=body.usage;}res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(body));};
  const error=(code,message,status=400)=>reply(status,{code,message});
  if(url.pathname==='/fixture/mode'){
-  mode=typeof input.mode==='string' ? input.mode : 'ok'; providerOffline=mode==='offline'; rerankNoAnswer=mode==='no-answer';
+  mode=typeof input.mode==='string' ? input.mode : 'ok'; hotfix15Enabled=mode==='hotfix-15'; providerOffline=mode==='offline'; rerankNoAnswer=mode==='no-answer';
   return reply(200,{mode,providerOffline,rerankNoAnswer});
  }
   const requestedMode=req.headers['x-fake-provider-mode'];if(requestedMode)mode=requestedMode;
@@ -330,7 +334,7 @@ const provider=createServer(async(req,res)=>{
   if(role!=='Admin' && !(role==='Sales' && assigned(input.p_lead,directory.Sales)))return error('42501','FORBIDDEN',403);
   const lead=leads.get(input.p_lead);if(lead.version!==input.p_version)return error('40001','VERSION_CONFLICT',409);lead.temperature=input.p_classification==='Unrated' ? null:input.p_classification.toUpperCase();lead.version++;return reply(200,{classification:input.p_classification,version:lead.version});
   }
- if(url.pathname.endsWith('/pose_system_ai_catalogue_overview')){
+  if(url.pathname.endsWith('/pose_system_ai_catalogue_overview')){
   const transaction=input.p_transaction_type||null,type=input.p_property_type||null,max=input.p_max_price==null?null:Number(input.p_max_price);
   const rows=catalogueRows().filter(p=>p.publication==='Published'&&!p.archived&&(!transaction||p.transaction_type===transaction)&&(!type||p.property_type===type)&&(max===null||(p.price!==null&&p.price<=max)));
   const by=(key)=>{const grouped=new Map();for(const row of rows){const value=row[key];if(value==null)continue;const item=grouped.get(value)||{label:value,count:0,min_price:null,max_price:null};item.count++;if(row.price!==null){item.min_price=item.min_price===null?row.price:Math.min(item.min_price,row.price);item.max_price=item.max_price===null?row.price:Math.max(item.max_price,row.price);}grouped.set(value,item);}return [...grouped.values()].sort((a,b)=>b.count-a.count||a.label.localeCompare(b.label,'vi'));};
@@ -509,6 +513,20 @@ try{
   check(!chipSearchData.clarify?.needed&&chipFilters&&chipSearchData.sources.length>0&&chipSearchData.sources.every(p=>p.price<=2e9),'Thủ Đức area chip searches Sale listings within the remembered 2 tỷ ceiling');
   const budgetPhrases=await call('/api/ai/chat',{...base,message:'Tôi có 2 tỷ, nên mua BĐS ở đâu?'});const budgetPhrasesData=await budgetPhrases.json();
   check(!budgetPhrasesData.reply.includes('ngân sách khoảng bao nhiêu')&&!budgetPhrasesData.reply.includes('dự kiến ngân sách')&&budgetPhrasesData.clarify?.options?.includes('Chưa rõ, gợi ý giúp tôi'),'A stated budget never triggers a repeated budget clarification');
+  await (await fetch('http://localhost:3301/fixture/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'hotfix-15'})})).json();
+  const flowFirstResponse=await call('/api/ai/chat',{...base,message:'Tôi muốn mua nhà'});const flowFirst=await flowFirstResponse.json();const flowCookie=flowFirstResponse.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];
+  const flowHistory=[{role:'user',content:'Tôi muốn mua nhà'},{role:'assistant',content:flowFirst.reply}];
+  const flowBudgetResponse=await call('/api/ai/chat',{...base,session_id:flowFirst.session.id,message:'Ngân sách 3 tỷ',history:flowHistory},flowCookie);const flowBudget=await flowBudgetResponse.json();
+  const flowHistoryWithBudget=[...flowHistory,{role:'user',content:'Ngân sách 3 tỷ'},{role:'assistant',content:flowBudget.reply}];
+  const bienHoa=await (await call('/api/ai/chat',{...base,session_id:flowFirst.session.id,message:'ở Biên Hòa',history:flowHistoryWithBudget},flowCookie)).json();
+  check(/chưa có|không có/iu.test(bienHoa.reply)&&!bienHoa.reply.includes('chưa đủ dữ liệu để trả lời chắc chắn')&&bienHoa.sources.length===0&&bienHoa.related.length>0&&bienHoa.related.every(p=>/khác khu vực/iu.test(String(p.reason))),'Biên Hòa zero-match is honest and related cards say khác khu vực');
+  const flowHistoryWithBienHoa=[...flowHistoryWithBudget,{role:'user',content:'ở Biên Hòa'},{role:'assistant',content:bienHoa.reply,sources:bienHoa.sources}];
+  const quan9=await (await call('/api/ai/chat',{...base,session_id:flowFirst.session.id,message:'thế ở quận 9 đi',history:flowHistoryWithBienHoa},flowCookie)).json();
+  check(/Mua[\s\S]*3 tỷ/iu.test(quan9.reply)&&quan9.sources.length>0&&quan9.sources.every(p=>p.price<=3e9),'Quận 9 area switch keeps the 3 tỷ ceiling');
+  const flowHistoryWithQuan9=[...flowHistoryWithBienHoa,{role:'user',content:'thế ở quận 9 đi'},{role:'assistant',content:quan9.reply,sources:quan9.sources}];
+  const thuDuc=await (await call('/api/ai/chat',{...base,session_id:flowFirst.session.id,message:'ở Thủ Đức',history:flowHistoryWithQuan9},flowCookie)).json();
+  check(/Mua, ở Thủ Đức, tối đa 3 tỷ đồng/iu.test(thuDuc.reply)&&thuDuc.sources.length>0&&thuDuc.sources.every(p=>p.transaction_type==='Sale'&&p.price<=3e9&&!/TD-15-HOUSE/.test(p.code))&&/Thủ Đức \(9 căn/iu.test(bienHoa.reply),'Thủ Đức area switch keeps budget, orders in-budget apartments, and excludes the 4,5 tỷ house');
+  check(thuDuc.sources.every((p,i,list)=>i===0||Math.abs(3e9-p.price)>=Math.abs(3e9-list[i-1].price)),'Thủ Đức main cards are ordered by closeness to the ceiling');
   await (await fetch('http://localhost:3301/fixture/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'ok'})})).json();
   catalogBeforeNormal=catalogSearchReads;
  const first=await call('/api/ai/chat',base);check(first.status===200,'Guest chat succeeds');const chat=await first.json();const firstModelReply=modelOutputs.at(-1).reply;

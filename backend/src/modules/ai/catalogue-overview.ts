@@ -55,15 +55,15 @@ function filteredTypes(data: Overview, transactionType?: 'Sale' | 'Rent') {
   return data.types.filter(row => !transactionType || row.transaction_type === transactionType);
 }
 
-export async function catalogueOverview(kind: CatalogueOverviewKind, transactionType?: 'Sale' | 'Rent', maxPrice?: number, propertyType?: string) {
+export async function catalogueOverview(kind: CatalogueOverviewKind, transactionType?: 'Sale' | 'Rent', maxPrice?: number, propertyType?: string, fresh = false) {
   const key = `${transactionType || 'all'}:${maxPrice ?? 'all'}:${propertyType || 'all'}`;
-  let value = cache.get(key)?.value;
+  let value = fresh ? undefined : cache.get(key)?.value;
   if (!value || cache.get(key)!.expires <= Date.now()) {
     const result = await systemClient().rpc('pose_system_ai_catalogue_overview', { p_transaction_type: transactionType || null, p_max_price: maxPrice ?? null, p_property_type: propertyType || null });
     if (result.error) throw new Error(result.error.message || 'CATALOGUE_OVERVIEW_UNAVAILABLE');
     const raw = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
     value = { areas: getRows(raw.areas), types: getRows(raw.types), projects: getRows(raw.projects), prices: getRows(raw.prices) };
-    cache.set(key, { expires: Date.now() + ttl, value });
+    if (!fresh) cache.set(key, { expires: Date.now() + ttl, value });
   }
   return formatOverview(kind, value, transactionType, maxPrice);
 }

@@ -80,7 +80,7 @@ export const loanAssumption = 'Giả định vay khoảng 60% giá trị căn; �
 export function noMatchReply(text: string): string {
   // Quote the customer's own words (with accents), not the accent-folded form.
   const original = text.normalize('NFC');
-  const district = original.match(/(?<![\p{L}])(?:quận\s+\d{1,2}|thủ đức|bình thạnh|phú nhuận|gò vấp|tân bình|tân phú|bình tân)(?![\p{L}\d])/iu)?.[0];
+  const district = original.match(/(?<![\p{L}])(?:quận\s+\d{1,2}|biên hòa|đồng nai|thủ đức|bình thạnh|phú nhuận|gò vấp|tân bình|tân phú|bình tân)(?![\p{L}\d])/iu)?.[0];
   const budget = original.match(/(?:mua|giá|ngân\s+sách|dưới|tối\s+đa|khoảng|trong\s+khoảng)[^\d]{0,30}(\d+(?:[.,]\d+)?\s*(?:tỷ|tỉ|triệu)(?:\s*\/\s*tháng)?)/iu)?.[1]
     || original.match(/\d+(?:[.,]\d+)?\s*(?:tỷ|tỉ|triệu)(?:\s*\/\s*tháng)?/iu)?.[0];
   const criteriaText = [district && `ở ${district}`, budget && `trong khoảng ${budget}`].filter(Boolean).join(' ');

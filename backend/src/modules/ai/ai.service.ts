@@ -81,7 +81,7 @@ async function retrieveStructured(filters:Record<string,unknown>,context:string|
   if(filters.maxArea!==undefined)query=query.lte('area',filters.maxArea);
   if(filters.bedrooms!==undefined)query=query.or(`bedrooms.is.null,bedrooms.eq.${Number(filters.bedrooms)}`);
   if(Array.isArray(filters.exclude_ids)&&filters.exclude_ids.length)query=query.not('id','in',`(${filters.exclude_ids.map(value=>String(value).replace(/[(),]/g,'')).join(',')})`);
-  const result=await query.order('updated_at',{ascending:false}).order('id').limit(5);
+  const result=await query.order('updated_at',{ascending:false}).order('id').limit(25);
   if(result.error)throw new Error('RETRIEVAL_UNAVAILABLE');
   return { items:(result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[], count:Number(result.count ?? 0) };
 }
@@ -303,7 +303,15 @@ export class AiService {
           const found=structured.items.filter(item=>matchesFilters(item,effective));
           const inStated=found.filter(item=>(typeof stated.minArea!=='number'||typeof item.area!=='number'||item.area>=stated.minArea)&&(typeof stated.maxArea!=='number'||typeof item.area!=='number'||item.area<=stated.maxArea));
           const near=found.filter(item=>!inStated.includes(item)&&typeof item.area==='number').map(item=>({...item,areaNearCriteria:true}));
-          return [...inStated,...near];
+          const ordered=[...inStated,...near];
+          if (typeof stated.maxPrice === 'number' && stated.minPrice === undefined) {
+            ordered.sort((left, right) => {
+              const leftDistance = typeof left.price === 'number' ? Math.abs(stated.maxPrice as number - left.price) : Number.POSITIVE_INFINITY;
+              const rightDistance = typeof right.price === 'number' ? Math.abs(stated.maxPrice as number - right.price) : Number.POSITIVE_INFINITY;
+              return leftDistance - rightDistance;
+            });
+          }
+          return ordered.slice(0, 5);
         }catch(error){
           console.warn(JSON.stringify({event:'structured_retrieval_fallback',error:error instanceof Error ? error.message:'RETRIEVAL_UNAVAILABLE'}));
         }
@@ -398,6 +406,7 @@ export class AiService {
         if(inferredFilters?.location===undefined && rememberedCriteria.location!==undefined)delete queryFilters.locations;
          if(inferredFilters?.locations===undefined && rememberedCriteria.locations!==undefined)delete queryFilters.location;
          if (/gần\s+(?:Quận\s*1|trung tâm)|đi\s+làm\s+(?:Quận\s*1|trung tâm)/iu.test(source)) { queryFilters.locations=centralFormerDistricts; delete queryFilters.location; }
+         if(!moneyAmounts(source).length && inferredFilters?.minPrice===undefined && rememberedCriteria.minPrice===undefined && rememberedCriteria.maxPrice!==undefined)delete queryFilters.minPrice;
          if(!moneyAmounts(source).length && rememberedCriteria.minPrice===undefined && rememberedCriteria.maxPrice===undefined){delete queryFilters.minPrice;delete queryFilters.maxPrice;delete queryFilters.maxPriceExclusive;}
         const aliases=formerDistrictAliases(queryFilters.location);
         if(aliases.length)queryFilters.location_aliases=aliases;
@@ -419,6 +428,13 @@ export class AiService {
       if(aliases.length)queryFilters.location_aliases=aliases;
     }
     if(!input.property_id && sanitizedHistory.some(turn=>turn.role==='user' && genericSearchQuestion(turn.content)) && !inferSearch(source)?.type) delete queryFilters.type;
+    if (typeof queryFilters.maxPrice === 'number' && queryFilters.minPrice === undefined) {
+      items.sort((left, right) => {
+        const leftDistance = typeof left.price === 'number' ? Math.abs(queryFilters.maxPrice as number - left.price) : Number.POSITIVE_INFINITY;
+        const rightDistance = typeof right.price === 'number' ? Math.abs(queryFilters.maxPrice as number - right.price) : Number.POSITIVE_INFINITY;
+        return leftDistance - rightDistance;
+      });
+    }
     // Refuse before retrieval and before constructing an agent with tools.
     if(outOfScope) {
       log('scope',source,'OUT_OF_SCOPE','flagged');
@@ -461,6 +477,7 @@ export class AiService {
     // Nothing matches every criterion: show the closest listings instead of a bare "chưa có".
     // Relax in the order customers can evaluate: price, then area, then location.
     let nearestReason='';
+    let availableAreasLine='';
     if(searchPerformed && !items.length && (!related.length || (!queryFilters.location && !queryFilters.locations)) && !budgetAdjustment && !contactOnly && !input.property_id && strictCashBudget===null && (queryFilters.location || queryFilters.locations || queryFilters.maxPrice!==undefined)){
       const query=[standalone,...queryKeywords].join(' ');
       const nearestSearch=async (filters:Record<string,unknown>) => {
@@ -473,6 +490,31 @@ export class AiService {
         if(near.length){nearestReason=stage.reason;break;}
       }
       related=near.sort((left,right)=>queryFilters.maxPrice!==undefined ? (left.price??Infinity)-(right.price??Infinity) : 0).slice(0,3).map(item=>({...item,number:undefined,relaxed_reason:nearestReason,reason:nearestReason,related:true}));
+    }
+    if (searchPerformed && !items.length && !contactOnly && !input.property_id
+      && typeof queryFilters.maxPrice === 'number' && (queryFilters.location || queryFilters.locations)
+      && queryFilters.transaction_type) {
+      try {
+        const overview = await catalogueOverview(
+          'areas',
+          queryFilters.transaction_type as 'Sale' | 'Rent',
+          queryFilters.maxPrice as number,
+          typeof queryFilters.type === 'string' ? queryFilters.type : undefined,
+          true,
+        );
+        const requested = withFormerDistrict(String(queryFilters.location || (Array.isArray(queryFilters.locations) ? queryFilters.locations[0] : '')))
+          .normalize('NFC').toLocaleLowerCase('vi');
+        const alternatives = (overview.areas || [])
+          .filter(area => Number(area.count) > 0 && withFormerDistrict(area.label).normalize('NFC').toLocaleLowerCase('vi') !== requested)
+          .slice(0, 3);
+        if (alternatives.length) {
+          const monthly = queryFilters.transaction_type === 'Rent';
+          const budget = priceLabel(queryFilters.maxPrice as number, monthly);
+          availableAreasLine = `\nKhu vực thực sự có tin phù hợp: ${alternatives.map(area => `${area.label} (${Number(area.count)} căn ≤ ${budget})`).join(', ')}.`;
+        }
+      } catch (error) {
+        console.warn(JSON.stringify({event:'catalogue_overview_for_no_match_failed',error:error instanceof Error ? error.message:'UNKNOWN'}));
+      }
     }
     const extracted:Record<string,unknown>={};
     // One known listing (detail page, a single code, or "căn đó"): answer from that listing's own text only.
@@ -632,7 +674,8 @@ export class AiService {
     const finalRag=rag as RetrievalResult|null;if(finalRag){const rendered=renderRetrievedContextWithCards(finalRag.chunks,new Set(items.map(x=>x.id)));rag={...finalRag,...rendered};items=items.map(item=>({...item,number:((rendered.sources.find(s=>(s as {id?:string}).id===item.id) as {number?:number}|undefined)?.number),source_type:'Property'}));}else items=items.map((item,index)=>({...item,number:index+1,source_type:'Property'}));
     const evidenceItems=items;
     const previousPrices=sanitizedHistory.flatMap(turn=>turn.role==='assistant'&&Array.isArray(turn.sources)?turn.sources.map(source=>source.price).filter((value):value is number=>typeof value==='number'&&Number.isFinite(value)):[]);
-    const guardContext={retrievalFound:rag?.found??evidenceItems.length>0,faqOnly:evidenceItems.length>0&&evidenceItems.every(x=>x.source_type==='Faq'),filterAmounts:[...new Set(filterAmounts)],previousPrices:[...new Set(previousPrices)],sourceText:`${rag?.context||''}\n${generalKnowledge}\n${marketNote}\n${[...details.values()].join('\n')}`,listingText:[...details.values()].join('\n'),practice:generalKnowledge.length>0};
+    const rememberedBudgetAmounts=[rememberedCriteria.minPrice,rememberedCriteria.maxPrice].filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    const guardContext={retrievalFound:rag?.found??evidenceItems.length>0,faqOnly:evidenceItems.length>0&&evidenceItems.every(x=>x.source_type==='Faq'),filterAmounts:[...new Set([...filterAmounts,...rememberedBudgetAmounts])],previousPrices:[...new Set(previousPrices)],sourceText:`${rag?.context||''}\n${generalKnowledge}\n${marketNote}\n${[...details.values()].join('\n')}`,listingText:[...details.values()].join('\n'),practice:generalKnowledge.length>0};
      Object.assign(guardContext,{financeAmounts:financeEvidence?.amounts || [],financeRanges:financeEvidence?.ranges || [],financePresent:Boolean(financeEvidence),faqEvidence:faqRows.length>0 || generalKnowledge.length>0});
      result.reply=removeUnpromptedNegotiation(rewriteUnverifiedAvailability(removeReplyArtifacts(discardInvalidCitations(labelMonthlyRent(normalizeCitations(result.reply,evidenceItems),evidenceItems),evidenceItems),evidenceItems,moreRequest),source,evidenceItems),source);
     const guardStarted=performance.now();
@@ -717,7 +760,8 @@ export class AiService {
     const handoffLine=searchPerformed && !items.length && Object.keys(queryFilters).length>0 && input.filters===undefined && !input.property_id && !contactOnly && !ownerRequest(source) && !/chuyên viên|nhân viên tư vấn/iu.test(result.reply) ? ` Nếu chưa ưng, mình nhờ chuyên viên tư vấn tìm thêm giúp ${address} nhé.` : '';
     const nearestLine=nearestReason && related.length && !items.length ? `\nMình gửi bên dưới ${related.length} căn gần tiêu chí nhất (${nearestReason.toLocaleLowerCase('vi')}) để ${address} tham khảo nhé.${handoffLine}` : handoffLine ? `\n${handoffLine.trim()}` : '';
      const noMatchPrefix=financeNote ? '' : noMatch && !modelAlreadyNoMatch ? `${noMatchReply(source)}\n` : related.length && !items.length && !modelAlreadyNoMatch ? `${noMatchReply(source).split('. ')[0]}.\n` : '';
-     const reply=(!hasDisclosure && count===0 ? `${disclosure}\n`:'')+criteriaLine+(cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatchPrefix)+(cheaperNoMatch || blocked && !items.length && noMatch && !modelAlreadyNoMatch ? '' : (blocked ? groundedSummary(items):result.reply))+areaToleranceSuffix+moreStatus+unsupportedSuffix+ownerSuffix+loanSuffix+bookingLine+contactLine+nearestLine+similarLine+appendBudget;
+      const deterministicListingReply=blocked ? (evidenceItems.length ? groundedSummary(evidenceItems) : safeReply) : result.reply;
+      const reply=(!hasDisclosure && count===0 ? `${disclosure}\n`:'')+criteriaLine+(cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatchPrefix)+(cheaperNoMatch || blocked && !items.length && noMatch && !modelAlreadyNoMatch ? '' : (blocked ? deterministicListingReply:result.reply))+areaToleranceSuffix+moreStatus+unsupportedSuffix+ownerSuffix+loanSuffix+bookingLine+contactLine+nearestLine+availableAreasLine+similarLine+appendBudget;
       const premiseCorrection=/chưa có sổ|chưa có sổ hồng/iu.test(source) && /sẵn sổ|sổ hồng/iu.test(listingText) ? '\nTheo dữ liệu tin đăng, căn này được ghi là đã có sổ hồng; mình không thể xác nhận lời hứa của bên thứ ba. Bạn nên xem bản gốc giấy chứng nhận và kiểm tra tại cơ quan đăng ký đất đai.' : '';
       const freshnessCorrection=/(?:bán rồi|đã bán|còn bán không|cập nhật lần cuối)/iu.test(source) && items[0]?.updated_at ? `\nMình xin lỗi vì tin có thể đã chậm so với thực tế. Dữ liệu tin đăng này cập nhật ngày ${String(items[0].updated_at).slice(0,10)}; mình có thể nhờ chuyên viên kiểm tra lại và gửi các căn tương tự.` : '';
       const externalSiteCorrection=/(?:bên khác|website khác|trang khác|nơi khác)/iu.test(source) && !/không thể kiểm tra|không kiểm chứng|không xác minh/iu.test(result.reply) ? '\nTERAVA không thể kiểm tra hoặc xác minh trực tiếp các tin đăng trên website khác; chuyên viên có thể xác nhận lại giá với chủ nhà.' : '';

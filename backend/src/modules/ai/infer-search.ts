@@ -26,7 +26,7 @@ const types: [RegExp, string][] = [
   [word('biệt thự'), 'Villa'], [word('căn hộ|chung cư|studio|penthouse|duplex'), 'Apartment'], [word('văn phòng'), 'Office'],
   [word('mặt bằng|shophouse|kiot|cửa hàng'), 'Shop'], [word('đất nền|lô đất|đất'), 'Land'], [word('nhà phố|nhà riêng|nhà nguyên căn|nhà mặt tiền|nhà mặt phố|nhà hẻm|nhà cấp 4|nhà [0-9]+ tầng|nhà [0-9]+ lầu|nhà [0-9]+ trệt'), 'House'], [word('nhà'), 'House'],
 ];
-const places = ['Thủ Đức', 'Bình Thạnh', 'Gò Vấp', 'Tân Bình', 'Tân Phú', 'Phú Nhuận', 'Bình Tân', 'Nhà Bè', 'Củ Chi', 'Hóc Môn', 'Bình Chánh', 'Cần Giờ', 'Thảo Điền', 'Phú Mỹ Hưng', 'Thủ Thiêm'];
+const places = ['Thủ Đức', 'Biên Hòa', 'Đồng Nai', 'Bình Thạnh', 'Gò Vấp', 'Tân Bình', 'Tân Phú', 'Phú Nhuận', 'Bình Tân', 'Nhà Bè', 'Củ Chi', 'Hóc Môn', 'Bình Chánh', 'Cần Giờ', 'Thảo Điền', 'Phú Mỹ Hưng', 'Thủ Thiêm'];
 const propertyWords = /căn(?: hộ)?|chung cư|nhà|đất|biệt thự|văn phòng|mặt bằng|bất động sản|bđs|bds|thuê|mua|bán|giá|ngân sách|tỷ|triệu|phòng ngủ|quận|khu vực|diện tích|nhận nhà ngay|dọn vào ở ngay|khu dân cư|vợ chồng|trường học|bệnh viện|chợ|siêu thị|trung tâm thương mại|hẻm|yên tĩnh|máy lạnh|máy giặt|nội thất|đậu ô tô|gara|tầng thấp|tầng cao|ban công|view|hồ bơi|gym|thang máy|giảm giá|ngộp|cắt lỗ|hạ giá|chiết khấu|giá tốt|chỉ còn|\bm\s*[²2]\b|apartment|house/i;
 
 const keywordRules: [RegExp, string][] = [
@@ -56,7 +56,7 @@ export function genericHome(text: string) {
 
 export function inferSearch(text: string): InferredSearch | null {
   const standalonePlace = places.some(name => text.trim().toLocaleLowerCase('vi') === name.toLocaleLowerCase('vi'));
-  if (!propertyWords.test(text) && !standalonePlace) return null;
+  if (!propertyWords.test(text) && !standalonePlace && !places.some(name => text.toLocaleLowerCase('vi').includes(name.toLocaleLowerCase('vi')))) return null;
   const filters: InferredSearch = {};
   const landmark = landmarkLocations.find(([pattern]) => pattern.test(text));
   if (landmark) { if (Array.isArray(landmark[1])) filters.locations = landmark[1]; else filters.location = landmark[1]; }

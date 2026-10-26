@@ -116,7 +116,7 @@ export function referencedListingCodes(message: string, history: { role: string;
   return { codes: [] as string[], ambiguous: false };
 }
 // A project, area or new ward name is a location too ("Vinhomes Grand Park", "Phú Mỹ Hưng", "Phường Long Bình").
-const placeNames = /(?<![\p{L}])(?:vinhomes|grand\s+park|masteri|midtown|sunrise|sky\s+garden|phú\s+mỹ\s+hưng|thảo\s+điền|thủ\s+thiêm|landmark|vạn\s+phúc|celadon|eco\s*green|gò\s+vấp|bình\s+thạnh|tân\s+bình|tân\s+phú|phú\s+nhuận|bình\s+tân|nhà\s+bè|củ\s+chi|hóc\s+môn|bình\s+chánh|cần\s+giờ|vũng\s+tàu|bình\s+dương|khu\s+đô\s+thị|dự\s+án)(?![\p{L}])/iu;
+const placeNames = /(?<![\p{L}])(?:vinhomes|grand\s+park|masteri|midtown|sunrise|sky\s+garden|biên\s+hòa|đồng\s+nai|phú\s+mỹ\s+hưng|thảo\s+điền|thủ\s+thiêm|landmark|vạn\s+phúc|celadon|eco\s*green|gò\s+vấp|bình\s+thạnh|tân\s+bình|tân\s+phú|phú\s+nhuận|bình\s+tân|nhà\s+bè|củ\s+chi|hóc\s+môn|bình\s+chánh|cần\s+giờ|vũng\s+tàu|bình\s+dương|khu\s+đô\s+thị|dự\s+án)(?![\p{L}])/iu;
 function namesPlace(message: string) {
   const text = message.normalize('NFC').toLocaleLowerCase('vi');
   return placeNames.test(message.normalize('NFC')) || hcmWards.some(row => text.includes(row.ward.normalize('NFC').toLocaleLowerCase('vi')));
@@ -172,7 +172,20 @@ export function searchCriteriaFromHistory(message: string, history: { role: stri
     if (explicitNewSearch.test(turn.content) && Object.keys(criteria).length) {
       for (const key of Object.keys(criteria)) delete criteria[key];
     }
-    Object.assign(criteria, inferredCriteria(turn.content));
+    const turnCriteria = inferredCriteria(turn.content);
+    const areaOnly = (turnCriteria.location !== undefined || turnCriteria.locations !== undefined)
+      && turnCriteria.transaction_type === undefined && turnCriteria.type === undefined
+      && turnCriteria.minPrice === undefined && turnCriteria.maxPrice === undefined
+      && turnCriteria.minArea === undefined && turnCriteria.maxArea === undefined
+      && turnCriteria.bedrooms === undefined;
+    if (areaOnly) {
+      // An area-only refinement replaces location while preserving the active
+      // transaction, type, budget, area and room criteria.
+      delete criteria.location;
+      delete criteria.locations;
+      delete criteria.location_aliases;
+    }
+    Object.assign(criteria, turnCriteria);
   }
   if (current.minPrice !== undefined || current.maxPrice !== undefined) {
     if (current.maxPriceExclusive === undefined) delete criteria.maxPriceExclusive;
