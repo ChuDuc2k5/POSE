@@ -11,11 +11,11 @@ with eligible as(
  and (not(p_filters?'transaction_type') or d.source_type='Faq' or p.transaction_type=p_filters->>'transaction_type')
  and (not(p_filters?'type') or d.source_type='Faq' or p.property_type=p_filters->>'type')
  and (not(p_filters?'minPrice') or d.source_type='Faq' or p.price>=(p_filters->>'minPrice')::numeric)
- and (not(p_filters?'maxPrice') or d.source_type='Faq' or p.price<=(p_filters->>'maxPrice')::numeric)
+ and (not(p_filters?'maxPrice') or d.source_type='Faq' or case when p_filters->>'maxPriceExclusive'='true' then p.price<(p_filters->>'maxPrice')::numeric else p.price<=(p_filters->>'maxPrice')::numeric end)
  and (not(p_filters?'minArea') or d.source_type='Faq' or p.area>=(p_filters->>'minArea')::numeric)
  and (not(p_filters?'maxArea') or d.source_type='Faq' or p.area<=(p_filters->>'maxArea')::numeric)
  and (not(p_filters?'bedrooms') or d.source_type='Faq' or p.bedrooms is null or p.bedrooms=(p_filters->>'bedrooms')::integer)
- and (not(p_filters?'location') or d.source_type='Faq' or strpos(pose_private.kb_unaccent(lower(coalesce(p.location,''))),pose_private.kb_unaccent(lower(p_filters->>'location')))>0 or strpos(pose_private.kb_unaccent(lower(c.header)),pose_private.kb_unaccent(lower(p_filters->>'location')))>0)
+ and (not(p_filters?'location') or d.source_type='Faq' or strpos(pose_private.kb_unaccent(lower(coalesce(p.location,''))),pose_private.kb_unaccent(lower(p_filters->>'location')))>0 or strpos(pose_private.kb_unaccent(lower(c.header)),pose_private.kb_unaccent(lower(p_filters->>'location')))>0 or exists(select 1 from jsonb_array_elements_text(coalesce(p_filters->'location_aliases','[]'::jsonb)) wanted where strpos(pose_private.kb_unaccent(lower(coalesce(p.location,''))),pose_private.kb_unaccent(lower(wanted)))>0 or strpos(pose_private.kb_unaccent(lower(c.header)),pose_private.kb_unaccent(lower(wanted)))>0))
  and (not(p_filters?'locations') or d.source_type='Faq' or exists(select 1 from jsonb_array_elements_text(p_filters->'locations') wanted where strpos(pose_private.kb_unaccent(lower(coalesce(p.location,''))),pose_private.kb_unaccent(lower(wanted)))>0 or strpos(pose_private.kb_unaccent(lower(c.header)),pose_private.kb_unaccent(lower(wanted)))>0))
 ),v as(
  select e.id,row_number()over(order by (e.embedding operator(extensions.<=>) p_embedding)-case when e.source_id=any(p_context) then 0.02 else 0 end)e_rank,1-(e.embedding operator(extensions.<=>) p_embedding)s

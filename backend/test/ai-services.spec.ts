@@ -111,7 +111,7 @@ describe('inferSearch', () => {
   it('turns a property question into catalogue filters', async () => {
     const { inferSearch } = await import('../src/modules/ai/infer-search.js');
     // A price in tỷ with no buy/rent word is a purchase.
-    expect(inferSearch('Căn hộ dưới 3,5 tỷ ở Thủ Đức')).toEqual({ location: 'Thủ Đức', type: 'Apartment', maxPrice: 3500000000, transaction_type: 'Sale' });
+    expect(inferSearch('Căn hộ dưới 3,5 tỷ ở Thủ Đức')).toEqual({ location: 'Thủ Đức', type: 'Apartment', maxPrice: 3500000000, maxPriceExclusive: true, transaction_type: 'Sale' });
     expect(inferSearch('cho thuê nhà quận 7 từ 10 triệu')).toEqual({ location: 'Quận 7', type: 'House', minPrice: 10000000, transaction_type: 'Rent' });
     expect(inferSearch('xin chào')).toBeNull();
     expect(inferSearch('diện tích khoảng 80 m²')).toMatchObject({ minArea: 68, maxArea: 92 });

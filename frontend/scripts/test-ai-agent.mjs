@@ -130,7 +130,7 @@ for(const [k,v] of Object.entries(savedEnv))if(v===undefined)delete process.env[
 const userId='f6000000-0000-4000-8000-000000000001',otherId='f6000000-0000-4000-8000-000000000002';
 const users={User:userId,Other:otherId,Sales:'f6000000-0000-4000-8000-000000000003',Admin:'f6000000-0000-4000-8000-000000000004'};
 const directory={Sales:'f6500000-0000-4000-8000-000000000003',Admin:'f6500000-0000-4000-8000-000000000004'};
-let mode='ok',modelCalls=0,prompt,providerOffline=false,verifiedPhone=false,searchReads=0,catalogSearchReads=0,ragCalls=0,rerankNoAnswer=false;
+let mode='ok',modelCalls=0,prompt,latestPrompt,providerOffline=false,verifiedPhone=false,searchReads=0,catalogSearchReads=0,ragCalls=0,rerankNoAnswer=false;
 const modelData=[],modelOutputs=[],ragRequests=[];
 const sessions=new Map(),messages=[],logs=[],requestLogs=[],tasks=new Map(),appointments=new Map(),leads=new Map(),customers=new Map(),preferences=new Map(),assignments=[],bookingRows=[];let lastRequestSessionId=null,unsafeSessionId=null,unsafePending=false;
 const customerFor=uid=>uid ? [...customers.values()].find(c=>c.auth_user_id===uid):undefined;
@@ -139,6 +139,7 @@ const assigned=(lead,sales)=>assignments.some(a=>a.lead_id===lead && a.sales_id=
 const scoringFor=lead=>lead ? {needs:lead.needs,verified:customers.get(lead.customer_id).phone_verified_at!==null,version:lead.version,score_result:lead.score_evidence,interest_ids:[...new Set([...sessions.values()].filter(s=>s.lead_id===lead.id).flatMap(s=>s.property_ids || []))]}:null;
 const properties=['Available','Sold','Reserved','Unavailable'].map((availability,i)=>({id:`f6300000-0000-4000-8000-00000000000${i+1}`,code:`P-${i+1}`,name:`Căn hộ công bố P-${i+1}`,price:i===1 || i===2 ? null:3e9,availability,updated_at:'2026-10-14T01:00:00Z',location:'Quận 7, Hồ Chí Minh',property_type:'Apartment',publication:'Published',archived:false,area:80,bedrooms:2,project_name:'TERAVA',subdivision_name:null,amenities:'Công viên',cover_id:null,transaction_type:i===2?'Rent':'Sale',price_period:i===2?'Month':'Total',description:'Căn hộ có thông tin công bố để tham khảo.'}));
 properties.push({...properties[0],id:randomUUID(),publication:'Draft'}, {...properties[0],id:randomUUID(),archived:true});
+for(const [price,ward,name,codePrefix] of [[6000000,'Long Bình','Phòng trọ Long Bình 6 triệu','Q9-R'],[7000000,'Long Bình','Nhà thuê Long Bình 7 triệu','Q9-R'],[8000000,'Long Bình','Nhà thuê Long Bình 8 triệu','Q9-R'],[9000000,'Long Bình','Nhà thuê Long Bình 9 triệu','Q9-R'],[10000000,'Long Bình','Nhà thuê Long Bình 10 triệu','Q9-R'],[10500000,'Long Bình','Nhà thuê Long Bình 10,5 triệu','Q9-R'],[6500000,'Bình Đông','Nhà thuê Bình Đông 6,5 triệu','Q8-R']]) properties.push({id:randomUUID(),code:`${codePrefix}-${price}`,name,price,availability:'Available',updated_at:'2026-10-14T01:00:00Z',location:`Phường ${ward}, Thành phố Hồ Chí Minh`,property_type:'House',publication:'Published',archived:false,area:55,bedrooms:2,project_name:'TERAVA',subdivision_name:null,amenities:'',cover_id:null,transaction_type:'Rent',price_period:'Month',description:'Căn cho thuê công bố để kiểm thử ngân sách và khu vực.'});
 const previewOnly=process.argv.includes('--preview-only'),live=process.argv.includes('--live');
 if(previewOnly || live){
  properties[0]={...properties[0],code:'TD-A01',name:'Căn hộ Thủ Đức',location:'Thủ Đức',price:3200000000,transaction_type:'Sale',price_period:'Total'};
@@ -172,7 +173,7 @@ const provider=createServer(async(req,res)=>{
    if(mode==='timeout'){await delay(6000);return reply(200,{choices:[{message:{content:''}}]});}
    if(mode==='empty')return reply(200,{choices:[{message:{content:''}}]});
    if(input.tools){
-   if(!prompt)prompt=input;
+   latestPrompt=input;if(!prompt)prompt=input;
    check(input.tools.length===6 && input.tools.every(t=>['search_properties','get_property_detail','list_my_appointments','save_favorite','request_handoff','propose_appointment'].includes(t.function.name)),'Native six-tool schema');
    check(input.max_tokens===600 && input.messages[0].content.length<4500,'Bounded generation and compact prompt/schema');
    const hasToolResult=input.messages.some(m=>m.role==='tool');
@@ -329,7 +330,9 @@ const provider=createServer(async(req,res)=>{
    if(mode==='rag-failure')return reply(500,{message:'fixture retrieval failure'});
   const context=Array.isArray(input.p_context)?input.p_context:[];
   const knownContext=context.filter(id=>properties.some(p=>p.id===id));
-  const rows=properties.filter(p=>p.publication==='Published'&&!p.archived&&(!context.length||knownContext.includes(p.id))).map((p,i)=>({chunk_id:`chunk-${i}`,document_id:`doc-${i}`,source_id:p.id,source_type:'Property',header:`${p.code} ${p.name}`,content:`${p.name} ${p.location} published listing.`,vector_rank:context.includes(p.id)?Math.max(1,i):i+1,text_rank:context.includes(p.id)?1:i+1,similarity:context.includes(p.id)?.95:.9,embed_model:'fixture',code:p.code,name:p.name,location:p.location,property_type:p.property_type,transaction_type:p.transaction_type,price:p.price,price_period:p.price_period,availability:p.availability,updated_at:p.updated_at})).sort((a,b)=>(b.similarity-a.similarity)||(a.vector_rank-b.vector_rank));
+  const filters=input.p_filters||{};
+  const wanted=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations.map(String):[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases.map(String):[])].map(value=>value.toLocaleLowerCase('vi'));
+  const rows=properties.filter(p=>p.publication==='Published'&&!p.archived&&(!context.length||knownContext.includes(p.id))&&(!filters.transaction_type||p.transaction_type===filters.transaction_type)&&(!filters.type||p.property_type===filters.type)&&(!wanted.length||wanted.some(value=>p.location.toLocaleLowerCase('vi').includes(value)))&&(typeof filters.minPrice!=='number'||p.price===null||p.price>=filters.minPrice)&&(typeof filters.maxPrice!=='number'||p.price===null||(filters.maxPriceExclusive?p.price<filters.maxPrice:p.price<=filters.maxPrice))).map((p,i)=>({chunk_id:`chunk-${i}`,document_id:`doc-${i}`,source_id:p.id,source_type:'Property',header:`${p.code} ${p.name}`,content:`${p.name} ${p.location} published listing.`,vector_rank:context.includes(p.id)?Math.max(1,i):i+1,text_rank:context.includes(p.id)?1:i+1,similarity:context.includes(p.id)?.95:.9,embed_model:'fixture',code:p.code,name:p.name,location:p.location,property_type:p.property_type,transaction_type:p.transaction_type,price:p.price,price_period:p.price_period,availability:p.availability,updated_at:p.updated_at})).sort((a,b)=>(b.similarity-a.similarity)||(a.vector_rank-b.vector_rank));
   return reply(200,rows);
  }
  if(url.pathname.endsWith('/property_public_catalog')){
@@ -440,6 +443,35 @@ try{
    const allCriteriaData=await allCriteria.json();
    const allFilters=ragRequests.slice().reverse().find(filters=>filters.location==='Quận 7'&&filters.transaction_type==='Rent'&&filters.maxPrice===15000000);
    check(!allCriteriaData.clarify?.needed&&allFilters,'All-in-one search retrieves immediately with all criteria');
+  }
+  {
+   const start=await call('/api/ai/chat',{...base,message:'Tôi muốn thuê nhà'});const startData=await start.json();const flowCookie=start.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];
+   const firstHistory=[{role:'user',content:'Tôi muốn thuê nhà'},{role:'assistant',content:startData.reply}];
+   const budget=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Dưới 10 triệu',history:firstHistory},flowCookie);const budgetData=await budget.json();
+   const budgetHistory=[...firstHistory,{role:'user',content:'Dưới 10 triệu'},{role:'assistant',content:budgetData.reply}];
+   const area=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Ở Quận 9',history:budgetHistory},flowCookie);const areaData=await area.json();
+   check(areaData.sources.length===4&&areaData.sources.every(p=>p.transaction_type==='Rent'&&p.price<10000000)&&!areaData.sources.some(p=>p.price>=10000000||p.location.includes('Bình Đông')),'Quận 9 under-10 search lists all four strict rentals before out-of-budget and Quận 8 rows');
+   const areaFilters=ragRequests.slice().reverse().find(filters=>filters.location==='Quận 9'&&filters.transaction_type==='Rent'&&filters.maxPrice===10000000);check(areaFilters&&areaFilters.maxPriceExclusive===true,'Dưới budget is strict and exclusive');check(/^Nhà thuê ở Quận 9 \(Thủ Đức\)/u.test(areaData.reply),'Search reply opens with remembered criteria');
+   const refinementHistory=[...budgetHistory,{role:'user',content:'Ở Quận 9'},{role:'assistant',content:areaData.reply,sources:areaData.sources}];
+   const range=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Giá 5-8 triệu',history:refinementHistory},flowCookie);const rangeData=await range.json();
+   check(rangeData.sources.length===3&&rangeData.sources.every(p=>[6000000,7000000,8000000].includes(p.price))&&!rangeData.sources.some(p=>p.location.includes('Bình Đông')),'Budget range keeps Quận 9 Rent and excludes Quận 8');
+   const cheaperHistory=[...refinementHistory,{role:'user',content:'Giá 5-8 triệu'},{role:'assistant',content:rangeData.reply,sources:rangeData.sources}];
+   const cheaper=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Rẻ hơn',history:cheaperHistory},flowCookie);const cheaperData=await cheaper.json();
+   check(cheaperData.sources.every(p=>p.transaction_type==='Rent'&&!p.location.includes('Bình Đông')),'Rẻ hơn keeps Rent and Quận 9');
+   const fresh=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Tìm nhà mua ở Quận 7',history:cheaperHistory},flowCookie);const freshData=await fresh.json();const freshFilters=ragRequests.slice().reverse().find(filters=>filters.location==='Quận 7'&&filters.transaction_type==='Sale');
+   check(!freshData.clarify?.needed&&freshFilters&&!Object.hasOwn(freshFilters,'maxPrice'),'New purchase search drops the previous rent budget and area');
+  }
+  {
+   const namedHistory=[{role:'user',content:'Tôi là tên là Minh Quân, bạn hãy dùng tên tôi để xưng hô trong chat này nhé'}];
+   const named=await call('/api/ai/chat',{...base,message:'Mua căn nhà 10 tỷ',history:namedHistory});const namedData=await named.json();const namedCookie=named.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];check(namedData.clarify?.needed&&/^Minh Quân/iu.test(namedData.reply)&&namedData.clarify.options.includes('Quận 7')&&!namedData.clarify.options.includes('Dưới 3 tỷ'),'Named bare-budget clarification addresses the customer by name and asks only for area');
+   const namedArea=await call('/api/ai/chat',{...base,session_id:namedData.session.id,message:'Quận 7',history:[...namedHistory,{role:'assistant',content:namedData.reply}],},namedCookie);const namedAreaData=await namedArea.json();const namedBudget=await call('/api/ai/chat',{...base,session_id:namedData.session.id,message:'Dưới 3 tỷ',history:[...namedHistory,{role:'assistant',content:namedData.reply},{role:'user',content:'Quận 7'},{role:'assistant',content:namedAreaData.reply}]},namedCookie);await namedBudget.json();check(latestPrompt.messages[0].content.includes('Xưng hô với khách bằng tên: Minh Quân'),'Customer name is passed in the LLM system prompt');
+   const role=await call('/api/ai/chat',{...base,message:'Muốn thuê nhà',history:[{role:'user',content:'Tôi là sinh viên'}]});const roleData=await role.json();check(roleData.clarify?.needed&&/^Bạn/iu.test(roleData.reply),'Role phrase is not treated as a customer name');
+  }
+  {
+   const generic=await call('/api/ai/chat',{...base,message:'Gợi ý mua nhà'});const genericData=await generic.json();const genericCookie=generic.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];check(genericData.clarify?.needed&&genericData.sources.length===0&&genericData.clarify.options.includes('Dưới 3 tỷ'),'Generic sale request asks before retrieval');
+   const genericHistory=[{role:'user',content:'Gợi ý mua nhà'},{role:'assistant',content:genericData.reply}];
+   const genericVague=await call('/api/ai/chat',{...base,session_id:genericData.session.id,message:'Chưa rõ, gợi ý giúp tôi',history:genericHistory},genericCookie);const genericVagueData=await genericVague.json();check(!genericVagueData.clarify?.needed&&genericVagueData.sources.length>0&&genericVagueData.sources.every(p=>p.transaction_type==='Sale'),'Vague generic answer searches with known Sale criteria');
+   const genericArea=await call('/api/ai/chat',{...base,message:'Gợi ý mua nhà'});const genericAreaData=await genericArea.json();const genericAreaCookie=genericArea.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];const genericAreaHistory=[{role:'user',content:'Gợi ý mua nhà'},{role:'assistant',content:genericAreaData.reply}];const q7=await call('/api/ai/chat',{...base,session_id:genericAreaData.session.id,message:'Quận 7',history:genericAreaHistory},genericAreaCookie);const q7Data=await q7.json();check(q7Data.clarify?.needed&&q7Data.clarify.options.includes('Dưới 3 tỷ')&&q7Data.sources.length===0,'Generic area answer asks for the budget field');
   }
  const first=await call('/api/ai/chat',base);check(first.status===200,'Guest chat succeeds');const chat=await first.json();const firstModelReply=modelOutputs.at(-1).reply;
   await delay(50);const turnLogs=requestLogs.filter(row=>row.p_session_id===chat.session.id&&row.p_kind!=='embed');check(turnLogs.length>=2 && turnLogs.every(row=>row.p_prompt_version && row.p_total_tokens>0),'Every model call is logged with prompt versions and fake usage');
@@ -566,12 +598,12 @@ mode='search';const search=await (await call('/api/ai/chat',base)).json();check(
  const limitResponse=await call('/api/ai/chat',base);const limitCookie=limitResponse.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];const limitId=(await limitResponse.json()).session.id;
  for(let i=0;i<41;i++){rate=await call('/api/ai/chat',{...base,session_id:limitId},limitCookie);if(rate.status===429)break;assert.equal(rate.status,200);}
  check(rate.status===429,'Per-session rate limit');
- providerOffline=true;const snapshot=sessions.size;check((await call('/api/ai/chat',base)).status===503 && sessions.size===snapshot,'Database failure fails closed');providerOffline=false;
+ providerOffline=true;const snapshot=sessions.size;const databaseFailure=await fetch(origin+'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',Origin:origin,'x-forwarded-for':'203.0.113.10'},body:JSON.stringify(base)});check(databaseFailure.status===503 && sessions.size===snapshot,'Database failure fails closed');providerOffline=false;
  unconfigured=await startStack(3302,{SUPABASE_URL:'http://127.0.0.1:3301',SUPABASE_PUBLISHABLE_KEY:'fixture-public',SUPABASE_SECRET_KEY:'fixture-secret',AI_API_URL:'',AI_API_KEY:'',AI_MODEL:''},{build:false,backendPort:3304});
  let reachable=false;for(let i=0;i<50;i++){try{if((await fetch('http://localhost:3302')).ok){reachable=true;break;}}catch{}await delay(250);}check(reachable,'Unconfigured app starts');
  const beforeUnconfigured=sessions.size;
  const noModel=await fetch('http://localhost:3302/api/ai/chat',{method:'POST',headers:{Origin:'http://localhost:3302','Content-Type':'application/json'},body:JSON.stringify(base)});check(noModel.status===503 && (await noModel.json()).code==='AI_UNAVAILABLE' && sessions.size===beforeUnconfigured,'Unconfigured LLM no writes');
- rerankNoAnswer=true;const noAnswer=await (await call('/api/ai/chat',{...base,message:'Có căn biệt thự ở Đà Lạt không?'})).json();rerankNoAnswer=false;check(noAnswer.sources.length===0&&!/P-\d|\d+\s*(?:tỷ|VND)|còn bán|Available/i.test(noAnswer.reply),'No-answer HTTP response is honest and ungrounded');
+ rerankNoAnswer=true;const noAnswerResponse=await fetch(origin+'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',Origin:origin,'x-forwarded-for':'203.0.113.11'},body:JSON.stringify({...base,message:'Có căn biệt thự ở Đà Lạt không?'})});const noAnswer=await noAnswerResponse.json();rerankNoAnswer=false;check(noAnswer.sources.length===0&&!/P-\d|\d+\s*(?:tỷ|VND)|còn bán|Available/i.test(noAnswer.reply),'No-answer HTTP response is honest and ungrounded');
  check(fakeEmbedding('căn hộ')!==fakeEmbedding('biệt thự'),'Embedding fixture is hashed semantic vector, not one-hot');
  console.log(`PASS: ${checks} M06 checks; fake provider and pure logic.`);
  if(process.argv.includes('--preview')){mode='ok';console.log(`PREVIEW READY: ${origin}`);await new Promise(resolve=>{process.once('SIGINT',resolve);process.once('SIGTERM',resolve);});}

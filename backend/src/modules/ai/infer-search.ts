@@ -1,6 +1,6 @@
 import { moneyAmounts } from './money.js';
 
-export type InferredSearch = { location?: string; locations?: string[]; type?: string; minPrice?: number; maxPrice?: number; minArea?: number; maxArea?: number; bedrooms?: number; transaction_type?: 'Sale'|'Rent'; keywords?: string[] };
+export type InferredSearch = { location?: string; locations?: string[]; location_aliases?: string[]; type?: string; minPrice?: number; maxPrice?: number; maxPriceExclusive?: boolean; minArea?: number; maxArea?: number; bedrooms?: number; transaction_type?: 'Sale'|'Rent'; keywords?: string[] };
 export const centralFormerDistricts = ['Quận 1', 'Quận 2', 'Quận 3', 'Quận 4', 'Quận 5', 'Quận 7', 'Quận 10', 'Quận Bình Thạnh', 'Phú Nhuận'];
 const landmarkLocations: [RegExp, string | string[]][] = [
   [/RMIT|Tôn Đức Thắng|Phú Mỹ Hưng/i, 'Quận 7'],
@@ -67,11 +67,22 @@ export function inferSearch(text: string): InferredSearch | null {
   if (bedrooms) filters.bedrooms = Number(bedrooms[1]);
   const keywords = searchKeywords(text);
   if (keywords.length) filters.keywords = keywords;
-  const below = text.match(/(?:dưới|tối đa|không quá|<=?|tầm|khoảng|budget|ngân sách)[^\d]{0,12}([\d.,]+\s*(?:tỷ|tỉ|triệu|tr))/i);
-  const above = text.match(/(?:trên|từ|tối thiểu|>=?)[^\d]{0,12}([\d.,]+\s*(?:tỷ|tỉ|triệu|tr))/i);
   const amount = (raw: string) => moneyAmounts(raw.replace(/\btr\b/i, 'triệu'))[0];
-  if (below) { const value = amount(below[1]); if (value) filters.maxPrice = /tầm|khoảng/i.test(below[0]) ? Math.round(value * 1.15) : value; }
+  const range = text.match(/([\d.,]+)\s*(tỷ|tỉ|ty|triệu|tr)?\s*(?:-|–|—|đến|tới)\s*([\d.,]+)\s*(tỷ|tỉ|ty|triệu|tr)?/iu);
+  const rangeAmount = (raw: string, fallbackUnit?: string) => amount(fallbackUnit && !/(?:tỷ|tỉ|ty|triệu|tr)\b/iu.test(raw) ? `${raw} ${fallbackUnit}` : raw);
+  if (range) {
+    const unit=range[2]||range[4];
+    const first = rangeAmount(range[1], unit), second = rangeAmount(range[3], unit);
+    if (first && second) { filters.minPrice = Math.min(first, second); filters.maxPrice = Math.max(first, second); }
+  }
+  const below = range ? null : text.match(/(?:dưới|tối đa|không quá|<=?|tầm|khoảng|budget|ngân sách)[^\d]{0,12}([\d.,]+\s*(?:tỷ|tỉ|triệu|tr))/i);
+  const above = text.match(/(?:trên|từ|tối thiểu|>=?)[^\d]{0,12}([\d.,]+\s*(?:tỷ|tỉ|triệu|tr))/i);
+  if (below) { const value = amount(below[1]); if (value) { filters.maxPrice = /tầm|khoảng/i.test(below[0]) ? Math.round(value * 1.15) : value; if (/dưới/i.test(below[0])) filters.maxPriceExclusive = true; } }
   if (above && above[0] !== below?.[0]) { const value = amount(above[1]); if (value) filters.minPrice = value; }
+  if (!range && !below && !above) {
+    const bareAmount = text.match(/(?<![\p{L}\d])([\d.,]+\s*(?:tỷ|tỉ|ty|triệu|tr))(?![\p{L}])/iu);
+    if (bareAmount) { const value = amount(bareAmount[1]); if (value) { filters.minPrice = value; filters.maxPrice = value; } }
+  }
   const area = text.match(/(?:diện\s*tích\s*)?(?:khoảng|tầm)\s*([\d.,]+)\s*(?:m\s*[²2]|mét\s*vuông)/i);
   const areaAbove = text.match(/(?:trên|từ)\s*([\d.,]+)\s*(?:m\s*[²2]|mét\s*vuông)/i);
   const areaBelow = text.match(/(?:dưới|tối đa|không quá)\s*([\d.,]+)\s*(?:m\s*[²2]|mét\s*vuông)/i);

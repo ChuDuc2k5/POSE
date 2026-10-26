@@ -28,7 +28,7 @@ describe('cards without [n] citations', () => {
   });
 });
 
-import { clarificationFor, missingBudgetQuestion, referencedListingCodes, searchCriteriaFromHistory } from '../src/modules/ai/history-aware.js';
+import { clarificationFor, customerNameFromHistory, missingBudgetQuestion, referencedListingCodes, searchCriteriaFromHistory } from '../src/modules/ai/history-aware.js';
 import { ownerRequest, ownerValuationQuestion, listingFollowUpFallback } from '../src/modules/ai/unsupported.js';
 import { explicitWriteIntent } from '../src/modules/ai/guard.js';
 describe('picking a listing that was just shown', () => {
@@ -54,6 +54,13 @@ describe('search clarification', () => {
   });
   it('searches when only a budget is supplied', () => {
     expect(clarificationFor('Tìm căn hộ dưới 3 tỷ', []).needed).toBe(false);
+  });
+  it('counts a bare first-message sale amount and asks only for the area', () => {
+    const result = clarificationFor('Mua căn nhà 10 tỷ', []);
+    expect(result).toMatchObject({ needed: true });
+    expect(result.question).toMatch(/khu vực/iu);
+    expect(result.options).toContain('Quận 7');
+    expect(result.options).not.toContain('Dưới 3 tỷ');
   });
   it('asks for the area after a budget chip in a clarification flow', () => {
     const history = [
@@ -93,7 +100,7 @@ describe('search clarification', () => {
     const result = clarificationFor('Quận 7', history);
     expect(result).toMatchObject({ needed: true });
     expect(result.question).toMatch(/ngân sách/iu);
-    expect(result.options).toEqual(['Dưới 3 tỷ', '3–6 tỷ', 'Chưa rõ, gợi ý giúp tôi']);
+    expect(result.options).toEqual(['Dưới 3 tỷ', '3–6 tỷ', '6–10 tỷ', 'Trên 10 tỷ', 'Chưa rõ, gợi ý giúp tôi']);
   });
   it('resets old rent budget for an explicit new purchase search', () => {
     const history = [
@@ -106,6 +113,30 @@ describe('search clarification', () => {
   it('searches immediately when all criteria are in one message', () => {
     expect(clarificationFor('Thuê nhà Quận 7 dưới 15 triệu', []).needed).toBe(false);
     expect(searchCriteriaFromHistory('Thuê nhà Quận 7 dưới 15 triệu', [])).toMatchObject({ transaction_type: 'Rent', type: 'House', location: 'Quận 7', maxPrice: 15000000 });
+  });
+  it('merges an explicit budget range and cheaper refinement without changing the active area', () => {
+    const history = [
+      { role: 'user', content: 'Tôi muốn thuê nhà' },
+      { role: 'assistant', content: 'Bạn đang tìm nhà thuê ở khu vực nào và ngân sách khoảng bao nhiêu mỗi tháng ạ?' },
+      { role: 'user', content: 'Dưới 10 triệu' },
+      { role: 'assistant', content: 'Bạn muốn thuê ở khu vực nào?' },
+      { role: 'user', content: 'Ở Quận 9' },
+      { role: 'assistant', content: 'Nhà thuê ở Quận 9.' },
+    ];
+    expect(searchCriteriaFromHistory('Giá 5-8 triệu', history)).toMatchObject({ transaction_type: 'Rent', location: 'Quận 9', minPrice: 5000000, maxPrice: 8000000 });
+    expect(searchCriteriaFromHistory('Rẻ hơn', history)).toMatchObject({ transaction_type: 'Rent', location: 'Quận 9' });
+  });
+  it('extracts a stated Vietnamese name but rejects role words', () => {
+    expect(customerNameFromHistory('Mình muốn mua nhà', [{ role: 'user', content: 'Tôi là tên là minh quân, bạn dùng tên tôi nhé' }])).toBe('Minh Quân');
+    expect(customerNameFromHistory('Muốn thuê nhà', [{ role: 'user', content: 'Tôi là sinh viên' }])).toBeNull();
+    expect(clarificationFor('Mua căn nhà 10 tỷ', [{ role: 'user', content: 'Tôi là tên là minh quân' }]).question).toMatch(/^Minh Quân/);
+  });
+  it('stages a generic request before recommending sale listings', () => {
+    const first = clarificationFor('Gợi ý mua nhà', []);
+    expect(first.needed).toBe(true);
+    expect(first.options).toContain('Dưới 3 tỷ');
+    expect(clarificationFor('Quận 7', [{ role: 'user', content: 'Gợi ý mua nhà' }, { role: 'assistant', content: first.question! }])).toMatchObject({ needed: true });
+    expect(clarificationFor('Chưa rõ, gợi ý giúp tôi', [{ role: 'user', content: 'Gợi ý mua nhà' }, { role: 'assistant', content: first.question! }]).needed).toBe(false);
   });
   it('answers a follow-up about the listing in history instead of clarifying', () => {
     expect(clarificationFor('Tiền cọc mấy tháng và hợp đồng thuê tối thiểu bao lâu?', [{ role: 'user', content: 'Chi tiết căn CFR-0FC7C10BB520419B' }]).needed).toBe(false);

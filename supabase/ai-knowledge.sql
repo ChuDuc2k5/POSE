@@ -107,8 +107,8 @@ with eligible as(
  and (not(p_filters?'transaction_type') or d.source_type='Faq' or p.transaction_type=p_filters->>'transaction_type')
  and (not(p_filters?'type') or d.source_type='Faq' or p.property_type=p_filters->>'type')
  and (not(p_filters?'minPrice') or d.source_type='Faq' or p.price>=(p_filters->>'minPrice')::numeric)
- and (not(p_filters?'maxPrice') or d.source_type='Faq' or p.price<=(p_filters->>'maxPrice')::numeric)
- and (not(p_filters?'location') or d.source_type='Faq' or strpos(lower(p.location),lower(p_filters->>'location'))>0)
+ and (not(p_filters?'maxPrice') or d.source_type='Faq' or case when p_filters->>'maxPriceExclusive'='true' then p.price<(p_filters->>'maxPrice')::numeric else p.price<=(p_filters->>'maxPrice')::numeric end)
+ and (not(p_filters?'location') or d.source_type='Faq' or strpos(lower(p.location),lower(p_filters->>'location'))>0 or exists(select 1 from jsonb_array_elements_text(coalesce(p_filters->'location_aliases','[]'::jsonb)) wanted where strpos(pose_private.kb_unaccent(lower(coalesce(p.location,''))),pose_private.kb_unaccent(lower(wanted)))>0))
 ),v as(select e.id,row_number()over(order by e.embedding operator(extensions.<=>) p_embedding)r,1-(e.embedding operator(extensions.<=>) p_embedding)s from eligible e where p_embedding is not null and e.embedding is not null and e.embed_model=p_embed_model order by e.embedding operator(extensions.<=>) p_embedding limit 20),
 t as(select e.id,row_number()over(order by ts_rank_cd(e.tsv,websearch_to_tsquery('simple',pose_private.kb_query_text(p_query)))desc)e_rank from eligible e where pose_private.kb_query_text(p_query) is not null and e.tsv@@websearch_to_tsquery('simple',pose_private.kb_query_text(p_query)) order by ts_rank_cd(e.tsv,websearch_to_tsquery('simple',pose_private.kb_query_text(p_query)))desc limit 20)
 select e.id,e.document_id,e.source_id,e.source_type,e.header,e.content,v.r,t.e_rank,v.s,e.code,e.name,e.price,e.availability,e.updated_at,e.location,e.property_type,e.transaction_type,e.price_period

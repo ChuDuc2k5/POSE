@@ -14,6 +14,7 @@ export function resetAiUsage() { aiUsage.prompt_tokens = 0; aiUsage.completion_t
 export function getAiUsage(): AiUsageTotals { return { ...aiUsage }; }
 export const SYSTEM_PROMPT = prompt('assistant').text;
 export const SYSTEM_PROMPT_VERSION = promptVersion('assistant');
+export function assistantPrompt(customerName?: string) { return customerName ? `${SYSTEM_PROMPT}\nXưng hô với khách bằng tên: ${customerName}` : SYSTEM_PROMPT; }
 const TurnSchema = z.object({ reply: z.string().trim().min(1).max(4000), intent: z.enum(['real_estate', 'other', 'unknown']), needs: NeedsV1Schema.nullable().default(null) });
 export const TURN_SCHEMA = zodResponseFormat(TurnSchema, 'assistant_turn');
 const tools = [
@@ -82,10 +83,11 @@ export async function structured<T>(schema: z.ZodType<T>, name: string, messages
 export async function complete(data: unknown): Promise<ModelResult> {
   const started=Date.now();
   const input: Record<string, unknown> = object(data) ? { ...data } : { data };
+  const customerName=typeof input.customer_name==='string' && input.customer_name.trim() ? input.customer_name.trim() : undefined;
   if (Array.isArray(input.properties)) { input.listing_terms = input.properties.map(p => object(p) ? { code: p.code, transaction_type: p.transaction_type ?? 'Sale', price_period: p.price_period ?? 'Total' } : p); input.properties = input.properties.map(p => object(p) ? Object.fromEntries(['code', 'name', 'price', 'availability', 'updated_at', 'location', 'property_type', 'transaction_type', 'area', 'bedrooms', 'details'].map(k => [k, p[k]])) : p); }
   const config = providerConfig();
   for (let attempt = 0; attempt < 2; attempt++) {
-    try { const response = await fetch(`${config.baseURL}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(config.key ? { Authorization: `Bearer ${config.key}` } : {}) }, signal: AbortSignal.timeout(config.timeout), cache: 'no-store', body: JSON.stringify({ model: config.model, temperature: 0, max_tokens: 600, response_format: TURN_SCHEMA, messages: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: `BEGIN_UNTRUSTED_DATA\n${JSON.stringify({ ...input, schema_retry: attempt === 1 }).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')}\nEND_UNTRUSTED_DATA` }] }) }); if (!response.ok) throw new Error('AI_UNAVAILABLE'); const body = await response.json(); let parsed: unknown; try { parsed = JSON.parse(body.choices?.[0]?.message?.content); } catch { throw new Error('INVALID_MODEL_JSON'); } return validateModel(parsed, typeof input.customer_text === 'string' ? input.customer_text : undefined); }
+    try { const response = await fetch(`${config.baseURL}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(config.key ? { Authorization: `Bearer ${config.key}` } : {}) }, signal: AbortSignal.timeout(config.timeout), cache: 'no-store', body: JSON.stringify({ model: config.model, temperature: 0, max_tokens: 600, response_format: TURN_SCHEMA, messages: [{ role: 'system', content: assistantPrompt(customerName) }, { role: 'user', content: `BEGIN_UNTRUSTED_DATA\n${JSON.stringify({ ...input, schema_retry: attempt === 1 }).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')}\nEND_UNTRUSTED_DATA` }] }) }); if (!response.ok) throw new Error('AI_UNAVAILABLE'); const body = await response.json(); let parsed: unknown; try { parsed = JSON.parse(body.choices?.[0]?.message?.content); } catch { throw new Error('INVALID_MODEL_JSON'); } return validateModel(parsed, typeof input.customer_text === 'string' ? input.customer_text : undefined); }
     catch (error) { logAiRequest({kind:'chat',model:config.model,promptName:'assistant',promptVersion:SYSTEM_PROMPT_VERSION,latencyMs:Date.now()-started,status:requestStatus(error),errorCode:error instanceof Error?error.message:'UNKNOWN'}); if (error instanceof Error && error.message === 'INVALID_MODEL_JSON' && attempt === 0) continue; throw error; }
   }
   throw new Error('INVALID_MODEL_JSON');
