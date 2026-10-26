@@ -24,7 +24,7 @@ export function inferTransactionType(text: string): 'Sale'|'Rent'|undefined {
 
 const types: [RegExp, string][] = [
   [word('biệt thự'), 'Villa'], [word('căn hộ|chung cư|studio|penthouse|duplex'), 'Apartment'], [word('văn phòng'), 'Office'],
-  [word('mặt bằng|shophouse|kiot|cửa hàng'), 'Shop'], [word('đất nền|lô đất|đất'), 'Land'], [word('nhà phố|nhà riêng|nhà nguyên căn|nhà mặt tiền|nhà mặt phố|nhà hẻm|nhà cấp 4|nhà \d+ tầng|nhà \d+ lầu'), 'House'], [word('nhà'), 'House'],
+  [word('mặt bằng|shophouse|kiot|cửa hàng'), 'Shop'], [word('đất nền|lô đất|đất'), 'Land'], [word('nhà phố|nhà riêng|nhà nguyên căn|nhà mặt tiền|nhà mặt phố|nhà hẻm|nhà cấp 4|nhà [0-9]+ tầng|nhà [0-9]+ lầu|nhà [0-9]+ trệt'), 'House'], [word('nhà'), 'House'],
 ];
 const places = ['Thủ Đức', 'Bình Thạnh', 'Gò Vấp', 'Tân Bình', 'Tân Phú', 'Phú Nhuận', 'Bình Tân', 'Nhà Bè', 'Củ Chi', 'Hóc Môn', 'Bình Chánh', 'Cần Giờ', 'Thảo Điền', 'Phú Mỹ Hưng', 'Thủ Thiêm'];
 const propertyWords = /căn(?: hộ)?|chung cư|nhà|đất|biệt thự|văn phòng|mặt bằng|bất động sản|bđs|bds|thuê|mua|bán|giá|ngân sách|tỷ|triệu|phòng ngủ|quận|khu vực|diện tích|nhận nhà ngay|dọn vào ở ngay|khu dân cư|vợ chồng|trường học|bệnh viện|chợ|siêu thị|trung tâm thương mại|hẻm|yên tĩnh|máy lạnh|máy giặt|nội thất|đậu ô tô|gara|tầng thấp|tầng cao|ban công|view|hồ bơi|gym|thang máy|giảm giá|ngộp|cắt lỗ|hạ giá|chiết khấu|giá tốt|chỉ còn|\bm\s*[²2]\b|apartment|house/i;
@@ -40,14 +40,19 @@ const keywordRules: [RegExp, string][] = [
   [/\bview\b/iu, 'view'], [/ho boi/iu, 'hồ bơi'], [/\bgym\b/iu, 'gym'],
   [/thang may/iu, 'thang máy'], [/giam gia|ngop|cat lo|ha gia|chiet khau|gia tot|chi con/iu, 'giảm giá'],
 ];
-keywordRules.push([/o to vao|xe hoi|hem xe hoi/iu, '\u0111\u1eadu \u00f4 t\u00f4']);
+keywordRules.push([/o to vao|xe hoi|hem xe hoi/iu, 'đậu ô tô']);
 const searchKeywords = (text: string) => {
   const normalized = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').toLocaleLowerCase('vi');
   return [...new Set(keywordRules.filter(([pattern]) => pattern.test(normalized)).map(([, keyword]) => keyword))];
 };
 
-// "thuê nhà" alone means a place to rent (apartments included); "mua nhà" still means a house.
-export function genericHome(text: string) { return word('thuê').test(text) && word('nhà').test(text) && !types.slice(0, -1).some(([pattern]) => pattern.test(text)); }
+const explicitHouse = word('nhà phố|nhà riêng|nhà nguyên căn|nhà mặt tiền|nhà mặt phố|nhà hẻm|nhà cấp 4|nhà [0-9]+ tầng|nhà [0-9]+ lầu|nhà [0-9]+ trệt');
+
+// Generic home wording describes a place to live, not the House catalogue type.
+export function genericHome(text: string) {
+  if (explicitHouse.test(text)) return false;
+  return /(?:thuê|mua|tìm|gợi ý)\s+nhà|nhà\s+(?:ở|để ở)|chỗ\s+ở/iu.test(text);
+}
 
 export function inferSearch(text: string): InferredSearch | null {
   const standalonePlace = places.some(name => text.trim().toLocaleLowerCase('vi') === name.toLocaleLowerCase('vi'));
@@ -66,6 +71,7 @@ export function inferSearch(text: string): InferredSearch | null {
   if (nearCentre) { filters.locations = centralFormerDistricts; delete filters.location; }
   const type = types.find(([pattern]) => pattern.test(text));
   if (type) filters.type = type[1];
+  if (genericHome(text)) delete filters.type;
   const bedrooms = text.match(/(?<!\d)(\d+)\s*(?:phòng\s*ngủ|pn|phòng)(?!\p{L})/iu);
   if (bedrooms) filters.bedrooms = Number(bedrooms[1]);
   const keywords = searchKeywords(text);

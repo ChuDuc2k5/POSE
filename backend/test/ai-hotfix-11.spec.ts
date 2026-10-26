@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { annuityPayment, financeNoteForQuestion, grossRentalYield, rateChangePayment, remainingBalance, safeMonthlyPayment } from '../src/modules/ai/finance.js';
 import { answerCriteriaLine, showCriteriaLine } from '../src/modules/ai/answer-rules.js';
-import { adviceOrServiceQuestion, clarificationFor, historyReferenceQuestion } from '../src/modules/ai/history-aware.js';
-import { inferSearch } from '../src/modules/ai/infer-search.js';
+import { adviceOrServiceQuestion, clarificationFor, historyReferenceQuestion, searchCriteriaFromHistory } from '../src/modules/ai/history-aware.js';
+import { genericHome, inferSearch } from '../src/modules/ai/infer-search.js';
 import { loanBudget, loanWords, noLoanWords, dedupeNoMatchReply } from '../src/modules/ai/unsupported.js';
 import { RetrievalService } from '../src/modules/ai/retrieval.js';
 
@@ -46,6 +46,33 @@ describe('Hotfix 11 deterministic routing and parsing', () => {
   it('keeps a genuine suggestion-to-buy search eligible for clarification', () => {
     expect(adviceOrServiceQuestion('Gợi ý mua nhà')).toBe(false);
     expect(clarificationFor('Gợi ý mua nhà', [])).toMatchObject({ needed: true });
+  });
+
+  it('treats generic home wording as an untyped place to live', () => {
+    for (const phrase of ['thuê nhà', 'mua nhà', 'tìm nhà', 'nhà ở', 'chỗ ở', 'nhà để ở', 'gợi ý mua nhà']) {
+      expect(genericHome(phrase), phrase).toBe(true);
+      expect(inferSearch(phrase) || {}, phrase).not.toHaveProperty('type');
+    }
+  });
+
+  it('keeps explicit house wording typed as House', () => {
+    expect(genericHome('thuê nhà phố Quận 9')).toBe(false);
+    expect(inferSearch('thuê nhà phố Quận 9')).toMatchObject({ type: 'House', transaction_type: 'Rent', location: 'Quận 9' });
+  });
+
+  it('remembers generic home criteria without adding House', () => {
+    const history = [
+      { role: 'user', content: 'Tôi muốn thuê nhà' },
+      { role: 'assistant', content: 'Bạn đang tìm nhà thuê ở khu vực nào và ngân sách khoảng bao nhiêu mỗi tháng ạ?' },
+      { role: 'user', content: 'Dưới 10 triệu' },
+      { role: 'assistant', content: 'Bạn muốn xem khu vực nào?' },
+      { role: 'user', content: 'Ở Quận 9' },
+      { role: 'assistant', content: 'Tiêu chí: Thuê, ở Quận 9, dưới 10 triệu đồng/tháng.' },
+    ];
+    expect(searchCriteriaFromHistory('Ở Quận 9', history)).toMatchObject({ transaction_type: 'Rent', location: 'Quận 9', maxPrice: 10_000_000, maxPriceExclusive: true });
+    expect(searchCriteriaFromHistory('Ở Quận 9', history)).not.toHaveProperty('type');
+    expect(searchCriteriaFromHistory('Có căn nào khác không', history)).toMatchObject({ transaction_type: 'Rent', location: 'Quận 9', maxPrice: 10_000_000, maxPriceExclusive: true });
+    expect(searchCriteriaFromHistory('Có căn nào khác không', history)).not.toHaveProperty('type');
   });
 
   it('treats negated borrowing as no loan', () => {

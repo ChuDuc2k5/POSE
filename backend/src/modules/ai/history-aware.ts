@@ -161,7 +161,7 @@ const inferredCriteria = (text: string) => {
 export function searchCriteriaFromHistory(message: string, history: { role: string; content: string }[]) {
   const criteria: Record<string, unknown> = {};
   const current = inferredCriteria(message);
-  if (message && !Object.keys(current).length && !vagueCriteriaAnswer.test(message) && !/(?:rẻ hơn|cao hơn|tăng ngân sách|ngân sách cao hơn)/iu.test(message)) return current as ReturnType<typeof inferSearch> & { bedrooms?: number };
+  if (message && !Object.keys(current).length && !vagueCriteriaAnswer.test(message) && !isMoreRequest(message) && !/(?:rẻ hơn|cao hơn|tăng ngân sách|ngân sách cao hơn)/iu.test(message)) return current as ReturnType<typeof inferSearch> & { bedrooms?: number };
   for (const turn of [...history, { role: 'user', content: message }]) {
     if (turn.role !== 'user') continue;
     if (explicitNewSearch.test(turn.content) && Object.keys(criteria).length) {

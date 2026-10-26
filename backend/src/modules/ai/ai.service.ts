@@ -65,6 +65,25 @@ async function retrieve(filters:Record<string,unknown>,context:string|null):Prom
   if(result.error)throw new Error('RETRIEVAL_UNAVAILABLE');
   return (result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[];
 }
+type StructuredCatalogueResult = { items: Evidence[]; count: number };
+async function retrieveStructured(filters:Record<string,unknown>,context:string|null):Promise<StructuredCatalogueResult> {
+  const select='id,code,name,cover_id,area,bedrooms,price,availability,updated_at,location,property_type,transaction_type,price_period';
+  let query=authClient().from('property_public_catalog').select(select,{count:'exact'});
+  if(context)query=query.eq('id',context);
+  const locations=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations:[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases:[])].map(value=>String(value).replace(/[%_\\]/g,'\\$&'));
+  if(locations.length)query=query.or(locations.map(value=>`location.ilike.%${value}%`).join(','));
+  if(filters.transaction_type)query=query.eq('transaction_type',filters.transaction_type);
+  if(filters.type)query=query.eq('property_type',filters.type);
+  if(filters.minPrice!==undefined)query=query.gte('price',filters.minPrice);
+  if(filters.maxPrice!==undefined)query=filters.maxPriceExclusive ? query.lt('price',filters.maxPrice) : query.lte('price',filters.maxPrice);
+  if(filters.minArea!==undefined)query=query.gte('area',filters.minArea);
+  if(filters.maxArea!==undefined)query=query.lte('area',filters.maxArea);
+  if(filters.bedrooms!==undefined)query=query.or(`bedrooms.is.null,bedrooms.eq.${Number(filters.bedrooms)}`);
+  if(Array.isArray(filters.exclude_ids)&&filters.exclude_ids.length)query=query.not('id','in',`(${filters.exclude_ids.map(value=>String(value).replace(/[(),]/g,'')).join(',')})`);
+  const result=await query.order('updated_at',{ascending:false}).order('id').limit(5);
+  if(result.error)throw new Error('RETRIEVAL_UNAVAILABLE');
+  return { items:(result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[], count:Number(result.count ?? 0) };
+}
 async function retrieveIds(ids:string[]):Promise<Evidence[]> {
   if(!ids.length)return [];
   const result=await authClient().from('property_public_catalog').select('id,code,name,cover_id,area,bedrooms,price,availability,updated_at,location,property_type,transaction_type,price_period').in('id',[...new Set(ids)].slice(0,100)).limit(100);
@@ -234,6 +253,7 @@ export class AiService {
      const loanBudget=inferLoanBudget(source);
      const strictCashBudget=noLoanWords(source) && typeof inferSearch(source)?.maxPrice==='number' ? inferSearch(source)?.maxPrice as number : null;
     let searchPerformed=input.filters!==undefined || !!input.property_id,rag:RetrievalResult|null=null;
+    let structuredRemainingCount:number|null=null;
     const filterAmounts:number[]=[];
     let items:Evidence[]=[],related:Record<string,unknown>[]=[];
     // Retrieval already applies price, area, room and type filters with tolerance; this recheck only
@@ -253,9 +273,16 @@ export class AiService {
       if(typeof filters.bedrooms==='number' && item.bedrooms!==null && item.bedrooms!==undefined && item.bedrooms!==filters.bedrooms)return false;
       return true;
     };
+    const criteriaOnlyFollowUp=sanitizedHistory.length>0&&!moreRequest&&!!inferSearch(source)&&!moneyAmounts(source).length&&!/(?:tìm|kiếm|muốn|cần|gợi ý|có\s+căn|căn\s+hộ|nhà|đất|phòng|thuê|mua|bán|bất động sản)/iu.test(source);
+    const structuredCatalogueSearch=moreRequest||criteriaOnlyFollowUp;
     const areaAlreadyTolerant=/(?:diện\s*tích\s*)?(?:khoảng|tầm)\s*[\d.,]+\s*(?:m\s*[²2]|mét\s*vuông)/iu.test(source);
     const search=async(searchFilters:Record<string,unknown>,propertyId:string|null=null,referenceIds:string[]=[],searchQuery=source)=>{
       const aliases:Record<string,string>={min_price_vnd:'minPrice',max_price_vnd:'maxPrice',min_area_m2:'minArea',max_area_m2:'maxArea',property_type:'type'};searchFilters=Object.fromEntries(Object.entries(searchFilters).map(([key,value])=>[aliases[key]||key,value]));
+      if(structuredCatalogueSearch){
+        const remembered=searchCriteriaFromHistory(source,sanitizedHistory);
+        for(const key of ['location','locations','location_aliases','type','transaction_type','minPrice','maxPrice','maxPriceExclusive','minArea','maxArea','bedrooms'] as const)if(searchFilters[key]===undefined&&remembered[key]!==undefined)searchFilters[key]=remembered[key];
+        if(!searchFilters.location_aliases){const aliases=formerDistrictAliases(searchFilters.location);if(aliases.length)searchFilters.location_aliases=aliases;}
+      }
       const stated={...searchFilters};
       const effective={...searchFilters};
       if(!areaAlreadyTolerant){
@@ -264,6 +291,19 @@ export class AiService {
       }
       if(excludePrevious&&shownIds.size)effective.exclude_ids=[...shownIds];
       const searchStarted=performance.now();
+      if(structuredCatalogueSearch&&!propertyId){
+        try{
+          const structured=await retrieveStructured(effective,null);
+          structuredRemainingCount=structured.count;
+          timing.kb_search+=performance.now()-searchStarted;
+          const found=structured.items.filter(item=>matchesFilters(item,effective));
+          const inStated=found.filter(item=>(typeof stated.minArea!=='number'||typeof item.area!=='number'||item.area>=stated.minArea)&&(typeof stated.maxArea!=='number'||typeof item.area!=='number'||item.area<=stated.maxArea));
+          const near=found.filter(item=>!inStated.includes(item)&&typeof item.area==='number').map(item=>({...item,areaNearCriteria:true}));
+          return [...inStated,...near];
+        }catch(error){
+          console.warn(JSON.stringify({event:'structured_retrieval_fallback',error:error instanceof Error ? error.message:'RETRIEVAL_UNAVAILABLE'}));
+        }
+      }
        try{for(const key of ['minPrice','maxPrice'])if(typeof effective[key]==='number')filterAmounts.push(effective[key] as number);rag=await this.retrieval.search(searchQuery,effective,{propertyId,propertyIds:referenceIds});timing.embed+=(rag.timings?.embed||0);timing.rerank+=(rag.timings?.rerank||0);const mapped=rag.sources.filter(item=>item.id).map(item=>({...item,id:item.id as string,name:item.title as string,reason:item.reason as string}));const live=await retrieveIds(mapped.map(item=>item.id));timing.kb_search+=performance.now()-searchStarted;const found=live.map(item=>({...item,...mapped.find(candidate=>candidate.id===item.id)})).filter(item=>propertyId||matchesFilters(item,effective)) as Evidence[];const inStated=found.filter(item=>(typeof stated.minArea!=='number'||typeof item.area!=='number'||item.area>=stated.minArea)&&(typeof stated.maxArea!=='number'||typeof item.area!=='number'||item.area<=stated.maxArea));const near=found.filter(item=>!inStated.includes(item)&&typeof item.area==='number').map(item=>({...item,areaNearCriteria:true}));return [...inStated,...near];}
       catch(error){
         timing.kb_search+=performance.now()-searchStarted;
@@ -614,7 +654,7 @@ export class AiService {
      items=items.map(item=>({...item,name:displayListingName(item.name)}));related=related.map(item=>({...item,name:displayListingName(String(item.name||''))}));
      const areaToleranceItems=evidenceItems.filter(item=>item.areaNearCriteria&&typeof item.area==='number');
      const areaToleranceSuffix=areaToleranceItems.length ? `\nLưu ý: ${areaToleranceItems.map(item=>`Diện tích gần tiêu chí (${item.area} m²)`).join('; ')}.` : '';
-     const moreStatus=moreRequest ? (evidenceItems.length ? `\nMình chỉ còn ${evidenceItems.length} căn khác đúng tiêu chí trong dữ liệu hiện có.` : '\nMình đã hiển thị tất cả căn phù hợp; bạn có thể nới diện tích/khu vực, tăng ngân sách 10%, hoặc nhờ chuyên viên tìm thêm.') : '';
+     const moreStatus=moreRequest ? (structuredRemainingCount===0 ? '\nMình đã hiển thị tất cả căn phù hợp; bạn có thể nới diện tích/khu vực, tăng ngân sách 10%, hoặc nhờ chuyên viên tìm thêm.' : structuredRemainingCount!==null&&structuredRemainingCount<=5 ? `\nMình chỉ còn ${structuredRemainingCount} căn khác đúng tiêu chí trong dữ liệu hiện có.` : structuredRemainingCount!==null ? `\nMình gửi 5 căn khác đúng tiêu chí; dữ liệu còn ${structuredRemainingCount} căn phù hợp.` : evidenceItems.length ? `\nMình gửi ${evidenceItems.length} căn khác đúng tiêu chí trong dữ liệu hiện có.` : '\nMình đã hiển thị tất cả căn phù hợp; bạn có thể nới diện tích/khu vực, tăng ngân sách 10%, hoặc nhờ chuyên viên tìm thêm.') : '';
      const followUpFees=/(?:phí\s+quản\s+lý|gửi\s+xe|điện\s+nước)/iu.test(source) ? 'phí quản lý, gửi xe, điện nước' : '';
      if(blocked && codeReference.codes.length && followUpFees){result.reply=listingFollowUpFallback(evidenceItems,followUpFees);blocked=false;}
      // A general question answered from FAQ knowledge ("thuê ngắn hạn được không?", a loan question) is not a failed search.
@@ -651,7 +691,7 @@ export class AiService {
     const locationForReply=rememberedLocation ? (/(?:quận|q\.?)\s*9\b/iu.test(rememberedLocation) ? `${rememberedLocation} (Thủ Đức)` : withFormerDistrict(rememberedLocation)) : '';
     const rememberedType=typeof queryFilters.type==='string' ? queryFilters.type : typeof rememberedCriteria.type==='string' ? rememberedCriteria.type : '';
     const typeForReply=rememberedType==='House' ? 'Nhà' : rememberedType==='Apartment' ? 'Căn hộ' : rememberedType==='Villa' ? 'Biệt thự' : rememberedType==='Land' ? 'Đất' : '';
-     const transactionForReply=queryFilters.transaction_type==='Rent' ? `${typeForReply ? `${typeForReply} ` : ''}thuê` : queryFilters.transaction_type==='Sale' ? `${typeForReply ? `${typeForReply} ` : ''}mua` : '';
+     const transactionForReply=queryFilters.transaction_type==='Rent' ? `${typeForReply ? `${typeForReply} ` : ''}Thuê` : queryFilters.transaction_type==='Sale' ? `${typeForReply ? `${typeForReply} ` : ''}Mua` : '';
      const monthly=queryFilters.transaction_type==='Rent';
      const budgetForReply=typeof queryFilters.minPrice==='number' && typeof queryFilters.maxPrice==='number' && queryFilters.minPrice!==queryFilters.maxPrice ? `${priceLabel(queryFilters.minPrice,monthly)}–${priceLabel(queryFilters.maxPrice,monthly)}` : typeof queryFilters.maxPrice==='number' ? `${queryFilters.maxPriceExclusive ? 'dưới' : 'tối đa'} ${priceLabel(queryFilters.maxPrice,monthly)}` : typeof queryFilters.minPrice==='number' ? `từ ${priceLabel(queryFilters.minPrice,monthly)}` : '';
      const areaForReply=typeof queryFilters.minArea==='number' && typeof queryFilters.maxArea==='number' && queryFilters.minArea!==queryFilters.maxArea ? `từ ${Math.round(queryFilters.minArea)} đến ${Math.round(queryFilters.maxArea)} m²` : typeof queryFilters.minArea==='number' ? `từ ${Math.round(queryFilters.minArea)} m²` : typeof queryFilters.maxArea==='number' ? `dưới ${Math.round(queryFilters.maxArea)} m²` : '';

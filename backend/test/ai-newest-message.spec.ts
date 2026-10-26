@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { genericHome, inferSearch } from '../src/modules/ai/infer-search.js';
 
 describe('newest message filters', () => {
-  it('reads "thuê nhà" as any home to rent and "mua nhà" as a house', () => {
+  it('reads generic home wording as any home and explicit wording as a house', () => {
     expect(genericHome('thuê nhà ở Quận 9')).toBe(true);
     expect(genericHome('thuê nhà nguyên căn ở Bình Thạnh')).toBe(false);
     expect(genericHome('thuê căn hộ ở Quận 7')).toBe(false);
-    expect(genericHome('mua nhà ở Gò Vấp')).toBe(false);
-    expect(inferSearch('mua nhà ở Gò Vấp')?.type).toBe('House');
+    expect(genericHome('mua nhà ở Gò Vấp')).toBe(true);
+    expect(inferSearch('mua nhà ở Gò Vấp')).not.toHaveProperty('type');
   });
   it('states location and transaction from the message itself', () => {
     expect(inferSearch('thuê nhà ở Quận 9')).toMatchObject({ transaction_type: 'Rent', location: 'Quận 9' });
@@ -107,12 +107,14 @@ describe('search clarification', () => {
       { role: 'user', content: 'Tôi muốn thuê nhà dưới 10 triệu ở Quận 9' },
       { role: 'assistant', content: 'Mình đã tìm thấy các căn phù hợp.' },
     ];
-    expect(searchCriteriaFromHistory('Tìm nhà mua ở Quận 7', history)).toMatchObject({ transaction_type: 'Sale', type: 'House', location: 'Quận 7' });
+    expect(searchCriteriaFromHistory('Tìm nhà mua ở Quận 7', history)).toMatchObject({ transaction_type: 'Sale', location: 'Quận 7' });
+    expect(searchCriteriaFromHistory('Tìm nhà mua ở Quận 7', history)).not.toHaveProperty('type');
     expect(searchCriteriaFromHistory('Tìm nhà mua ở Quận 7', history).maxPrice).toBeUndefined();
   });
   it('searches immediately when all criteria are in one message', () => {
     expect(clarificationFor('Thuê nhà Quận 7 dưới 15 triệu', []).needed).toBe(false);
-    expect(searchCriteriaFromHistory('Thuê nhà Quận 7 dưới 15 triệu', [])).toMatchObject({ transaction_type: 'Rent', type: 'House', location: 'Quận 7', maxPrice: 15000000 });
+    expect(searchCriteriaFromHistory('Thuê nhà Quận 7 dưới 15 triệu', [])).toMatchObject({ transaction_type: 'Rent', location: 'Quận 7', maxPrice: 15000000 });
+    expect(searchCriteriaFromHistory('Thuê nhà Quận 7 dưới 15 triệu', [])).not.toHaveProperty('type');
   });
   it('merges an explicit budget range and cheaper refinement without changing the active area', () => {
     const history = [
