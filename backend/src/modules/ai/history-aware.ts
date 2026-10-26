@@ -81,7 +81,7 @@ export function catalogueOverviewIntent(message: string): CatalogueOverviewKind 
 export function isMoreRequest(message: string) {
   const folded=fold(message);
   if(/(?:so\s+sanh|dua\s+vao\s+dau|khang\s+dinh|cung\s+khu\s+vuc|gia\s+tot)/iu.test(folded))return false;
-  return /(?:co\s+can\s+nao\s+khac|con\s+can\s+nao\s+nua|xem\s+them|can\s+khac|them\s+(?:vai\s+)?can\s+nua)/iu.test(folded);
+  return /(?:co\s+can\s+nao\s+khac|con\s+can\s+nao\s+(?:khac|nua)|con\s+nua|xem\s+them|can\s+khac|them\s+(?:vai\s+)?can\s+nua)/iu.test(folded);
 }
 // "căn hộ này", "nhà đó", "dự án này"… point back at the listing discussed in the previous turn.
 // "quan tâm căn …", "chọn căn …" pick one of the listings just shown.
@@ -152,7 +152,7 @@ type HistorySource = { id?: string; code?: string; price?: number | null };
 type HistoryTurn = { role: string; content: string; sources?: HistorySource[] };
 export type BudgetFollowUp = { filters: ReturnType<typeof inferSearch> & { location?: string; locations?: string[] }; direction: 'cheaper' | 'higher' };
 const cheaperBudget = /(?:rẻ hơn|giá thấp hơn|mềm hơn|thấp hơn|bớt tiền|tiết kiệm hơn|có căn nào rẻ hơn)/iu;
-const higherBudget = /(?:đắt hơn|cao hơn|cao cấp hơn|tăng ngân sách|ngân sách cao hơn|xịn hơn)/iu;
+const higherBudget = /(?:đắt hơn|cao hơn|cao cấp hơn|tăng(?: lên| ngân sách)|ngân sách cao hơn|nâng(?: lên| ngân sách)|xịn hơn)/iu;
 const nameStopWords = new Set(['sinh', 'viên', 'người', 'mua', 'bán', 'thuê', 'nhà', 'căn', 'hộ', 'lần', 'đầu', 'khách', 'hàng', 'tư', 'vấn', 'chủ', 'nhà', 'môi', 'giới', 'sale', 'sales', 'admin', 'bạn', 'mình', 'tôi']);
 const namePhrase = /(?:tôi\s+(?:(?:là\s+)?tên\s+là\s+|là\s+)|tên\s+tôi\s+là\s+|gọi\s+tôi\s+là\s+|mình\s+là\s+)/iu;
 function statedName(text: string) {
@@ -224,11 +224,21 @@ export function searchCriteriaFromHistory(message: string, history: { role: stri
   }
   return criteria as ReturnType<typeof inferSearch> & { bedrooms?: number };
 }
+export function isAreaOnlyRefinement(message: string, history: { role: string; content: string; sources?: HistorySource[] }[]) {
+  const current = inferredCriteria(message);
+  const hasLocation = current.location !== undefined || current.locations !== undefined;
+  if (!hasLocation || isMoreRequest(message)) return false;
+  const nonLocationKeys = ['type', 'transaction_type', 'minPrice', 'maxPrice', 'maxPriceExclusive', 'minArea', 'maxArea', 'bedrooms', 'keywords'];
+  if (nonLocationKeys.some(key => current[key as keyof typeof current] !== undefined)) return false;
+  const active = searchCriteriaFromHistory('', history);
+  return Boolean(active.transaction_type || active.type || active.minPrice !== undefined || active.maxPrice !== undefined || active.minArea !== undefined || active.maxArea !== undefined || active.bedrooms !== undefined);
+}
 export function budgetFollowUp(message: string, history: HistoryTurn[]): BudgetFollowUp | null {
   const explicit = inferSearch(message);
   if (explicitNewSearch.test(message)) return null;
   const cheaper = cheaperBudget.test(message);
   const higher = higherBudget.test(message);
+  const cheaperKeepsCeiling = /rẻ\s+hơn\s+nữa/iu.test(message);
   if (!cheaper && !higher && !explicit?.minPrice && !explicit?.maxPrice) return null;
   const prior = (searchCriteriaFromHistory('', history) || {}) as ReturnType<typeof inferSearch> & Record<string, unknown>;
   if (!Object.keys(prior).length) return null;
@@ -242,9 +252,16 @@ export function budgetFollowUp(message: string, history: HistoryTurn[]): BudgetF
   // structured catalogue prices are authoritative for a budget adjustment.
   const previousSources = [...history].reverse().find(turn => turn.role === 'assistant' && Array.isArray(turn.sources))?.sources || [];
   const shownPrices = previousSources.map(source => source.price).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
-  if (cheaper) {
+  if (cheaper && !cheaperKeepsCeiling) {
     const candidates = (shownPrices.length ? shownPrices : [prior.maxPrice]).filter((value): value is number => Number.isFinite(value));
     if (candidates.length) filters.maxPrice = Math.max(0, Math.floor(Math.min(...candidates) * 0.9));
+    delete filters.minPrice;
+  } else if (cheaper) {
+    // "Rẻ hơn nữa" changes ordering, not the remembered ceiling. A page may
+    // contain a cheap outlier, so deriving a new max from source-card prices
+    // silently narrows the customer's request on the next turn.
+    const rememberedMax = typeof prior.maxPrice === 'number' ? prior.maxPrice : shownPrices.length ? Math.max(...shownPrices) : undefined;
+    if (rememberedMax !== undefined) filters.maxPrice = rememberedMax;
     delete filters.minPrice;
   } else if (higher) {
     const candidates = (shownPrices.length ? shownPrices : [prior.maxPrice, prior.minPrice]).filter((value): value is number => Number.isFinite(value));
@@ -295,7 +312,17 @@ export function clarificationFor(message: string, history: { role: string; conte
     question: /thuê/iu.test(message) ? `${addressStart} đang tìm ${kind} thuê ở khu vực nào (quận, phường hay tuyến đường) và ngân sách khoảng bao nhiêu mỗi tháng ạ? Nếu chưa chắc, mình gợi ý vài khu phù hợp nhé.` : `${addressStart} đang tìm mua ${kind} ở khu vực nào (quận, phường hay tuyến đường) và ngân sách khoảng bao nhiêu ạ? Nếu chưa chắc, mình gợi ý vài khu phù hợp nhé.`,
     options: /thuê/iu.test(message) ? ['Dưới 10 triệu', '10–20 triệu', 'Chưa rõ, gợi ý giúp tôi'] : ['Dưới 3 tỷ', '3–6 tỷ', '6–10 tỷ', 'Trên 10 tỷ', 'Chưa rõ, gợi ý giúp tôi'],
   };
-  // Explicit budget searches keep the legacy direct-search behaviour; a bare first-message amount and every clarification answer ask for area first.
+  const anywhereRequest = /(?:ở đâu cũng được|khu nào cũng được|không giới hạn khu vực|không giới hạn)/iu.test(message);
+  const suggestionRequest = vagueCriteriaAnswer.test(message) || /(?:gợi ý\s+giúp|chưa\s+rõ)/iu.test(message);
+  // An ordinary transaction + type + budget request is still staged: the owner
+  // rule asks for an area before mixing listings from unrelated districts.
+  // Extreme-price, suggestion-chip, and explicit-anywhere requests remain broad.
+  if (!location && hasBudget && !extremePriceRequest && !suggestionRequest && !anywhereRequest && (criteria.transaction_type || criteria.type)) return {
+    needed: true,
+    question: `${addressStart} muốn ${action} ở khu vực nào (quận/phường)? Nếu chưa chắc, mình gợi ý vài khu nhé.`,
+    options: ['Quận 7', 'Bình Thạnh', 'Thủ Đức', 'Chưa rõ, gợi ý giúp tôi'],
+  };
+  // Explicit anywhere/suggestion requests keep the broad-search behaviour; every clarification answer still asks for area first.
   if (!location && hasBudget) return { needed: false, question: null, options: [] };
   if (!location) return { needed: false, question: null, options: [] };
   if (location && /(?:khu vực khác|khu vuc khac|đổi khu vực|doi khu vuc|nơi khác|noi khac|chỗ khác|cho khac)/iu.test(message)) {

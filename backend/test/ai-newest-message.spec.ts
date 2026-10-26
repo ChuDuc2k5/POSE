@@ -52,8 +52,8 @@ describe('search clarification', () => {
     expect(result.needed).toBe(true);
     expect(result.options).toContain('Chưa rõ, gợi ý giúp tôi');
   });
-  it('searches when only a budget is supplied', () => {
-    expect(clarificationFor('Tìm căn hộ dưới 3 tỷ', []).needed).toBe(false);
+  it('asks for the area when only a budget is supplied (owner rule: staged clarification)', () => {
+    expect(clarificationFor('Tìm căn hộ dưới 3 tỷ', []).needed).toBe(true);
   });
   it('counts a bare first-message sale amount and asks only for the area', () => {
     const result = clarificationFor('Mua căn nhà 10 tỷ', []);

@@ -56,7 +56,8 @@ export function genericHome(text: string) {
 
 export function inferSearch(text: string): InferredSearch | null {
   const standalonePlace = places.some(name => text.trim().toLocaleLowerCase('vi') === name.toLocaleLowerCase('vi'));
-  if (!propertyWords.test(text) && !standalonePlace && !places.some(name => text.toLocaleLowerCase('vi').includes(name.toLocaleLowerCase('vi')))) return null;
+  const asciiDistrictOnly = /(?:^|\s)(?:q|quan)\s*\d{1,2}(?:\s|$)/iu.test(text.normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
+  if (!propertyWords.test(text) && !standalonePlace && !asciiDistrictOnly && !places.some(name => text.toLocaleLowerCase('vi').includes(name.toLocaleLowerCase('vi')))) return null;
   const filters: InferredSearch = {};
   const landmark = landmarkLocations.find(([pattern]) => pattern.test(text));
   if (landmark) { if (Array.isArray(landmark[1])) filters.locations = landmark[1]; else filters.location = landmark[1]; }
@@ -65,7 +66,7 @@ export function inferSearch(text: string): InferredSearch | null {
   const district = [...text.matchAll(/(?:quận|quan|q\.?|district)\s*(\d{1,2})(?![\p{L}\d])/giu)].at(-1);
   const normalized = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').toLowerCase();
   const nearCentre = /gan\s+(?:quan\s*1|trung\s*tam)|di\s*lam\s+(?:quan\s*1|trung\s*tam)|cach\s+(?:trung\s*tam|quan\s*1)\s+(?:khong\s+qua\s+)?\d+\s*km|\d+\s*km\s+(?:den\s+)?trung\s*tam/i.test(normalized);
-  const asciiPlaces: [string, string][] = [['thu duc', 'Thủ Đức'], ['bien hoa', 'Biên Hòa'], ['binh thanh', 'Bình Thạnh'], ['go vap', 'Gò Vấp'], ['tan binh', 'Tân Bình'], ['quan 7', 'Quận 7'], ['quan 9', 'Quận 9']];
+  const asciiPlaces: [string, string][] = [['thu duc', 'Thủ Đức'], ['bien hoa', 'Biên Hòa'], ['binh thanh', 'Bình Thạnh'], ['go vap', 'Gò Vấp'], ['tan binh', 'Tân Bình'], ['quan 7', 'Quận 7'], ['q7', 'Quận 7'], ['quan 9', 'Quận 9'], ['q9', 'Quận 9']];
   const place = places.find(name => text.toLocaleLowerCase('vi').includes(name.toLocaleLowerCase('vi'))) || asciiPlaces.find(([name]) => normalized.includes(name))?.[1];
   if (district) filters.location = `Quận ${district[1]}`;
   else if (place) filters.location = place;

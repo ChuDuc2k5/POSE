@@ -156,7 +156,16 @@ const hotfixProperties=[
   const hotfix17Rent=Array.from({length:12},(_,index)=>{const price=6000000+index*300000;return {id:randomUUID(),code:`HF17-R-${index+1}`,name:`Căn hộ Long Bình thuê ${price/1e6} triệu`,price,availability:'Available',updated_at:`2026-10-${String(1+index).padStart(2,'0')}T02:00:00Z`,location:'Phường Long Bình, Quận 9, Thành phố Hồ Chí Minh',property_type:'Apartment',publication:'Published',archived:false,area:47+index,bedrooms:index%3===0?1:2,project_name:'TERAVA',subdivision_name:null,amenities:'hồ bơi',cover_id:null,transaction_type:'Rent',price_period:'Month',description:'Fixture rental listing for reliable Hotfix 17 catalogue criteria.'};});
   const hotfix17GoVap=Array.from({length:4},(_,index)=>{const price=5500000+index*500000;return {id:randomUUID(),code:`HF17-G-${index+1}`,name:`Căn hộ Gò Vấp thuê ${price/1e6} triệu`,price,availability:'Available',updated_at:`2026-10-${String(10+index).padStart(2,'0')}T02:00:00Z`,location:'Phường 5, Gò Vấp, Thành phố Hồ Chí Minh',property_type:'Apartment',publication:'Published',archived:false,area:40+index,bedrooms:1,project_name:'TERAVA',subdivision_name:null,amenities:'hồ bơi',cover_id:null,transaction_type:'Rent',price_period:'Month',description:'Fixture rental listing for reliable Hotfix 17 catalogue criteria.'};});
   const hotfix17Properties=[...hotfix17Sale,...hotfix17Rent,...hotfix17GoVap];
-  const catalogueRows=()=>mode==='hotfix-10d' ? [...properties,...hotfixProperties] : mode==='hotfix-15' || hotfix15Enabled ? [...properties,...hotfix15Properties] : mode==='hotfix-16' ? [...properties,...hotfix15Properties,...hotfix16Properties] : mode==='hotfix-17' ? [...properties,...hotfix15Properties,...hotfix16Properties,...hotfix17Properties] : properties;
+  const hf19Q7='Qu'+String.fromCodePoint(0x1ead)+'n 7';
+  const hf19BinhThanh='B'+String.fromCodePoint(0x00ec)+'nh Th'+String.fromCodePoint(0x1ea1)+'nh';
+  const hotfix19Q7=hotfix17Rent.slice(0,4).map((item,index)=>({...item,id:randomUUID(),code:`HF19-Q7-${index+1}`,name:`C${String.fromCodePoint(0x0103)}n h${String.fromCodePoint(0x1ed9)} ${hf19Q7} thu${String.fromCodePoint(0x00ea)} ${item.price/1e6} tri${String.fromCodePoint(0x1ec7)}u`,location:`Ph${String.fromCodePoint(0x01b0)}${String.fromCodePoint(0x1edd)}ng 1, ${hf19Q7}, Th${String.fromCodePoint(0x00e0)}nh ph${String.fromCodePoint(0x1ed1)} H${String.fromCodePoint(0x1ed3)} Ch${String.fromCodePoint(0x00ed)} Minh`}));
+  const hotfix19BinhThanh=hotfix17Rent.slice(4,8).map((item,index)=>({...item,id:randomUUID(),code:`HF19-BT-${index+1}`,name:`C${String.fromCodePoint(0x0103)}n h${String.fromCodePoint(0x1ed9)} ${hf19BinhThanh} thu${String.fromCodePoint(0x00ea)} ${item.price/1e6} tri${String.fromCodePoint(0x1ec7)}u`,location:`Ph${String.fromCodePoint(0x01b0)}${String.fromCodePoint(0x1edd)}ng 1, ${hf19BinhThanh}, Th${String.fromCodePoint(0x00e0)}nh ph${String.fromCodePoint(0x1ed1)} H${String.fromCodePoint(0x1ed3)} Ch${String.fromCodePoint(0x00ed)} Minh`}));
+  hotfix17Rent[1].description=`Tin ${String.fromCodePoint(0x0111)}ang ghi c${String.fromCodePoint(0x0103)}n n${String.fromCodePoint(0x00e0)}y s${String.fromCodePoint(0x1eb5)}n s${String.fromCodePoint(0x1ed5)} h${String.fromCodePoint(0x1ed3)}ng.`;
+  const hotfix19Raw={...hotfix17Rent[2],id:randomUUID(),code:'HF19-RAW',name:'BS tầng 22 Loại căn: 2pn+ 2wc 69m Loại hđ: 1 năm Nội thất: bếp rèm Giá thuê: 7tr',description:'Tin đăng cho phép kiểm tra tên hiển thị.'};
+  for(const property of properties) if(String(property.code).startsWith('Q9-R-')) property.description='Tin dang ghi can nay san so hong.';
+  const hotfix19SaleLow={...hotfixProperties[0],id:randomUUID(),code:'HF19-S-LOW',location:'Phường Long Bình, Quận 9, Thành phố Hồ Chí Minh',price:1800000000,name:'Căn hộ Thủ Đức 1,8 tỷ'};
+  const hotfix19Properties=[...hotfix17Properties,...hotfix19Q7,...hotfix19BinhThanh,hotfix19Raw,hotfix19SaleLow];
+  const catalogueRows=()=>mode==='hotfix-10d' ? [...properties,...hotfixProperties] : mode==='hotfix-15' || hotfix15Enabled ? [...properties,...hotfix15Properties] : mode==='hotfix-16' ? [...properties,...hotfix15Properties,...hotfix16Properties] : mode==='hotfix-17' ? [...properties,...hotfix15Properties,...hotfix16Properties,...hotfix17Properties] : mode==='hotfix-19' ? [...properties,...hotfix15Properties,...hotfix16Properties,...hotfix19Properties] : properties;
 if(previewOnly || live){
  properties[0]={...properties[0],code:'TD-A01',name:'Căn hộ Thủ Đức',location:'Thủ Đức',price:3200000000,transaction_type:'Sale',price_period:'Total'};
  properties[2]={...properties[2],code:'Q7-R01',name:'Căn hộ 2 phòng ngủ Quận 7',location:'Quận 7',price:25000000,availability:'Available',transaction_type:'Rent',price_period:'Month'};
@@ -365,7 +374,7 @@ const provider=createServer(async(req,res)=>{
   const knownContext=context.filter(id=>catalogueRows().some(p=>p.id===id));
   const filters=input.p_filters||{};
   const wanted=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations.map(String):[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases.map(String):[])].map(value=>value.toLocaleLowerCase('vi'));
-  const rows=catalogueRows().filter(p=>p.publication==='Published'&&!p.archived&&(!context.length||knownContext.includes(p.id))&&(!filters.transaction_type||p.transaction_type===filters.transaction_type)&&(!filters.type||p.property_type===filters.type)&&(!wanted.length||wanted.some(value=>p.location.toLocaleLowerCase('vi').includes(value)))&&(typeof filters.minPrice!=='number'||p.price===null||p.price>=filters.minPrice)&&(typeof filters.maxPrice!=='number'||p.price===null||(filters.maxPriceExclusive?p.price<filters.maxPrice:p.price<=filters.maxPrice))).map((p,i)=>({chunk_id:`chunk-${i}`,document_id:`doc-${i}`,source_id:p.id,source_type:'Property',header:`${p.code} ${p.name}`,content:`${p.name} ${p.location} published listing.`,vector_rank:context.includes(p.id)?Math.max(1,i):i+1,text_rank:context.includes(p.id)?1:i+1,similarity:context.includes(p.id)?.95:.9,embed_model:'fixture',code:p.code,name:p.name,location:p.location,property_type:p.property_type,transaction_type:p.transaction_type,price:p.price,price_period:p.price_period,availability:p.availability,updated_at:p.updated_at})).sort((a,b)=>(b.similarity-a.similarity)||(a.vector_rank-b.vector_rank));
+  const rows=catalogueRows().filter(p=>p.publication==='Published'&&!p.archived&&(!context.length||knownContext.includes(p.id))&&(!filters.transaction_type||p.transaction_type===filters.transaction_type)&&(!filters.type||p.property_type===filters.type)&&(!wanted.length||wanted.some(value=>p.location.toLocaleLowerCase('vi').includes(value)))&&(typeof filters.minPrice!=='number'||p.price===null||p.price>=filters.minPrice)&&(typeof filters.maxPrice!=='number'||p.price===null||(filters.maxPriceExclusive?p.price<filters.maxPrice:p.price<=filters.maxPrice))).map((p,i)=>({chunk_id:`chunk-${i}`,document_id:`doc-${i}`,source_id:p.id,source_type:'Property',header:`${p.code} ${p.name}`,content:`${p.name} ${p.location} published listing. ${p.description || ''}`,vector_rank:context.includes(p.id)?Math.max(1,i):i+1,text_rank:context.includes(p.id)?1:i+1,similarity:context.includes(p.id)?.95:.9,embed_model:'fixture',code:p.code,name:p.name,location:p.location,property_type:p.property_type,transaction_type:p.transaction_type,price:p.price,price_period:p.price_period,availability:p.availability,updated_at:p.updated_at})).sort((a,b)=>(b.similarity-a.similarity)||(a.vector_rank-b.vector_rank));
   return reply(200,rows);
  }
  if(url.pathname.endsWith('/property_public_catalog')){
@@ -409,7 +418,7 @@ const app=stack.app;
 let unconfigured;
 let output='';app.stdout.on('data',c=>output+=c);app.stderr.on('data',c=>output+=c);
 const origin='http://localhost:3300';
-const call=(path,body,cookie='',method=body ? 'POST':'GET',requestOrigin=origin)=>fetch(origin+path,{method,headers:{Cookie:cookie,Origin:requestOrigin,'Content-Type':'application/json',...(mode==='hotfix-17' ? {'x-forwarded-for':'203.0.113.17'}:{})},...(body ? {body:JSON.stringify(body)}:{})});
+const call=(path,body,cookie='',method=body ? 'POST':'GET',requestOrigin=origin)=>fetch(origin+path,{method,headers:{Cookie:cookie,Origin:requestOrigin,'Content-Type':'application/json',...(mode==='hotfix-17'||mode==='hotfix-19' ? {'x-forwarded-for':'203.0.113.17'}:{})},...(body ? {body:JSON.stringify(body)}:{})});
 const base={message:'Tôi muốn tìm căn hộ Quận 7 ngân sách 3 tỷ',store_transcript:false,history:[]};
 try{
  let ready=false;for(let i=0;i<60;i++){try{if((await fetch(origin)).ok){ready=true;break;}}catch{}await delay(250);}assert.ok(ready,output);
@@ -561,6 +570,7 @@ try{
   check(compare.sources.length===2&&compare.sources[0].code===underTen.sources[0].code&&compare.sources[1].code===underTen.sources[1].code,'Ordinal comparison resolves the previous source cards and preserves numbering');
   const legal=await (await call('/api/ai/chat',{...base,message:'căn số 2 có sổ hồng chưa',history:hf17History('thuê căn hộ quận 9 dưới 10 triệu',underTen)})).json();
   check(legal.sources.length===1&&legal.sources[0].code===underTen.sources[1].code,'A numbered listing question resolves to the matching previous card');
+  check(legal.reply.includes('[2]')&&legal.reply.includes(String.fromCodePoint(0x1ed5))&&!/Mình tìm thấy 1 căn/iu.test(legal.reply),'Numbered legal follow-up answers from the retrieved listing detail');
   const bedroomRefine=await (await call('/api/ai/chat',{...base,message:'cần 2 phòng ngủ',history:hf17History('thuê căn hộ quận 9 dưới 10 triệu',underTen)})).json();
   check(!bedroomRefine.clarify?.needed&&bedroomRefine.sources.length>0&&bedroomRefine.sources.every(p=>p.transaction_type==='Rent'&&p.bedrooms===2),'Room refinement silently retains the remembered location and transaction');
   const switchToBuy=await (await call('/api/ai/chat',{...base,message:'à thôi tôi muốn mua, tầm 3 tỷ',history:hf17History('thuê căn hộ quận 9 dưới 10 triệu',underTen)})).json();
@@ -583,6 +593,56 @@ try{
   check(ascii.sources.length>0&&ascii.sources.every(p=>p.location.includes('Quận 9'))&&english.sources.length>0&&english.sources.every(p=>p.transaction_type==='Rent'&&p.price<10e6),'Diacritic-free Vietnamese and English criteria both parse into cards');
   const finance=await (await call('/api/ai/chat',{...base,message:'nếu vay 70% căn số 1 trong 20 năm thì trả góp mỗi tháng bao nhiêu',history:hf17History('mua căn hộ quận 9 3 tỷ',saleQ9)})).json();
   check(finance.sources.length===1&&finance.sources[0].code===saleQ9.sources[0].code&&/70%|khoản vay|triệu đồng|8–10%/iu.test(finance.reply),'Finance follow-up resolves the first card and includes computed loan evidence');
+  await (await fetch('http://localhost:3301/fixture/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'hotfix-19'})})).json();
+  const hf19Rent=`thu${String.fromCodePoint(0x00ea)} c${String.fromCodePoint(0x0103)}n h${String.fromCodePoint(0x1ed9)} d${String.fromCodePoint(0x1b0)}${String.fromCodePoint(0x1edb)}i 8 tri${String.fromCodePoint(0x1ec7)}u`;
+  const hf19Q7='q7';
+  const hf19Q9=`qu${String.fromCodePoint(0x1ead)}n 9`;
+  const hf19ThuDuc=`Th${String.fromCodePoint(0x1ee7)} ${String.fromCodePoint(0x0110)}${String.fromCodePoint(0x1ee9)}c`;
+  const hf19BinhThanh=`B${String.fromCodePoint(0x00ec)}nh Th${String.fromCodePoint(0x1ea1)}nh`;
+  const hf19GopVap=`G${String.fromCodePoint(0x00f2)} V${String.fromCodePoint(0x1ea5)}p`;
+  const hf19Turns=(message,data)=>({role:'user',content:message},{role:'assistant',content:data.reply,sources:data.sources});
+  const hf19Turn=async(session,cookie,turns,message)=>{const response=await call('/api/ai/chat',{...base,store_transcript:true,session_id:session,message,history:turns.slice(-10)},cookie);const data=await response.json();turns.push({role:'user',content:message},{role:'assistant',content:data.reply,sources:data.sources});return data;};
+  const hf19Start=async message=>{const response=await call('/api/ai/chat',{...base,store_transcript:true,message});const data=await response.json();const cookie=response.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];return {data,cookie,turns:[{role:'user',content:message},{role:'assistant',content:data.reply,sources:data.sources}]};};
+  const hf19AreaVariant=async message=>{const firstResponse=await call('/api/ai/chat',{...base,store_transcript:true,message:hf19Rent});const first=await firstResponse.json();const cookie=firstResponse.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];const turns=[{role:'user',content:hf19Rent},{role:'assistant',content:first.reply,sources:first.sources}];const next=await hf19Turn(first.session.id,cookie,turns,message);return {first,next};};
+  const ownerStage=await (await call('/api/ai/chat',{...base,message:hf19Rent})).json();
+  check(ownerStage.clarify?.needed&&ownerStage.sources.length===0&&ownerStage.clarify.options.includes('Quận 7'),'Rent budget-only request stages the owner area clarification');
+  for(const phrase of [`${hf19Q7} được không`,`thôi ${hf19BinhThanh}`,`${hf19ThuDuc} thì sao`,`còn ${hf19GopVap}`,`đổi sang ${hf19Q9}`,`chuyển qua ${hf19Q7}`,`${hf19BinhThanh} nhé`]){
+    const result=await hf19AreaVariant(phrase);
+    check(result.first.clarify?.needed&&result.next.sources.length>0&&result.next.sources.every(p=>p.transaction_type==='Rent'&&p.price<8e6)&&!result.next.clarify?.needed,`Full-flow area-only refinement parses: ${phrase}`);
+  }
+  {
+    const firstResponse=await call('/api/ai/chat',{...base,store_transcript:true,message:hf19Rent});const first=await firstResponse.json();const cookie=firstResponse.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];const turns=[{role:'user',content:hf19Rent},{role:'assistant',content:first.reply,sources:first.sources}];
+    const q9=await hf19Turn(first.session.id,cookie,turns,hf19Q9);const thuDuc=await hf19Turn(first.session.id,cookie,turns,hf19ThuDuc);const more=await hf19Turn(first.session.id,cookie,turns,'có căn nào khác không');
+    check(q9.sources.length>0&&thuDuc.sources.length>0&&more.sources.length>0&&more.sources.every(p=>p.transaction_type==='Rent'&&p.price<8e6)&&/chưa đủ dữ liệu/iu.test(more.reply)===false,'Rent area switch then more keeps the full rental criteria');
+  }
+  {
+    const sale=await hf19Start('mua căn hộ Thủ Đức dưới 2 tỷ');
+    const raised=await hf19Turn(sale.data.session.id,sale.cookie,sale.turns,'tăng lên 3 tỷ');
+    const cheaper=await hf19Turn(sale.data.session.id,sale.cookie,sale.turns,'rẻ hơn nữa');
+    const more=await hf19Turn(sale.data.session.id,sale.cookie,sale.turns,'có căn nào khác không');
+
+    check(sale.data.sources.length>0&&raised.sources.length>0&&raised.sources.every(p=>p.transaction_type==='Sale'&&p.price<=3e9)&&cheaper.sources.length>0&&cheaper.sources.every(p=>p.price<=3e9)&&cheaper.sources.every((p,index,list)=>index===0||p.price>=list[index-1].price)&&!cheaper.reply.includes('chưa đủ dữ liệu'),'Budget raise then cheaper preserves the 3 tỷ ceiling and sorts cheapest first');
+    check(more.sources.length>0&&more.sources.every(p=>p.transaction_type==='Sale'&&p.price<=3e9)&&!more.reply.includes('chưa đủ dữ liệu'),'More after budget movement keeps the remembered budget');
+  }
+  {
+    const paging=await hf19Start('thuê căn hộ quận 9 dưới 10 triệu');
+    const page2=await hf19Turn(paging.data.session.id,paging.cookie,paging.turns,'còn căn nào khác không');
+    const filler=Array.from({length:6},(_,index)=>({role:index%2?'assistant':'user',content:index%2?'Cảm ơn bạn.':'cảm ơn'}));
+    const capped=[...paging.turns,...filler];
+    const page3=await (async()=>{const response=await call('/api/ai/chat',{...base,store_transcript:true,session_id:paging.data.session.id,message:'còn nữa không',history:capped.slice(-10)},paging.cookie);return response.json();})();
+
+    check(paging.data.sources.length===5&&page2.sources.length>0&&page3.sources.length===0&&/Tiêu chí/iu.test(page3.reply)&&!page3.reply.includes('chưa đủ dữ liệu'),'Paging keeps rent, Quận 9, and the 10 triệu ceiling after the original user leaves the ten-message window');
+    check(/Tiêu chí/iu.test(page3.reply)&&!page3.reply.includes('chưa đủ dữ liệu'),'Paging response carries the deterministic criteria line');
+  }
+  {
+    const switched=await hf19Start(hf19Rent);
+    const q9=await hf19Turn(switched.data.session.id,switched.cookie,switched.turns,hf19Q9);
+    const thuDuc=await hf19Turn(switched.data.session.id,switched.cookie,switched.turns,hf19ThuDuc);
+    const more=await hf19Turn(switched.data.session.id,switched.cookie,switched.turns,'có căn nào khác không');
+    check(switched.data.clarify?.needed&&q9.sources.length>0&&thuDuc.sources.length>0&&more.sources.length>0&&more.sources.every(p=>p.transaction_type==='Rent'&&p.price<8e6),'Rent then Quận 9 then Thủ Đức then more replays the full flow');
+  }
+  const rawTitles=await (await call('/api/ai/chat',{...base,message:'thuê căn hộ quận 9 dưới 8 triệu'})).json();
+  check(rawTitles.sources.length>0&&rawTitles.sources.every(p=>!String(p.name).includes('Loại căn')&&!String(p.name).includes('Giá thuê')),'Deterministic cards never expose raw field-heavy listing titles');
   {
     const hopFirstResponse=await call('/api/ai/chat',{...base,store_transcript:true,message:'tôi muốn mua nhà'});const hopFirst=await hopFirstResponse.json();const hopCookie=hopFirstResponse.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];
     const hopBudget=await (await call('/api/ai/chat',{...base,store_transcript:true,session_id:hopFirst.session.id,message:'ngân sách 3 tỷ',history:[{role:'user',content:'tôi muốn mua nhà'},{role:'assistant',content:hopFirst.reply}]},hopCookie)).json();
