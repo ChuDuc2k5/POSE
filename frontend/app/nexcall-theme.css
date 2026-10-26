@@ -126,3 +126,19 @@ h1, h2, h3, h4 { color: var(--nx-ink); }
 @media (prefers-reduced-motion: reduce) {
   .button, .favorite-button, .catalog-edit-button { transition: none; }
 }
+
+/* Scrollbars: thin rounded TERAVA thumb, no arrow buttons; sidebars show theirs on hover. */
+::-webkit-scrollbar { width:10px; height:10px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--nx-line-strong); border:3px solid transparent; border-radius:999px; background-clip:padding-box; }
+::-webkit-scrollbar-thumb:hover { background:var(--nx-subtle); border-width:2px; background-clip:padding-box; }
+::-webkit-scrollbar-thumb:active { background:var(--nx-muted); border-width:2px; background-clip:padding-box; }
+::-webkit-scrollbar-button, ::-webkit-scrollbar-corner { display:none; width:0; height:0; background:transparent; }
+.admin-sidebar::-webkit-scrollbar, [data-crm-sidebar]::-webkit-scrollbar { width:8px; }
+.admin-sidebar::-webkit-scrollbar-thumb, [data-crm-sidebar]::-webkit-scrollbar-thumb { background-color:transparent; }
+.admin-sidebar:hover::-webkit-scrollbar-thumb, [data-crm-sidebar]:hover::-webkit-scrollbar-thumb, .admin-sidebar:focus-within::-webkit-scrollbar-thumb, [data-crm-sidebar]:focus-within::-webkit-scrollbar-thumb { background-color:var(--nx-line-strong); }
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width:thin; scrollbar-color:var(--nx-line-strong) transparent; }
+  .admin-sidebar, [data-crm-sidebar] { scrollbar-color:transparent transparent; }
+  .admin-sidebar:hover, [data-crm-sidebar]:hover, .admin-sidebar:focus-within, [data-crm-sidebar]:focus-within { scrollbar-color:var(--nx-line-strong) transparent; }
+}
