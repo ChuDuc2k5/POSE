@@ -1,14 +1,15 @@
 'use client';
 import { useState, type FormEvent } from 'react';
 import { CatalogRequestError } from '@/lib/catalog-client';
-import { appointmentChannelLabels, appointmentInstant, appointmentLocal, appointmentStatusLabels, type Appointment, type AppointmentChannel, type AppointmentChoice, type AppointmentStatus } from '@/lib/appointments';
+import { appointmentInstant, appointmentLocal, appointmentStatusLabels, type Appointment, type AppointmentChoice, type AppointmentStatus } from '@/lib/appointments';
 import { AppointmentPicker } from './appointment-picker';
 import s from './appointments.module.css';
 export type AppointmentAction = 'create' | 'edit' | 'reschedule' | 'complete' | 'cancel' | 'correct';
 export function AppointmentForm({ action, item, role, onSave, onReload, onCancel, onBusy }: { action: AppointmentAction; item?: Appointment; role: 'Admin' | 'Sales'; onSave: (data: Record<string, unknown>, reason: string) => Promise<void>; onReload: () => void; onCancel: () => void; onBusy: (busy: boolean) => void }) {
-  const [lead, setLead] = useState<AppointmentChoice | null>(item ? { id: item.lead_id, name: item.customer.name, sales_name: item.sales_name, status: item.lead_status, archived: item.lead_archived } : null);
+  const [lead, setLead] = useState<AppointmentChoice | null>(item ? { id: item.lead_id, name: item.customer.name, phone: item.customer.phone, sales_name: item.sales_name, status: item.lead_status, archived: item.lead_archived } : null);
   const [property, setProperty] = useState<AppointmentChoice | null>(item?.property || null);
-  const [title, setTitle] = useState(item?.title || ''), [channel, setChannel] = useState<AppointmentChannel | ''>(item ? item.channel || '' : 'Phone');
+  const [title, setTitle] = useState(item?.title || '');
+  const channel = item?.channel || 'Phone';
   const [start, setStart] = useState(item ? appointmentLocal(item.starts_at) : ''), [end, setEnd] = useState(item ? appointmentLocal(item.ends_at) : '');
   const [location, setLocation] = useState(item?.location || ''), [notes, setNotes] = useState(item?.notes || '');
   const [result, setResult] = useState(item?.result || ''), [cancelReason, setCancelReason] = useState(item?.cancel_reason || ''), [status, setStatus] = useState<AppointmentStatus | ''>(item && item.status in appointmentStatusLabels ? item.status as AppointmentStatus : '');
@@ -41,9 +42,8 @@ export function AppointmentForm({ action, item, role, onSave, onReload, onCancel
   return <form className={s.form} onSubmit={submit}><fieldset disabled={busy}>
     {action === 'create' ? <AppointmentPicker kind="leads" value={lead} onChange={v => { setLead(v); setProperty(null); }}/> : <div className={s.readonly}><strong>{item?.customer.name}</strong><span>Sales: {item?.sales_name}</span></div>}
     {full && <><label>Tiêu đề / nội dung hẹn *<input aria-label="Tiêu đề / nội dung hẹn" required minLength={3} maxLength={200} value={title} onChange={e => setTitle(e.target.value)} placeholder="Ví dụ: Tư vấn căn hộ theo ngân sách"/></label>
-      <label>Hình thức *<select aria-label="Hình thức" required value={channel} onChange={e => setChannel(e.target.value as AppointmentChannel)}><option value="" disabled>Chọn hình thức</option>{Object.entries(appointmentChannelLabels).map(([k, label]) => <option key={k} value={k}>{label}</option>)}</select></label>
+      <label>Số điện thoại<input aria-label="Số điện thoại" type="tel" readOnly value={lead?.phone || ''} placeholder={lead ? 'Lead chưa có số điện thoại' : 'Chọn Lead để hiển thị số điện thoại'}/></label>
       {channel && channel !== 'Phone' && <label>{channel === 'Online' ? 'Link cuộc họp *' : 'Địa điểm *'}<input aria-label={channel === 'Online' ? 'Link cuộc họp' : 'Địa điểm'} type={channel === 'Online' ? 'url' : 'text'} required minLength={3} maxLength={1000} value={location} onChange={e => setLocation(e.target.value)}/></label>}
-      {channel === 'Phone' && <p className={s.hint}>Liên hệ theo số điện thoại trong hồ sơ khách hàng.</p>}
       <AppointmentPicker key={lead?.id || 'none'} kind="properties" value={property} leadId={lead?.id} onChange={setProperty}/>
       <label>Ghi chú<textarea aria-label="Ghi chú" maxLength={3000} rows={3} value={notes} onChange={e => setNotes(e.target.value)}/></label></>}
     {time && <><div className={s.twoColumns}><label>Bắt đầu *<input aria-label="Bắt đầu" type="datetime-local" required value={start} onChange={e => setStart(e.target.value)}/></label><label>Kết thúc *<input aria-label="Kết thúc" type="datetime-local" required value={end} onChange={e => setEnd(e.target.value)}/></label></div><p className={s.hint}>Ngày giờ Việt Nam (UTC+7). Hai lịch nối tiếp nhau được phép.</p></>}
