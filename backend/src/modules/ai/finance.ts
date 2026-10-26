@@ -95,6 +95,19 @@ function formatLoanScenario(text: string): string | null {
   return `Tính theo dư nợ giảm dần, trả đều, khoản vay ${money(principal, 0)}, kỳ hạn ${years[0]} năm: mức trả ban đầu khoảng ${money(result.monthlyPayment)} mỗi tháng; sau ${change[1]} năm dư nợ còn khoảng ${money(result.balanceAfterChange)} và với lãi suất ${rates[1]}% mức trả mới khoảng ${money(result.newMonthlyPayment)}, chênh khoảng ${money(result.paymentDifference)} mỗi tháng. Đây là ước tính, giả định trả đúng hạn và lãi suất áp dụng cho phần thời hạn còn lại.`;
 }
 
+function formatInstallment(text: string, listingPrice?: number): string | null {
+  const ratio = text.match(/(?:vay|borrow)\s*(?:khoảng\s*)?(\d+(?:[.,]\d+)?)\s*%/iu);
+  const years = text.match(/(\d+|một|hai|ba|bốn|năm|sáu|bảy|tám|chín|mười)\s*năm/iu);
+  if (!ratio || !years || !(listingPrice && listingPrice > 0)) return null;
+  const percentage = Number(ratio[1].replace(',', '.')) / 100;
+  const term = smallNumber(years[1]);
+  if (!(percentage > 0 && percentage <= 1) || !(term > 0)) return null;
+  const principal = listingPrice * percentage;
+  const low = annuityPayment(principal, 8, term).monthlyPayment;
+  const high = annuityPayment(principal, 10, term).monthlyPayment;
+  return `Khoản vay ${money(principal, 0)} (tương đương ${ratio[1]}% giá căn) trong ${term} năm. Với lãi suất tham khảo ${typicalLoanRateRange}, khoản trả góp đều ước tính khoảng ${money(low)}–${money(high)} mỗi tháng; đây là ước tính và cần ngân hàng xác nhận lãi suất, phí và lịch trả nợ cụ thể.`;
+}
+
 function formatAffordability(text: string): string | null {
   const incomeMatch = text.match(/thu\s*nhập[^\d]{0,20}([\d.,]+\s*(?:triệu|tr|tỷ|tỉ|ty))/iu);
   const cashMatch = text.match(/(?:có|sẵn|tự có|tiền mặt|vốn)[^\d]{0,20}([\d.,]+\s*(?:triệu|tr|tỷ|tỉ|ty))/iu);
@@ -147,7 +160,7 @@ function extractFinanceEvidence(note: string): FinanceEvidence {
 }
 
 export function financeEvidenceForQuestion(text: string, listingPrice?: number, marketNote?: string): FinanceEvidence | null {
-  const note = formatLoanScenario(text) || formatAffordability(text) || (yieldQuestionPattern.test(text) ? formatYield(text, listingPrice, marketNote) : null);
+  const note = formatInstallment(text, listingPrice) || formatLoanScenario(text) || formatAffordability(text) || (yieldQuestionPattern.test(text) ? formatYield(text, listingPrice, marketNote) : null);
   return note ? extractFinanceEvidence(note) : null;
 }
 

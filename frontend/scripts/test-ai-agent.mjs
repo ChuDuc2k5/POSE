@@ -151,7 +151,12 @@ const hotfixProperties=[
   hotfix15Properties.push({id:randomUUID(),code:'TD-15-HOUSE',name:'Nhà phố Thủ Đức vượt ngân sách',price:4500000000,availability:'Available',updated_at:'2026-10-25T01:00:00Z',location:'Phường Long Bình, Quận 9, Thành phố Hồ Chí Minh',property_type:'House',publication:'Published',archived:false,area:90,bedrooms:3,project_name:'TERAVA',subdivision_name:null,amenities:'',cover_id:null,transaction_type:'Sale',price_period:'Total',description:'Nhà phố bán công bố để kiểm thử hotfix 15.'});
   const hotfix16Properties=[{id:randomUUID(),code:'HF16-ZERO',name:'Căn hộ dữ liệu giá 0',price:0,availability:'Available',updated_at:'2026-10-26T01:00:00Z',location:'Quận 7, Thành phố Hồ Chí Minh',property_type:'Apartment',publication:'Published',archived:false,area:80,bedrooms:2,project_name:'TERAVA',subdivision_name:null,amenities:'',cover_id:null,transaction_type:'Sale',price_period:'Total',description:'Căn hộ giá 0 để kiểm thử related.'},{id:randomUUID(),code:'HF16-NEAR',name:'Căn hộ gần tiêu chí Quận 1',price:1500000000,availability:'Available',updated_at:'2026-10-26T02:00:00Z',location:'Quận 1, Thành phố Hồ Chí Minh',property_type:'Apartment',publication:'Published',archived:false,area:80,bedrooms:2,project_name:'TERAVA',subdivision_name:null,amenities:'',cover_id:null,transaction_type:'Sale',price_period:'Total',description:'Căn hộ dàn dựng để kiểm thử nearest.'}];
   let hotfix15Enabled=false;
-  const catalogueRows=()=>mode==='hotfix-10d' ? [...properties,...hotfixProperties] : mode==='hotfix-15' || hotfix15Enabled ? [...properties,...hotfix15Properties] : mode==='hotfix-16' ? [...properties,...hotfix15Properties,...hotfix16Properties] : properties;
+  const hotfix17SalePrices=[2990000000,2950000000,2850000000,2750000000,2650000000,2550000000,2450000000,2350000000,2400000000];
+  const hotfix17Sale=hotfix17SalePrices.map((price,index)=>({id:randomUUID(),code:`HF17-S-${index+1}`,name:`Căn hộ Long Bình bán ${String(price/1e9).replace('.',',')} tỷ`,price,availability:'Available',updated_at:`2026-10-${String(1+index).padStart(2,'0')}T01:00:00Z`,location:'Phường Long Bình, Quận 9, Thành phố Hồ Chí Minh',property_type:'Apartment',publication:'Published',archived:false,area:59+index,bedrooms:2,project_name:'TERAVA',subdivision_name:null,amenities:index%2?'nội thất':'hồ bơi',cover_id:null,transaction_type:'Sale',price_period:'Total',description:'Fixture listing for reliable Hotfix 17 catalogue criteria.'}));
+  const hotfix17Rent=Array.from({length:12},(_,index)=>{const price=6000000+index*300000;return {id:randomUUID(),code:`HF17-R-${index+1}`,name:`Căn hộ Long Bình thuê ${price/1e6} triệu`,price,availability:'Available',updated_at:`2026-10-${String(1+index).padStart(2,'0')}T02:00:00Z`,location:'Phường Long Bình, Quận 9, Thành phố Hồ Chí Minh',property_type:'Apartment',publication:'Published',archived:false,area:47+index,bedrooms:index%3===0?1:2,project_name:'TERAVA',subdivision_name:null,amenities:'hồ bơi',cover_id:null,transaction_type:'Rent',price_period:'Month',description:'Fixture rental listing for reliable Hotfix 17 catalogue criteria.'};});
+  const hotfix17GoVap=Array.from({length:4},(_,index)=>{const price=5500000+index*500000;return {id:randomUUID(),code:`HF17-G-${index+1}`,name:`Căn hộ Gò Vấp thuê ${price/1e6} triệu`,price,availability:'Available',updated_at:`2026-10-${String(10+index).padStart(2,'0')}T02:00:00Z`,location:'Phường 5, Gò Vấp, Thành phố Hồ Chí Minh',property_type:'Apartment',publication:'Published',archived:false,area:40+index,bedrooms:1,project_name:'TERAVA',subdivision_name:null,amenities:'hồ bơi',cover_id:null,transaction_type:'Rent',price_period:'Month',description:'Fixture rental listing for reliable Hotfix 17 catalogue criteria.'};});
+  const hotfix17Properties=[...hotfix17Sale,...hotfix17Rent,...hotfix17GoVap];
+  const catalogueRows=()=>mode==='hotfix-10d' ? [...properties,...hotfixProperties] : mode==='hotfix-15' || hotfix15Enabled ? [...properties,...hotfix15Properties] : mode==='hotfix-16' ? [...properties,...hotfix15Properties,...hotfix16Properties] : mode==='hotfix-17' ? [...properties,...hotfix15Properties,...hotfix16Properties,...hotfix17Properties] : properties;
 if(previewOnly || live){
  properties[0]={...properties[0],code:'TD-A01',name:'Căn hộ Thủ Đức',location:'Thủ Đức',price:3200000000,transaction_type:'Sale',price_period:'Total'};
  properties[2]={...properties[2],code:'Q7-R01',name:'Căn hộ 2 phòng ngủ Quận 7',location:'Quận 7',price:25000000,availability:'Available',transaction_type:'Rent',price_period:'Month'};
@@ -404,7 +409,7 @@ const app=stack.app;
 let unconfigured;
 let output='';app.stdout.on('data',c=>output+=c);app.stderr.on('data',c=>output+=c);
 const origin='http://localhost:3300';
-const call=(path,body,cookie='',method=body ? 'POST':'GET',requestOrigin=origin)=>fetch(origin+path,{method,headers:{Cookie:cookie,Origin:requestOrigin,'Content-Type':'application/json'},...(body ? {body:JSON.stringify(body)}:{})});
+const call=(path,body,cookie='',method=body ? 'POST':'GET',requestOrigin=origin)=>fetch(origin+path,{method,headers:{Cookie:cookie,Origin:requestOrigin,'Content-Type':'application/json',...(mode==='hotfix-17' ? {'x-forwarded-for':'203.0.113.17'}:{})},...(body ? {body:JSON.stringify(body)}:{})});
 const base={message:'Tôi muốn tìm căn hộ Quận 7 ngân sách 3 tỷ',store_transcript:false,history:[]};
 try{
  let ready=false;for(let i=0;i<60;i++){try{if((await fetch(origin)).ok){ready=true;break;}}catch{}await delay(250);}assert.ok(ready,output);
@@ -538,6 +543,64 @@ try{
   const thuDuc=await (await call('/api/ai/chat',{...base,session_id:flowFirst.session.id,message:'ở Thủ Đức',history:flowHistoryWithQuan9},flowCookie)).json();
   check(/Mua, ở Thủ Đức, tối đa 3 tỷ đồng/iu.test(thuDuc.reply)&&thuDuc.sources.length>0&&thuDuc.sources.every(p=>p.transaction_type==='Sale'&&p.price<=3e9&&!/TD-15-HOUSE/.test(p.code))&&/Thủ Đức \(9 căn/iu.test(bienHoa.reply),'Thủ Đức area switch keeps budget, orders in-budget apartments, and excludes the 4,5 tỷ house');
   check(thuDuc.sources.every((p,i,list)=>i===0||Math.abs(3e9-p.price)>=Math.abs(3e9-list[i-1].price)),'Thủ Đức main cards are ordered by closeness to the ceiling');
+  await (await fetch('http://localhost:3301/fixture/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'hotfix-17'})})).json();
+  const hf17History=(message,data)=>[{role:'user',content:message},{role:'assistant',content:data.reply,sources:data.sources}];
+  const hf17Search=async message=>{const response=await call('/api/ai/chat',{...base,message});return response.json();};
+  const saleQ9=await hf17Search('mua căn hộ quận 9 3 tỷ');
+  check(saleQ9.sources.length===5&&saleQ9.sources.every(p=>p.transaction_type==='Sale'&&p.property_type==='Apartment'&&p.price<=3e9)&&/Tiêu chí:[\s\S]*Quận 9[\s\S]*3 tỷ/iu.test(saleQ9.reply),'One-message Quận 9 sale criteria uses structured catalogue evidence');
+  const saleThuDuc=await hf17Search('mua căn hộ thủ đức 3 tỷ');
+  check(saleThuDuc.sources.length===5&&saleThuDuc.sources.every(p=>p.transaction_type==='Sale'&&p.price<=3e9)&&/Tiêu chí:[\s\S]*Thủ Đức[\s\S]*3 tỷ/iu.test(saleThuDuc.reply),'Thủ Đức alias returns the same in-budget sale catalogue set');
+  const correctedArea=await hf17Search('mua căn hộ quận 7 dưới 3 tỷ, à không, quận 9 mới đúng');
+  check(correctedArea.sources.length>0&&correctedArea.sources.every(p=>p.location.includes('Quận 9'))&&/Quận 9/iu.test(correctedArea.reply),'In-message area correction wins over the first district');
+  const budgetStart=await hf17Search('mua căn hộ 2 tỷ');
+  const budgetAreaResponse=await call('/api/ai/chat',{...base,message:'ở thủ đức',history:hf17History('mua căn hộ 2 tỷ',budgetStart)});
+  const budgetArea=await budgetAreaResponse.json();
+  check(!budgetArea.clarify?.needed&&budgetArea.sources.length>0&&budgetArea.sources.every(p=>p.price<=2e9),'Name-flow area refinement keeps a bare budget ceiling without a floor');
+  const underTen=await hf17Search('thuê căn hộ quận 9 dưới 10 triệu');
+  const compare=await (await call('/api/ai/chat',{...base,message:'so sánh căn 1 và căn 2 giúp tôi',history:hf17History('thuê căn hộ quận 9 dưới 10 triệu',underTen)})).json();
+  check(compare.sources.length===2&&compare.sources[0].code===underTen.sources[0].code&&compare.sources[1].code===underTen.sources[1].code,'Ordinal comparison resolves the previous source cards and preserves numbering');
+  const legal=await (await call('/api/ai/chat',{...base,message:'căn số 2 có sổ hồng chưa',history:hf17History('thuê căn hộ quận 9 dưới 10 triệu',underTen)})).json();
+  check(legal.sources.length===1&&legal.sources[0].code===underTen.sources[1].code,'A numbered listing question resolves to the matching previous card');
+  const bedroomRefine=await (await call('/api/ai/chat',{...base,message:'cần 2 phòng ngủ',history:hf17History('thuê căn hộ quận 9 dưới 10 triệu',underTen)})).json();
+  check(!bedroomRefine.clarify?.needed&&bedroomRefine.sources.length>0&&bedroomRefine.sources.every(p=>p.transaction_type==='Rent'&&p.bedrooms===2),'Room refinement silently retains the remembered location and transaction');
+  const switchToBuy=await (await call('/api/ai/chat',{...base,message:'à thôi tôi muốn mua, tầm 3 tỷ',history:hf17History('thuê căn hộ quận 9 dưới 10 triệu',underTen)})).json();
+  check(!switchToBuy.clarify?.needed&&switchToBuy.sources.length>0&&switchToBuy.sources.every(p=>p.transaction_type==='Sale'&&p.price<=3.3e9),'Transaction and budget refinement replace stale rental criteria');
+  const lowerBudget=await (await call('/api/ai/chat',{...base,message:'giờ tôi chỉ còn 2,5 tỷ thôi',history:hf17History('mua căn hộ quận 9 3 tỷ',saleQ9)})).json();
+  check(lowerBudget.sources.every(p=>p.price<=2.5e9)&&!/3 tỷ đồng–2,5 tỷ đồng/iu.test(lowerBudget.reply),'Lower budget replaces the ceiling and removes the stale minimum');
+  const raiseStart=await hf17Search('mua căn hộ thủ đức dưới 2 tỷ');
+  const raised=await (await call('/api/ai/chat',{...base,message:'tăng lên 3 tỷ',history:hf17History('mua căn hộ thủ đức dưới 2 tỷ',raiseStart)})).json();
+  check(raised.sources.length>0&&raised.sources.every(p=>p.transaction_type==='Sale'&&p.price<=3e9)&&!/từ [^\n]*3 tỷ/iu.test(raised.reply),'Raised budget keeps location and never prints an inverted range');
+  const underEight=await hf17Search('thuê căn hộ quận 9 dưới 8 triệu');
+  const goVap=await (await call('/api/ai/chat',{...base,message:'gò vấp được không',history:hf17History('thuê căn hộ quận 9 dưới 8 triệu',underEight)})).json();
+  check(goVap.sources.length===4&&goVap.sources.every(p=>p.location.includes('Gò Vấp')&&p.price<8e6)&&/Tiêu chí:[\s\S]*8 triệu/iu.test(goVap.reply),'Area-only follow-up runs the remembered rent search and shows every Gò Vấp card');
+  const noMatchArea=await hf17Search('mua căn hộ biên hòa 3 tỷ');
+  check(noMatchArea.sources.length===0&&noMatchArea.related.length>0&&noMatchArea.related.every(p=>p.price>0)&&noMatchArea.related[0].price>=noMatchArea.related.at(-1).price,'No-match related cards are valid and closest to the budget ceiling first');
+  const expensive=await hf17Search('căn đắt nhất đang bán trên TERAVA');
+  const cheapest=await hf17Search('căn rẻ nhất đang bán trên TERAVA');
+  check(expensive.sources.length===1&&cheapest.sources.length===1&&expensive.sources[0].price>=cheapest.sources[0].price,'Price-extreme requests return one structured sale card without asking for area');
+  const ascii=await hf17Search('mua can ho quan 9 duoi 3 ty');
+  const english=await hf17Search('apartment for rent in district 9 under 10 million');
+  check(ascii.sources.length>0&&ascii.sources.every(p=>p.location.includes('Quận 9'))&&english.sources.length>0&&english.sources.every(p=>p.transaction_type==='Rent'&&p.price<10e6),'Diacritic-free Vietnamese and English criteria both parse into cards');
+  const finance=await (await call('/api/ai/chat',{...base,message:'nếu vay 70% căn số 1 trong 20 năm thì trả góp mỗi tháng bao nhiêu',history:hf17History('mua căn hộ quận 9 3 tỷ',saleQ9)})).json();
+  check(finance.sources.length===1&&finance.sources[0].code===saleQ9.sources[0].code&&/70%|khoản vay|triệu đồng|8–10%/iu.test(finance.reply),'Finance follow-up resolves the first card and includes computed loan evidence');
+  {
+    const hopFirstResponse=await call('/api/ai/chat',{...base,store_transcript:true,message:'tôi muốn mua nhà'});const hopFirst=await hopFirstResponse.json();const hopCookie=hopFirstResponse.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];
+    const hopBudget=await (await call('/api/ai/chat',{...base,store_transcript:true,session_id:hopFirst.session.id,message:'ngân sách 3 tỷ',history:[{role:'user',content:'tôi muốn mua nhà'},{role:'assistant',content:hopFirst.reply}]},hopCookie)).json();
+    const hopArea=await (await call('/api/ai/chat',{...base,store_transcript:true,session_id:hopFirst.session.id,message:'ở biên hòa',history:[{role:'user',content:'ngân sách 3 tỷ'},{role:'assistant',content:hopBudget.reply}]},hopCookie)).json();
+    const hopQ9=await (await call('/api/ai/chat',{...base,store_transcript:true,session_id:hopFirst.session.id,message:'thế ở quận 9 đi',history:[{role:'assistant',content:hopArea.reply,sources:hopArea.sources}]},hopCookie)).json();
+    const hopThuDuc=await (await call('/api/ai/chat',{...base,store_transcript:true,session_id:hopFirst.session.id,message:'ở thủ đức',history:[{role:'assistant',content:hopQ9.reply,sources:hopQ9.sources}]},hopCookie)).json();
+    const hopBinhThanh=await (await call('/api/ai/chat',{...base,store_transcript:true,session_id:hopFirst.session.id,message:'bình thạnh thì sao',history:[{role:'assistant',content:hopThuDuc.reply,sources:hopThuDuc.sources}]},hopCookie)).json();
+    const hopBack=await (await call('/api/ai/chat',{...base,store_transcript:true,session_id:hopFirst.session.id,message:'quay lại quận 9',history:[{role:'assistant',content:hopBinhThanh.reply,sources:hopBinhThanh.sources}]},hopCookie)).json();
+    check(hopArea.sources.length===0&&hopArea.related.length>0&&/Tiêu chí:[\s\S]*3 tỷ/iu.test(hopArea.reply),'Buy-area-hop keeps the budget and related cards for Biên Hòa');
+    check(hopQ9.sources.length>0&&hopThuDuc.sources.length>0&&hopBinhThanh.sources.length===0&&hopBinhThanh.related.length>0&&hopBack.sources.length===hopQ9.sources.length&&/3 tỷ/iu.test(hopBack.reply),'Seven-turn buy-area-hop survives the ten-message widget history cap');
+  }
+  {
+    const memoryResponse=await call('/api/ai/chat',{...base,store_transcript:true,message:'mua căn hộ quận 9 3 tỷ'});const memoryData=await memoryResponse.json();const memoryCookie=memoryResponse.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];
+    const cappedHistory=[{role:'assistant',content:memoryData.reply},...Array.from({length:9},(_,index)=>({role:index%2?'assistant':'user',content:index%2?'Cảm ơn bạn.':'cảm ơn'}))];
+    const memoryMore=await (await call('/api/ai/chat',{...base,store_transcript:true,message:'mua căn hộ quận 9 dưới 3 tỷ',history:cappedHistory})).json();
+    check(memoryData.sources.length>0&&/Tiêu chí:[\s\S]*Quận 9[\s\S]*3 tỷ/iu.test(memoryMore.reply),'Criteria survives beyond the widget ten-message history through the deterministic assistant line');
+  }
+  messages.length=0;
   await (await fetch('http://localhost:3301/fixture/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'hotfix-16'})})).json();
   const negationOne=await (await call('/api/ai/chat',{...base,message:'Tôi muốn mua nhà Quận 7 dưới 4 tỷ. Nếu tin đăng chưa có thông tin về pháp lý căn nhà, mình sẽ nói rõ như vậy và không tự ý đoán hay cam kết.'})).json();
   const negationTwo=await (await call('/api/ai/chat',{...base,message:'Tôi muốn mua nhà Quận 7 dưới 4 tỷ. Nếu tin đăng chưa có thông tin về pháp lý căn nhà, mình sẽ nói rõ điều đó với bạn và không đưa ra ý kiến hay cam kết pháp lý cụ thể.'})).json();

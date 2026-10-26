@@ -107,12 +107,26 @@ export function referencedListingCodes(message: string, history: { role: string;
   const direct = listingCodes(message);
   if (direct.length) return { codes: direct, ambiguous: false };
   if (newSearch.test(message)) return { codes: [] as string[], ambiguous: false };
+  const turns = history as HistoryTurn[];
+  const listed = [...turns].reverse().find(turn => turn.role === 'assistant' && Array.isArray(turn.sources) && turn.sources.length)?.sources || [];
+  const sourceCodes = listed.map(source => source.code).filter((code): code is string => typeof code === 'string');
+  const numbered = [...message.matchAll(/(?:căn|can)(?:\s+hộ|\s+ho)?\s*(?:số|so)?\s*(\d+)(?![\p{L}\d])/giu)].map(match => Number(match[1]) - 1).filter(index => index >= 0 && index < sourceCodes.length);
+  const wantsFirst = /(?:căn|can)\s+(?:đầu\s+tiên|dau\s+tien)/iu.test(message);
+  const wantsCheapest = /(?:căn|can)\s+(?:rẻ\s+nhất|re\s+nhat)(?:\s+vừa\s+rồi|\s+vua\s+roi)?/iu.test(message);
+  if (sourceCodes.length && (numbered.length || wantsFirst || wantsCheapest)) {
+    const selected = wantsCheapest
+      ? [...listed].sort((left, right) => (left.price ?? Number.POSITIVE_INFINITY) - (right.price ?? Number.POSITIVE_INFINITY)).slice(0, 1)
+      : wantsFirst ? listed.slice(0, 1) : numbered.map(index => listed[index]).filter(Boolean);
+    return { codes: [...new Set(selected.map(source => source.code).filter((code): code is string => typeof code === 'string'))], ambiguous: false };
+  }
   // Right after one listing was discussed, a question without a new search ("Tiền cọc mấy tháng?",
   // "Khu này có ngập không?") is about that listing.
-  const last = listingCodes(history[history.length - 1]?.content || '');
+  const lastTurn = history[history.length - 1] as HistoryTurn | undefined;
+  const last = [...listingCodes(lastTurn?.content || ''), ...(lastTurn?.sources || []).map(source => source.code).filter((code): code is string => typeof code === 'string')];
   if (!backReference.test(message)) return last.length === 1 ? { codes: last, ambiguous: false } : { codes: [] as string[], ambiguous: false };
   for (let i = history.length - 1; i >= 0; i--) {
-    const codes = listingCodes(history[i]?.content || '');
+    const turn = history[i] as HistoryTurn;
+    const codes = [...listingCodes(turn?.content || ''), ...(turn?.sources || []).map(source => source.code).filter((code): code is string => typeof code === 'string')];
     if (codes.length) return { codes, ambiguous: codes.length > 1 };
   }
   return { codes: [] as string[], ambiguous: false };
@@ -134,7 +148,7 @@ export function missingBudgetQuestion(message: string, history: { role: string; 
     ? `Ngân sách thuê của ${name || 'bạn'} khoảng bao nhiêu mỗi tháng? Có thêm tên đường hay phường mong muốn thì mình lọc sát hơn nhé.`
     : `${name || 'Bạn'} dự kiến ngân sách khoảng bao nhiêu? Có thêm tên đường hay phường mong muốn thì mình lọc sát hơn nhé.`;
 }
-type HistorySource = { price?: number | null };
+type HistorySource = { id?: string; code?: string; price?: number | null };
 type HistoryTurn = { role: string; content: string; sources?: HistorySource[] };
 export type BudgetFollowUp = { filters: ReturnType<typeof inferSearch> & { location?: string; locations?: string[] }; direction: 'cheaper' | 'higher' };
 const cheaperBudget = /(?:rẻ hơn|giá thấp hơn|mềm hơn|thấp hơn|bớt tiền|tiết kiệm hơn|có căn nào rẻ hơn)/iu;
@@ -170,7 +184,11 @@ export function searchCriteriaFromHistory(message: string, history: { role: stri
   const current = inferredCriteria(message);
   if (message && !Object.keys(current).length && !vagueCriteriaAnswer.test(message) && !isMoreRequest(message) && !/(?:rẻ hơn|cao hơn|tăng ngân sách|ngân sách cao hơn)/iu.test(message)) return current as ReturnType<typeof inferSearch> & { bedrooms?: number };
   for (const turn of [...history, { role: 'user', content: message }]) {
-    if (turn.role !== 'user') continue;
+    if (turn.role === 'assistant') {
+      const deterministic = turn.content.match(/(?:^|\n)Tiêu chí:\s*([^\n]+)/iu)?.[1];
+      if (deterministic) Object.assign(criteria, inferredCriteria(deterministic));
+      continue;
+    }
     if (explicitNewSearch.test(turn.content) && Object.keys(criteria).length) {
       for (const key of Object.keys(criteria)) delete criteria[key];
     }
@@ -216,6 +234,8 @@ export function budgetFollowUp(message: string, history: HistoryTurn[]): BudgetF
   if (!Object.keys(prior).length) return null;
   const filters = { ...prior, ...(explicit || {}) } as BudgetFollowUp['filters'];
   if (explicit?.minPrice !== undefined || explicit?.maxPrice !== undefined) {
+    if (explicit.maxPrice !== undefined && explicit.minPrice === undefined) delete filters.minPrice;
+    if (explicit.minPrice !== undefined && explicit.maxPrice === undefined) delete filters.maxPrice;
     if (explicit.maxPriceExclusive === undefined) delete filters.maxPriceExclusive;
   }
   // Assistant prose echoes customer budgets and contains other numbers. Only
@@ -258,7 +278,7 @@ export function clarificationFor(message: string, history: { role: string; conte
   const kind = /chung\s+cư|căn\s+hộ/iu.test(message) ? 'chung cư' : /đất/iu.test(message) ? 'đất' : 'nhà';
   const action = criteria.transaction_type === 'Rent' ? 'thuê' : criteria.transaction_type === 'Sale' ? 'mua' : /thuê/iu.test(message) ? 'thuê' : 'tìm';
   if (criteriaReply && vagueCriteriaAnswer.test(message)) return { needed: false, question: null, options: [] };
-  const bareFirstMessageBudget = hasBudget && criteria.minPrice === criteria.maxPrice && /[\d.,]+\s*(?:tỷ|tỉ|ty|triệu|tr)/iu.test(message) && !/(?:dưới|tối đa|không quá|tầm|khoảng|ngân sách|<=?)/iu.test(message);
+  const bareFirstMessageBudget = hasBudget && criteria.minPrice === undefined && typeof criteria.maxPrice === 'number' && /[\d.,]+\s*(?:tỷ|tỉ|ty|triệu|tr)/iu.test(message) && !/(?:dưới|tối đa|không quá|tầm|khoảng|ngân sách|<=?)/iu.test(message);
   if ((criteriaReply || bareFirstMessageBudget) && !location && hasBudget) return {
     needed: true,
     question: `${addressStart} muốn ${action} ở khu vực nào (quận/phường)? Nếu chưa chắc, mình gợi ý vài khu nhé.`,
@@ -269,7 +289,8 @@ export function clarificationFor(message: string, history: { role: string; conte
     question: `${addressStart} muốn ${action} ở ${location}; ngân sách khoảng bao nhiêu${action === 'thuê' ? ' mỗi tháng' : ''}?`,
     options: action === 'thuê' ? ['Dưới 10 triệu', '10–20 triệu', 'Chưa rõ, gợi ý giúp tôi'] : ['Dưới 3 tỷ', '3–6 tỷ', '6–10 tỷ', 'Trên 10 tỷ', 'Chưa rõ, gợi ý giúp tôi'],
   };
-  if (!location && !hasBudget && !concrete && (!history.length || !previousWasClarification)) return {
+  const extremePriceRequest = /(?:đắt|cao|rẻ|thấp)\s+nhất/iu.test(message);
+  if (!location && !hasBudget && !concrete && !extremePriceRequest && (!history.length || !previousWasClarification)) return {
     needed: true,
     question: /thuê/iu.test(message) ? `${addressStart} đang tìm ${kind} thuê ở khu vực nào (quận, phường hay tuyến đường) và ngân sách khoảng bao nhiêu mỗi tháng ạ? Nếu chưa chắc, mình gợi ý vài khu phù hợp nhé.` : `${addressStart} đang tìm mua ${kind} ở khu vực nào (quận, phường hay tuyến đường) và ngân sách khoảng bao nhiêu ạ? Nếu chưa chắc, mình gợi ý vài khu phù hợp nhé.`,
     options: /thuê/iu.test(message) ? ['Dưới 10 triệu', '10–20 triệu', 'Chưa rõ, gợi ý giúp tôi'] : ['Dưới 3 tỷ', '3–6 tỷ', '6–10 tỷ', 'Trên 10 tỷ', 'Chưa rõ, gợi ý giúp tôi'],
@@ -277,11 +298,12 @@ export function clarificationFor(message: string, history: { role: string; conte
   // Explicit budget searches keep the legacy direct-search behaviour; a bare first-message amount and every clarification answer ask for area first.
   if (!location && hasBudget) return { needed: false, question: null, options: [] };
   if (!location) return { needed: false, question: null, options: [] };
-  if (!hasBudget && !locationPattern.test(message) && !namesPlace(message)) {
-    const action = /thuê/iu.test(message) ? 'thuê' : /mua/iu.test(message) ? 'mua' : 'tìm';
+  if (location && /(?:khu vực khác|khu vuc khac|đổi khu vực|doi khu vuc|nơi khác|noi khac|chỗ khác|cho khac)/iu.test(message)) {
+    return { needed: true, question: `${addressStart} muốn ${action} ở khu vực nào khác?`, options: ['Quận 9', 'Thủ Đức', 'Bình Thạnh', 'Chưa rõ, gợi ý giúp tôi'] };
+  }
+  const hasSourceCards = history.some(turn => Array.isArray((turn as { sources?: unknown[] }).sources) && (turn as { sources?: unknown[] }).sources!.length > 0);
+  if (!hasSourceCards && location && !locationPattern.test(message) && !namesPlace(message)) {
     return { needed: true, question: `${addressStart} muốn ${action} ở ${location} như trước hay khu vực khác?`, options: [location, 'Khu vực khác', 'Không giới hạn khu vực'] };
   }
-  if (!hasBudget) return { needed: false, question: null, options: [] };
-  if (criteriaReply) return { needed: false, question: null, options: [] };
-  return { needed: true, question: `${addressStart} muốn ${action} ở ${location} như trước hay khu vực khác?`, options: [location, 'Khu vực khác', 'Không giới hạn khu vực'] };
+  return { needed: false, question: null, options: [] };
 }
