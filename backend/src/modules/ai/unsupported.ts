@@ -12,26 +12,37 @@ const criteria: [string, RegExp][] = [
   ['dịch vụ quản lý cho thuê', /(?:quan ly khach thue|khong muon tu quan ly)/iu],
   ['pháp lý chi tiết', /(?:so hong|the chap|tranh chap|tho cu|quy hoach)/iu],
   ['chủ đầu tư / tiến độ', /(?:chu dau tu|tien do)/iu],
+  ['dự báo / tiềm năng tăng giá', /(?:tiem nang tang gia|tang gia|du bao|tuong lai gia)/iu],
+  ['thời gian bán', /(?:ban (?:nha|can|dat)?\s*trong (?:vong )?\d+\s*(?:thang|tuan|ngay)|bao lau (?:thi )?ban duoc)/iu],
 ];
 
 export function unsupportedCriteria(text: string): string[] {
   const normalized = normalize(text);
-  return criteria.filter(([, pattern]) => pattern.test(normalized)).map(([label]) => label);
+  return criteria.filter(([label, pattern]) => label === 'khoản vay ngân hàng' ? loanWords(text) : pattern.test(normalized)).map(([label]) => label);
+}
+
+// Accent folding turns "vậy" into "vay", so loan wording is matched on the accented text.
+export function loanWords(text: string): boolean {
+  return /(?<![\p{L}])(?:vay|khoản vay|trả góp)(?![\p{L}])/iu.test(text.normalize('NFC'));
 }
 
 export function ownerRequest(text: string): boolean {
   const normalized = normalize(text);
-  if (/mu.{0,30}b.{0,20}nh/i.test(normalized)) return true;
-  return /(?:toi\s+co\s+(?:can|nha|bat dong san).*(?:muon\s+(?:ban|cho thue))|muon[\s\S]{0,30}(?:ban|cho thue)[\s\S]{0,20}(?:nha|can|dat)|can\s+(?:ban|cho thue)[\s\S]{0,20}(?:nha|can|dat)\s+cua\s+(?:toi|minh)|ky gui|dang tin|dang ban|tim nguoi thue|khong muon tu quan ly|phi moi gioi|ban nha cua toi)/iu.test(normalized);
+  // A buyer or renter ("muốn tìm", "mua", "thuê", comparing options) is never an owner unless they name their own property.
+  const ownProperty = /(?:cua\s+(?:toi|minh|em|nha minh)|ky gui|dang tin|tim nguoi thue|toi\s+co\s+(?:mot\s+|1\s+)?(?:can|nha|lo|dat|bat dong san))/i.test(normalized);
+  if (!ownProperty && /(?<![a-z])(?:tim|mua|so sanh|nen chon|phuong an|dau tu|muon\s+thue|can\s+thue|(?<!cho\s)thue\s+(?:nha|can|phong|chung cu))(?![a-z])/i.test(normalized)) return false;
+  return /(?:toi\s+co\s+(?:mot\s+|1\s+)?(?:can|nha|lo|dat|bat dong san).*(?:muon\s+(?:ban|cho thue))|muon[\s\S]{0,30}(?:ban|cho thue)[\s\S]{0,20}(?:nha|can|dat)|can\s+(?:ban|cho thue)[\s\S]{0,20}(?:nha|can|dat)\s+cua\s+(?:toi|minh)|ky gui|dang tin|dang ban|tim nguoi thue|khong muon tu quan ly|ban nha cua toi|ban (?:nha|can|dat) qua (?:ben|terava)|nho (?:ben ban|terava) ban)/iu.test(normalized) || ownProperty && /phi moi gioi|hoa hong/i.test(normalized);
 }
 
 export function ownerValuationQuestion(text: string): boolean {
   const normalized = normalize(text);
-  if (/gi.{0,40}l/i.test(normalized)) return true;
   return /(?:gia.*hop ly|hop ly.*gia|dinh gia|gia thi truong|danh gia.*gia|gia cho thue)/iu.test(normalized);
 }
 
-export function unsupportedLine(labels: string[]): string {
+export function unsupportedLine(labels: string[], general: 'listing' | 'general' | false = false): string {
+  // After an answer built from general FAQ knowledge, say plainly that the specific facts are not in the data.
+  if (general === 'listing') return `Lưu ý: tin đăng chưa có thông tin về ${labels.join(', ')} của căn này, phần trên là thông lệ chung; chuyên viên tư vấn sẽ xác nhận cụ thể giúp bạn.`;
+  if (general === 'general') return `Lưu ý: phần trên là thông lệ chung, hiện chưa có thông tin về ${labels.join(', ')} cho trường hợp cụ thể của bạn; chuyên viên tư vấn sẽ xác nhận giúp bạn.`;
   return `Hiện chưa có thông tin về ${labels.join(', ')} trong dữ liệu; chuyên viên tư vấn có thể hỗ trợ bạn phần này.`;
 }
 

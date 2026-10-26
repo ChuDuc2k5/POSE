@@ -2,6 +2,15 @@ import { moneyAmounts } from './money.js';
 
 export type InferredSearch = { location?: string; locations?: string[]; type?: string; minPrice?: number; maxPrice?: number; minArea?: number; maxArea?: number; transaction_type?: 'Sale'|'Rent' };
 export const centralFormerDistricts = ['Quận 1', 'Quận 2', 'Quận 3', 'Quận 4', 'Quận 5', 'Quận 7', 'Quận 10', 'Quận Bình Thạnh', 'Phú Nhuận'];
+const landmarkLocations: [RegExp, string | string[]][] = [
+  [/RMIT|Tôn Đức Thắng|Phú Mỹ Hưng/i, 'Quận 7'],
+  [/Landmark\s*81/i, 'Quận Bình Thạnh'],
+  [/Tân Sơn Nhất/i, 'Tân Bình'],
+  [/Đại học Quốc gia|Làng Đại học/i, 'Thủ Đức'],
+  [/Bến Thành|Nhà thờ Đức Bà|phố đi bộ Nguyễn Huệ|trung tâm (?:thành phố|Sài Gòn|TP.?|Q.? ?1|quận 1)|gần trung tâm(?! (?:mua sắm|thương mại|hành chính))/iu, ['Quận 1', 'Quận 3', 'Quận 4', 'Quận 5', 'Quận 10', 'Quận Bình Thạnh']],
+  [/Thảo Điền/i, 'Quận 2'],
+  [/Bitexco/i, 'Quận 1'],
+];
 const word = (source: string) => new RegExp(`(?<![\\p{L}])(?:${source})(?![\\p{L}])`, 'iu');
 
 export function inferTransactionType(text: string): 'Sale'|'Rent'|undefined {
@@ -25,6 +34,8 @@ export function genericHome(text: string) { return word('thuê').test(text) && w
 export function inferSearch(text: string): InferredSearch | null {
   if (!propertyWords.test(text)) return null;
   const filters: InferredSearch = {};
+  const landmark = landmarkLocations.find(([pattern]) => pattern.test(text));
+  if (landmark) { if (Array.isArray(landmark[1])) filters.locations = landmark[1]; else filters.location = landmark[1]; }
   if (word('thuê').test(text)) filters.transaction_type = 'Rent';
   else if (word('mua|bán').test(text)) filters.transaction_type = 'Sale';
   const district = text.match(/\b(?:quận|q\.?)\s*(\d{1,2})\b/i);

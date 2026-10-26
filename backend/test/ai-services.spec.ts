@@ -74,7 +74,7 @@ describe('M06 services', () => {
     expect(data.properties[0].location).toBe('Thủ Đức');
     expect(data.listing_terms).toEqual([{code:'RV-A0805',transaction_type:'Sale',price_period:'Total'}]);
     expect(JSON.stringify(TURN_SCHEMA).length).toBeLessThan(1500); // The warmer consultant rules need room; gpt-4.1-mini handles a 1,600-character prompt.
-    expect(SYSTEM_PROMPT.length).toBeLessThan(1600);
+    expect(SYSTEM_PROMPT.length).toBeLessThan(4500); // assistant@16 adds the source guide (details, viewed listing, general knowledge)
     vi.stubEnv('AI_API_URL', 'https://provider.example/v1'); expect(() => providerConfig()).toThrow('AI_UNAVAILABLE');
   });
   it('retries schema failures exactly once and does not retry transport failures', async () => {

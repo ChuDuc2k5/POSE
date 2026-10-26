@@ -17,9 +17,9 @@ import { groundedSummary, safeReply } from '../src/modules/ai/guard.js';
 describe('grounded summary when the model answer stays blocked', () => {
   it('lists the cited listings with live price/status and their [n] numbers', () => {
     const text = groundedSummary([{ ...(evidence as unknown as Record<string, unknown>[])[0], number: 1 } as never]);
-    expect(text).toContain('[1] Cho thuê Midtown M8 2PN Q7');
-    expect(text).toContain('10.000.000 VND/tháng');
-    expect(text).toContain('đang cho thuê');
+    expect(text).toContain('Cho thuê Midtown M8 2PN Q7 ở Quận 7');
+    expect(text).toContain('giá 10 triệu đồng/tháng, đang cho thuê [1].');
+    expect(text).not.toContain('VND');
   });
   it('falls back to the safe reply when no listing was retrieved', () => {
     expect(groundedSummary([])).toBe(safeReply);

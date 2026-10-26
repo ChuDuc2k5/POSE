@@ -93,11 +93,11 @@ export function budgetFollowUp(message: string, history: HistoryTurn[]): BudgetF
 }
 export function clarificationFor(message: string, history: { role: string; content: string }[]): Clarification {
   const ownerText=message.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').toLowerCase();
-  if (/(?:cho\s+thue\s+(?:nha|can)|dang\s+tin|tim\s+nguoi\s+thue|ky\s+gui|ban\s+nha\s+cua\s+toi|muon\s+cho\s+thue|ban\s+nha\s+qua|nho\s+ban|phi\s+moi\s+gioi|hoa\s+hong)/u.test(ownerText)) return { needed: false, question: null, options: [] };
+  if (/(?:cho\s+thue\s+(?:nha|can)|dang\s+tin|tim\s+nguoi\s+thue|ky\s+gui|ban\s+nha\s+cua\s+toi|muon\s+cho\s+thue|(?:muon|can)\s+ban\s+(?:nha|can|dat|lo)|ban\s+nha\s+qua|nho\s+ban|phi\s+moi\s+gioi|hoa\s+hong)/u.test(ownerText)) return { needed: false, question: null, options: [] };
   // A named listing ("Đặt lịch xem căn RVL-…") or a booking/saving request is never a new search.
   // A question about the listing just discussed ("Tiền cọc mấy tháng?") is answered from that listing.
   if (referencedListingCodes(message, history).codes.length) return { needed: false, question: null, options: [] };
-  if (!searchIntent.test(message) || budgetFollowUp(message, history) || locationPattern.test(message) || namesPlace(message) || isFollowUp(message) || listingCodes(message).length || /(?<![\p{L}])(?:đặt\s+lịch|hẹn\s+xem|lưu\s+căn|yêu\s+thích|liên\s+hệ|chuyên\s+viên)(?![\p{L}])/iu.test(message)) return { needed: false, question: null, options: [] };
+  if (!searchIntent.test(message) || budgetFollowUp(message, history) || locationPattern.test(message) || namesPlace(message) || !!(inferSearch(message)?.location || inferSearch(message)?.locations?.length) || isFollowUp(message) || listingCodes(message).length || /(?<![\p{L}])(?:đặt\s+lịch|hẹn\s+xem|lưu\s+căn|yêu\s+thích|liên\s+hệ|chuyên\s+viên)(?![\p{L}])/iu.test(message)) return { needed: false, question: null, options: [] };
   const location = previousSearchLocation(history);
   const inferred = inferSearch(message) || {};
   const hasBudget = inferred.minPrice !== undefined || inferred.maxPrice !== undefined;

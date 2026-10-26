@@ -15,7 +15,7 @@ await mkdir(join(temp,'node_modules'));
 for(const dep of ['openai','zod'])await symlink(join(repoRoot,'backend','node_modules',dep),join(temp,'node_modules',dep),'junction');
 await mkdir(join(temp,'prompts'));
 await cp(join(repoRoot,'backend','src','modules','ai','prompts'),join(temp,'prompts'),{recursive:true});
-for(const name of ['privacy','money','extraction','lead-scoring','hcm-wards','ward-label','guard','schemas','request-log','llm']){
+for(const name of ['privacy','money','extraction','lead-scoring','hcm-wards','ward-label','display','guard','schemas','request-log','llm']){
  const source=await readFile(new URL(`../../backend/src/modules/ai/${name}.ts`,import.meta.url),'utf8');
  await writeFile(join(temp,`${name}.mjs`),ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText.replace(/from '\.\/([\w-]+)(?:\.(?:js|ts))?'/g,"from './$1.mjs'"));
 }
@@ -72,7 +72,7 @@ check(outputReason('Căn hộ gia đình Block A vẫn còn bán.',[open,sold])=
 check(outputReason('Căn hộ gia đình Block A giá 4,1 tỷ. Căn này còn bán.',[open,sold])==='UNSUPPORTED_AVAILABILITY','Follow-up sentence inherits the product named before it');}
 check(validateModel({reply:'ok',intent:'other',score:100}).reply==='ok','Only reply and intent mandatory');
 // The consultant prompt intentionally grew to keep grounding and a helpful next step together.
-check(JSON.stringify(TURN_SCHEMA).length<1500 && SYSTEM_PROMPT.length<1600,'Compact model schema and prompt');
+check(JSON.stringify(TURN_SCHEMA).length<1500 && SYSTEM_PROMPT.length<4500,'Compact model schema and prompt');
 const normalized=validateModel({reply:'Xin chào',intent:'other',needs:[{field:'budget_min_vnd',value:0,evidence:'unknown'},{field:'locations',value:['unknown'],evidence:'không có thông tin'},{field:'timeline',value:'3to6m',evidence:'2 tháng tới'},{field:'property_types',value:['House'],evidence:'căn hộ'}],tool_calls:[{name:'read_leads',arguments:{}}]},'Tôi mua căn hộ trong 2 tháng tới');
 check(normalized.reply==='Xin chào' && normalized.flags.filter(f=>f.tool==='invalid_need').length===2 && normalized.flags.some(f=>f.tool==='invalid_tool'),'Junk fields/tools flagged without losing reply');
 check(normalized.needs.timeline.value==='lt3m' && normalized.needs.property_types.value[0]==='Apartment','Quote controls timeline and Vietnamese property type');
@@ -174,7 +174,7 @@ const provider=createServer(async(req,res)=>{
    if(input.tools){
    if(!prompt)prompt=input;
    check(input.tools.length===6 && input.tools.every(t=>['search_properties','get_property_detail','list_my_appointments','save_favorite','request_handoff','propose_appointment'].includes(t.function.name)),'Native six-tool schema');
-   check(input.max_tokens===600 && input.messages[0].content.length<1600,'Bounded generation and compact prompt/schema');
+   check(input.max_tokens===600 && input.messages[0].content.length<4500,'Bounded generation and compact prompt/schema');
    const hasToolResult=input.messages.some(m=>m.role==='tool');
    const redacted=input.messages.some(m=>typeof m.content==='string'&&m.content.includes('contact_redacted":true'));
     const dataText=input.messages.map(m=>typeof m.content==='string'?m.content:'').join('\n');
@@ -215,7 +215,7 @@ const provider=createServer(async(req,res)=>{
    check(input.response_format.type==='json_schema' && input.response_format.json_schema.name==='assistant_turn' && input.response_format.json_schema.strict && input.response_format.json_schema.schema.additionalProperties===false,'Strict provider JSON Schema');
   check(!req.headers.authorization,'Local provider accepts empty key without Authorization');
   // The consultant prompt intentionally grew to keep grounding and a helpful next step together.
-  check(input.max_tokens===600 && input.messages[0].content.length<1600 && JSON.stringify(input.response_format.json_schema.schema).length<1500,'Bounded generation and compact prompt/schema');
+  check(input.max_tokens===600 && input.messages[0].content.length<4500 && JSON.stringify(input.response_format.json_schema.schema).length<1500,'Bounded generation and compact prompt/schema');
   const data=JSON.parse(input.messages[1].content.replace(/^BEGIN_UNTRUSTED_DATA\n|\nEND_UNTRUSTED_DATA$/g,''));modelData.push(data);
   check(data.properties.every(p=>!Object.hasOwn(p,'id') && Object.keys(p).length===7),'Provider receives minimal evidence without UUIDs');
   if(mode==='timeout'){await delay(6000);return reply(200,{choices:[{message:{content:JSON.stringify({reply:'Xin chào!',intent:'other'})}}]});}
