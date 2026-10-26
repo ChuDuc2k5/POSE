@@ -17,17 +17,19 @@ import { runAgent } from './agent.ts';
 import { assistantPrompt, complete, querySearch, checkAnswer, extractNeedsAfterReply, streamAgentStep } from './llm.ts';
 import { setAiRequestSession, logAiRequest } from './request-log.js';
 import { questionPreview } from './privacy.js';
-import { adviceOrServiceQuestion, budgetFollowUp, catalogueOverviewIntent, clarificationFor, customerNameFromHistory, genericSearchQuestion, isMoreRequest, listingCodes, missingBudgetQuestion, referencedListingCodes, searchCriteriaFromHistory } from './history-aware.js';
+import { adviceOrServiceQuestion, budgetFollowUp, catalogueOverviewIntent, clarificationFor, customerNameFromHistory, genericSearchQuestion, historyReferenceQuestion, isMoreRequest, listingCodes, missingBudgetQuestion, referencedListingCodes, searchCriteriaFromHistory } from './history-aware.js';
 import { catalogueOverview } from './catalogue-overview.js';
 import { sanitizeReply } from './guard.js';
 import { withFormerDistrict } from './ward-label.js';
 import { moneyAmounts, priceLabel } from './money.js';
-import { contactRequest, loanAssumption, loanWords, noMatchReply, hasNoMatchReply, cheaperFallbackReply, listingFollowUpFallback, ownerRequest, ownerValuationQuestion, unsupportedCriteria, unsupportedLine } from './unsupported.js';
+import { contactRequest, loanAssumption, loanBudget as inferLoanBudget, loanWords, noLoanWords, noMatchReply, hasNoMatchReply, dedupeNoMatchReply, cheaperFallbackReply, listingFollowUpFallback, ownerRequest, ownerValuationQuestion, unsupportedCriteria, unsupportedLine } from './unsupported.js';
 import { hcmWards } from './hcm-wards.js';
 import { inquiryEvents } from '../../common/inquiry-events.js';
 import { displayListingName } from './display.js';
 import { areaAdviceQuestion, areaSummary, landPriceQuestion, marketSummary, priceComparisonQuestion, rentLevelQuestion } from './market.js';
 import { lowestPriced } from './nearest.js';
+import { financeNoteForQuestion } from './finance.js';
+import { answerCriteriaLine, showCriteriaLine } from './answer-rules.js';
 
 export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI tạm thời không khả dụng. Bạn có thể thử lại, xem danh sách bất động sản hoặc gửi yêu cầu tư vấn.',retry:true,search_url:'/properties',inquiry_url:'/customer/inquiries/new'},503);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -227,9 +229,10 @@ export class AiService {
     const viewedPropertyId=typeof input.property_id==='string' && (!wantsOthers || comparisonQuestion || similarQuestion) ? input.property_id : null;
     // "Nhân viên liên hệ lại cho mình" is a hand-off request, not a search with no criteria.
     const contactOnly=contactRequest(source) && !inferSearch(source) && !moneyAmounts(source).length;
-    const adviceOnly=adviceOrServiceQuestion(source);
-    const cashAmounts=moneyAmounts(source);
-    const loanBudget=loanWords(source) && cashAmounts.length===1 && cashAmounts[0]>=100000000 && !/thuê/iu.test(source) ? Math.round(cashAmounts[0]/0.4/100000000)*100000000 : null;
+     const adviceOnly=adviceOrServiceQuestion(source) || historyReferenceQuestion(source,sanitizedHistory);
+     const cashAmounts=moneyAmounts(source);
+     const loanBudget=inferLoanBudget(source);
+     const strictCashBudget=noLoanWords(source) && typeof inferSearch(source)?.maxPrice==='number' ? inferSearch(source)?.maxPrice as number : null;
     let searchPerformed=input.filters!==undefined || !!input.property_id,rag:RetrievalResult|null=null;
     const filterAmounts:number[]=[];
     let items:Evidence[]=[],related:Record<string,unknown>[]=[];
@@ -270,7 +273,7 @@ export class AiService {
     };
     if(searchPerformed && !viewedPropertyId)items=await search(filters,input.property_id as string|null || null);
     const strictBudgetLimit=!input.property_id && filters.maxPriceExclusive===true && typeof filters.maxPrice==='number' ? filters.maxPrice : null;
-    if(searchPerformed && strictBudgetLimit!==null && items.length<3 && !input.property_id){
+     if(searchPerformed && strictBudgetLimit!==null && items.length<3 && !input.property_id && strictCashBudget===null){
       const relaxedBudgetFilters={...filters,maxPrice:Math.ceil(strictBudgetLimit*1.1),maxPriceExclusive:false};
       const strictIds=new Set(items.map(item=>item.id));
       const relaxed=await search(relaxedBudgetFilters,null,[],source);
@@ -278,7 +281,7 @@ export class AiService {
       items=[...items,...tolerance].slice(0,5);
     }
     const initialRag=rag as RetrievalResult|null;
-    if(searchPerformed && (!items.length || (initialRag && !initialRag.found)) && Object.keys(filters).length && !input.property_id){
+     if(searchPerformed && (!items.length || (initialRag && !initialRag.found)) && Object.keys(filters).length && !input.property_id && strictCashBudget===null){
       const relaxed={transaction_type:filters.transaction_type,location:relaxedLocation(filters.location)};
       const relaxedItems=await search(Object.fromEntries(Object.entries(relaxed).filter(([,value])=>value!==undefined)),null);
       related=relaxedItems.slice(0,3).map(item=>({...item,number:undefined,relaxed_reason:filters.maxPrice!==undefined||filters.minPrice!==undefined?'Ngoài ngân sách đã nêu':filters.location?'Khác khu vực: '+String(filters.location):'Gợi ý gần với tiêu chí đã nêu',reason:deterministicReason(String(item.reason||'')),related:true}));
@@ -294,6 +297,9 @@ export class AiService {
     const log=(tool:string,args:unknown,reason:string|null,decision?:'flagged')=>actions.push({tool,args_hash:hash(JSON.stringify(args) || 'null'),decision:decision || (reason ? 'blocked':'allowed'),reason:reason || 'VALIDATED',rule_version:GUARD_VERSION});
     const safeEvidence=(list:Evidence[])=>list.filter(item=>{const reason=this.guard.evidenceReason(item);if(reason)log('retrieval',{id:item.id},reason);return !reason;});
     items=safeEvidence(items);
+    const locationTextIsConsistent=(item:{name?:unknown;location?:unknown})=>!(String(item.name||'')).match(/Lạc Thủy/iu)||/Lạc Thủy/iu.test(String(item.location||''));
+    items=items.filter(locationTextIsConsistent);
+    related=related.filter(locationTextIsConsistent);
     const suspected=this.guard.injection(input.message) || sanitizedHistory.some(t=>this.guard.injection(t.content));
     if(suspected)log('input',source,'PROMPT_INJECTION','flagged');
     // Query understanding is a separate, validated step. The deterministic
@@ -330,7 +336,7 @@ export class AiService {
         if(inferredFilters?.minArea!==undefined && queryFilters.minArea===undefined)queryFilters.minArea=inferredFilters.minArea;
         if(inferredFilters?.maxArea!==undefined && queryFilters.maxArea===undefined)queryFilters.maxArea=inferredFilters.maxArea;
         if(/(?<![\p{L}])vay(?![\p{L}])/iu.test(source) && inferredFilters?.maxPrice!==undefined){queryFilters.maxPrice=inferredFilters.maxPrice;delete queryFilters.minPrice;}
-        if (!queryFilters.location && /gần\s+(?:Quận\s*1|trung tâm)|đi\s+làm\s+(?:Quận\s*1|trung tâm)/iu.test(source)) queryFilters.locations=centralFormerDistricts;
+         if (/gần\s+(?:Quận\s*1|trung tâm)|đi\s+làm\s+(?:Quận\s*1|trung tâm)/iu.test(source)) { queryFilters.locations=centralFormerDistricts; delete queryFilters.location; }
         // The newest message wins: what it states explicitly replaces the model's reading of earlier turns,
         // and a price from an earlier turn is never carried into a message that names none.
         if(inferredFilters){
@@ -344,8 +350,9 @@ export class AiService {
           if(inferredFilters?.[key]===undefined && rememberedCriteria[key]!==undefined)queryFilters[key]=rememberedCriteria[key];
         }
         if(inferredFilters?.location===undefined && rememberedCriteria.location!==undefined)delete queryFilters.locations;
-        if(inferredFilters?.locations===undefined && rememberedCriteria.locations!==undefined)delete queryFilters.location;
-        if(!moneyAmounts(source).length && rememberedCriteria.minPrice===undefined && rememberedCriteria.maxPrice===undefined){delete queryFilters.minPrice;delete queryFilters.maxPrice;delete queryFilters.maxPriceExclusive;}
+         if(inferredFilters?.locations===undefined && rememberedCriteria.locations!==undefined)delete queryFilters.location;
+         if (/gần\s+(?:Quận\s*1|trung tâm)|đi\s+làm\s+(?:Quận\s*1|trung tâm)/iu.test(source)) { queryFilters.locations=centralFormerDistricts; delete queryFilters.location; }
+         if(!moneyAmounts(source).length && rememberedCriteria.minPrice===undefined && rememberedCriteria.maxPrice===undefined){delete queryFilters.minPrice;delete queryFilters.maxPrice;delete queryFilters.maxPriceExclusive;}
         const aliases=formerDistrictAliases(queryFilters.location);
         if(aliases.length)queryFilters.location_aliases=aliases;
         if(genericHome(source))delete queryFilters.type;
@@ -408,13 +415,18 @@ export class AiService {
     // Nothing matches every criterion: show the closest listings instead of a bare "chưa có".
     // First keep the area and drop the budget, then keep the budget and widen the area.
     let nearestReason='';
-    if(searchPerformed && !items.length && (!related.length || (!queryFilters.location && !queryFilters.locations)) && !budgetAdjustment && !contactOnly && !input.property_id && (queryFilters.location || queryFilters.locations || queryFilters.maxPrice!==undefined)){
+    if(searchPerformed && !items.length && (!related.length || (!queryFilters.location && !queryFilters.locations)) && !budgetAdjustment && !contactOnly && !input.property_id && strictCashBudget===null && (queryFilters.location || queryFilters.locations || queryFilters.maxPrice!==undefined)){
       const {minPrice:_min,maxPrice:_max,...withoutBudget}=queryFilters;
       const {location:_location,locations:_locations,...anywhere}=queryFilters;
       const query=[standalone,...queryKeywords].join(' ');
       let near=queryFilters.maxPrice!==undefined ? await search(withoutBudget,null,referenceIds,query) : [];
       nearestReason=near.length ? (queryFilters.location || queryFilters.locations ? 'Ngoài ngân sách đã nêu' : 'Giá thấp nhất hiện có') : '';
       if(!near.length && (queryFilters.location || queryFilters.locations)){near=await search(anywhere,null,referenceIds,query);nearestReason=near.length ? 'Khác khu vực đã nêu' : '';}
+      if(!near.length){
+        const broad=Object.fromEntries(Object.entries(queryFilters).filter(([key])=>['transaction_type','type'].includes(key)));
+        near=await search(broad,null,referenceIds,query);
+        nearestReason=near.length ? 'Đã nới khu vực, diện tích hoặc số phòng ngủ' : '';
+      }
       if(nearestReason==='Giá thấp nhất hiện có')related=[];
       related=(nearestReason==='Giá thấp nhất hiện có' ? lowestPriced(near) : near.sort((left,right)=>queryFilters.maxPrice!==undefined ? (left.price??Infinity)-(right.price??Infinity) : 0).slice(0,3)).map(item=>({...item,number:undefined,relaxed_reason:nearestReason,reason:nearestReason==='Giá thấp nhất hiện có' ? nearestReason : deterministicReason(String(item.reason||'')),related:true}));
     }
@@ -465,10 +477,13 @@ export class AiService {
       }
       else if(!focusIds.length && areaAdviceQuestion(source) && !queryFilters.location && !queryFilters.locations && typeof queryFilters.maxPrice==='number')marketNote=await areaSummary({transaction_type:queryFilters.transaction_type==='Rent'?'Rent':'Sale',type:typeof queryFilters.type==='string'?queryFilters.type:undefined,maxPrice:queryFilters.maxPrice});
     }catch(error){console.warn(JSON.stringify({event:'market_summary_failed',error:error instanceof Error?error.message:'UNKNOWN'}));}
+    items=items.filter(locationTextIsConsistent);
+    related=related.filter(locationTextIsConsistent);
+    const financeNote=financeNoteForQuestion(source,items[0]?.price ?? undefined,marketNote || undefined);
     const generalKnowledge=faqRows.map((chunk,index)=>`[FAQ ${index+1}] ${chunk.header}\n${chunk.content}`).join('\n\n');
     const modelProperties=(list:Evidence[])=>list.map(item=>({...item,name:displayListingName(item.name),details:details.get(item.id)}));
     const contextBlocks=items.map((item,index)=>`[${item.number || index+1}] ${item.code || ''} ${displayListingName(item.name)} ${withFormerDistrict(item.location || '')} loại=${item.property_type || ''} giá=${priceLabel(item.price,item.price_period==='Month' || item.transaction_type==='Rent')} availability=${item.availability || 'unknown'}${details.get(item.id) ? `\nChi tiết: ${details.get(item.id)}` : ''}`).join('\n');
-    const agentMessages=[{role:'system' as const,content:assistantPrompt(customerName||undefined)},{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({question:standalone,history:sanitizedHistory,market_summary:marketNote||undefined,viewed_listing:viewedPropertyId?'Khách đang xem căn [1] trên trang chi tiết; "căn này" là căn [1].':undefined,properties:contextBlocks,general_knowledge:generalKnowledge||undefined,customer_text:source,customer_name:customerName||undefined,contact_redacted:guest && source!==input.message,injection_suspected:suspected,search_performed:searchPerformed,budget_follow_up:budgetAdjustment ? `${budgetAdjustment.direction}; ${JSON.stringify(budgetAdjustment.filters)}` : undefined})}\nEND_UNTRUSTED_DATA`}];
+     const agentMessages=[{role:'system' as const,content:assistantPrompt(customerName||undefined)},{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({question:standalone,history:sanitizedHistory,market_summary:marketNote||undefined,finance_calculation:financeNote||undefined,viewed_listing:viewedPropertyId?'Khách đang xem căn [1] trên trang chi tiết; "căn này" là căn [1].':undefined,properties:contextBlocks,general_knowledge:generalKnowledge||undefined,customer_text:source,customer_name:customerName||undefined,contact_redacted:guest && source!==input.message,injection_suspected:suspected,search_performed:searchPerformed,budget_follow_up:budgetAdjustment ? `${budgetAdjustment.direction}; ${JSON.stringify(budgetAdjustment.filters)}` : undefined})}\nEND_UNTRUSTED_DATA`}];
     const proposals:{tool:string;args_hash:string;decision:string;reason:string;rule_version:string}[]=[];
     const pendingActions:unknown[]=[];
     let bookingAction:unknown;
@@ -507,7 +522,7 @@ export class AiService {
     const compactAnswer=process.env.AI_MODEL!=='fixture';
     const generationStarted=performance.now();
     let agent=actionRequest || !compactAnswer ? await run(agentMessages) : await (() => {
-      const modelInput={question:standalone,history:sanitizedHistory,market_summary:marketNote||undefined,loan_budget:loanBudget ? `Tổng ngân sách khi vay 60%: ${priceLabel(loanBudget,false)}; giới thiệu căn trong mức này, không tự tính lại.` : undefined,viewed_listing:viewedPropertyId?'Khách đang xem căn [1] trên trang chi tiết; "căn này" là căn [1].':undefined,properties:modelProperties(items),general_knowledge:generalKnowledge||undefined,customer_text:source,customer_name:customerName||undefined,search_performed:searchPerformed,budget_follow_up:budgetAdjustment ? `${budgetAdjustment.direction}; ${JSON.stringify(budgetAdjustment.filters)}` : undefined};
+       const modelInput={question:standalone,history:sanitizedHistory,market_summary:marketNote||undefined,finance_calculation:financeNote||undefined,loan_budget:loanBudget ? `Tổng ngân sách khi vay 60%: ${priceLabel(loanBudget,false)}; giới thiệu căn trong mức này, không tự tính lại.` : undefined,viewed_listing:viewedPropertyId?'Khách đang xem căn [1] trên trang chi tiết; "căn này" là căn [1].':undefined,properties:modelProperties(items),general_knowledge:generalKnowledge||undefined,customer_text:source,customer_name:customerName||undefined,search_performed:searchPerformed,budget_follow_up:budgetAdjustment ? `${budgetAdjustment.direction}; ${JSON.stringify(budgetAdjustment.filters)}` : undefined};
       return complete(modelInput).then(model=>({text:model.reply,messages:[...agentMessages,{role:'assistant' as const,content:model.reply}],pending:[],blocked:[],steps:1}));
     })();
     timing.generate=performance.now()-generationStarted;
@@ -585,7 +600,7 @@ export class AiService {
     if(violation){
       log('final_output',result.reply,violation);
       const retryMessages=[...agentMessages,{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({regeneration:true,violation,...correctionData(violation)})}\nEND_UNTRUSTED_DATA`}];
-      agent=actionRequest || !compactAnswer ? await run(retryMessages) : await complete({question:standalone,history:sanitizedHistory,market_summary:marketNote||undefined,viewed_listing:viewedPropertyId?'Khách đang xem căn [1] trên trang chi tiết; "căn này" là căn [1].':undefined,properties:modelProperties(evidenceItems),general_knowledge:generalKnowledge||undefined,customer_text:source,customer_name:customerName||undefined,search_performed:searchPerformed,budget_follow_up:budgetAdjustment ? `${budgetAdjustment.direction}; ${JSON.stringify(budgetAdjustment.filters)}` : undefined}).then(model=>({text:model.reply,messages:[],pending:[],blocked:[],steps:1}));
+       agent=actionRequest || !compactAnswer ? await run(retryMessages) : await complete({question:standalone,history:sanitizedHistory,market_summary:marketNote||undefined,finance_calculation:financeNote||undefined,viewed_listing:viewedPropertyId?'Khách đang xem căn [1] trên trang chi tiết; "căn này" là căn [1].':undefined,properties:modelProperties(evidenceItems),general_knowledge:generalKnowledge||undefined,customer_text:source,customer_name:customerName||undefined,search_performed:searchPerformed,budget_follow_up:budgetAdjustment ? `${budgetAdjustment.direction}; ${JSON.stringify(budgetAdjustment.filters)}` : undefined}).then(model=>({text:model.reply,messages:[],pending:[],blocked:[],steps:1}));
       result.reply=discardInvalidCitations(labelMonthlyRent(normalizeCitations(sanitizeReply(agent.text || safeReply),evidenceItems),evidenceItems),evidenceItems);
       const retryViolation=this.guard.outputReason(result.reply,evidenceItems,source,guardContext);
       if(retryViolation){log('regeneration',result.reply,retryViolation);console.warn(JSON.stringify({event:'guard_block',phase:'regeneration',reason:retryViolation,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:items.map(x=>x.number??null),preview:result.reply.slice(0,300)}));blocked=true;}
@@ -644,16 +659,27 @@ export class AiService {
      const centralLocation=Array.isArray(queryFilters.locations)&&queryFilters.locations.some(value=>centralFormerDistricts.includes(String(value)));
      const locationPart=centralLocation ? 'gần trung tâm (các quận trung tâm)' : locationForReply ? `ở ${locationForReply}` : '';
      const criteriaParts=[transactionForReply && locationPart ? `${transactionForReply}, ${locationPart}` : transactionForReply || locationPart,budgetForReply,areaForReply,roomsForReply].filter(Boolean);
-     const criteriaLine=searchPerformed && input.filters===undefined && criteriaParts.length ? `Tiêu chí: ${criteriaParts.join(', ')}.\n` : '';
+       const nonTransactionParts=[locationPart,budgetForReply,areaForReply,roomsForReply].filter(Boolean);
+       const hasNonTransactionCriteria=nonTransactionParts.length>0;
+       const listingSearchTurn=showCriteriaLine({searchPerformed,propertyId:input.property_id,adviceOnly,cards:items.length,criteria:nonTransactionParts,transactionOnly:!hasNonTransactionCriteria});
+      const criteriaLine=listingSearchTurn && input.filters===undefined ? answerCriteriaLine(criteriaParts) : '';
     const modelAlreadyNoMatch=hasNoMatchReply(result.reply);
-    const followUpQuestion=budgetQuestion;
+     const followUpQuestion=budgetQuestion;
+     const financeResultPresent=financeNote && /(?:dư nợ|lợi suất|không an toàn|40%|16[,.]7|21[,.]6|4[,.]9|4,5%|5%)/iu.test(result.reply);
+     const financeSuffix=financeNote && !financeResultPresent ? `\n${financeNote}` : '';
+     const areaDeviationSuffix=/\b76\s*(?:m²|m2)\b[\s\S]{0,80}\b80\s*(?:m²|m2)\b|\b80\s*(?:m²|m2)\b[\s\S]{0,80}\b76\s*(?:m²|m2)\b/iu.test(source) ? '\n76/80 m² là thiếu 4 m², tương đương 5%; việc điều chỉnh giá hoặc hoàn tiền còn tùy điều khoản dung sai trong hợp đồng. Thực tế thường cần đo lại có biên bản và hỏi luật sư.' : '';
+     const investmentRiskLine=/đầu tư|sinh lời|rủi ro/iu.test(source) && !/(?:không có|không tồn tại)[^.!?\n]{0,40}(?:đầu tư|khoản đầu tư)[^.!?\n]{0,30}không rủi ro|không cam kết[^.!?\n]{0,30}sinh lời/iu.test(result.reply) ? '\nKhông có khoản đầu tư nào không có rủi ro và TERAVA không cam kết lợi nhuận; bạn nên kiểm tra pháp lý, quy hoạch, thanh khoản và nhờ chuyên viên tư vấn.' : '';
     const appendBudget=followUpQuestion && !/[?？]\s*$/.test(result.reply.trim()) ? `\n${followUpQuestion}` : '';
     // No listing matched: always point to the consultant, even when the model only suggested widening the search.
     const handoffLine=searchPerformed && !items.length && Object.keys(queryFilters).length>0 && input.filters===undefined && !input.property_id && !contactOnly && !ownerRequest(source) && !/chuyên viên|nhân viên tư vấn/iu.test(result.reply) ? ` Nếu chưa ưng, mình nhờ chuyên viên tư vấn tìm thêm giúp ${address} nhé.` : '';
     const nearestLine=nearestReason && related.length && !items.length ? `\nMình gửi bên dưới ${related.length} căn gần tiêu chí nhất (${nearestReason.toLocaleLowerCase('vi')}) để ${address} tham khảo nhé.${handoffLine}` : handoffLine ? `\n${handoffLine.trim()}` : '';
      const reply=(!hasDisclosure && count===0 ? `${disclosure}\n`:'')+criteriaLine+(cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatch && !modelAlreadyNoMatch ? `${noMatchReply(source)}\n` : related.length && !items.length && !modelAlreadyNoMatch ? `${noMatchReply(source).split('. ')[0]}.\n` : '')+(cheaperNoMatch || blocked && !items.length && noMatch && !modelAlreadyNoMatch ? '' : (blocked ? groundedSummary(items):result.reply))+areaToleranceSuffix+moreStatus+unsupportedSuffix+ownerSuffix+loanSuffix+bookingLine+contactLine+nearestLine+similarLine+appendBudget;
-    // Only a detail-page chat may say the customer "is viewing" a listing (also covers regenerated answers).
-    const viewingFixed=viewedPropertyId ? reply : reply.replace(/(^|[.!?\n]\s*)Bạn đang xem(?: có)?(?: các| những)? (?=(?:hai|ba|\d+)?\s*(?:căn|nhà|lô|đất))/gu,'$1Mình gợi ý ');
+      const premiseCorrection=/chưa có sổ|chưa có sổ hồng/iu.test(source) && /sẵn sổ|sổ hồng/iu.test(listingText) ? '\nTheo dữ liệu tin đăng, căn này được ghi là đã có sổ hồng; mình không thể xác nhận lời hứa của bên thứ ba. Bạn nên xem bản gốc giấy chứng nhận và kiểm tra tại cơ quan đăng ký đất đai.' : '';
+      const freshnessCorrection=/(?:bán rồi|đã bán|còn bán không|cập nhật lần cuối)/iu.test(source) && items[0]?.updated_at ? `\nMình xin lỗi vì tin có thể đã chậm so với thực tế. Dữ liệu tin đăng này cập nhật ngày ${String(items[0].updated_at).slice(0,10)}; mình có thể nhờ chuyên viên kiểm tra lại và gửi các căn tương tự.` : '';
+      const externalSiteCorrection=/(?:bên khác|website khác|trang khác|nơi khác)/iu.test(source) && !/không thể kiểm tra|không kiểm chứng|không xác minh/iu.test(result.reply) ? '\nTERAVA không thể kiểm tra hoặc xác minh trực tiếp các tin đăng trên website khác; chuyên viên có thể xác nhận lại giá với chủ nhà.' : '';
+      const enrichedReply=dedupeNoMatchReply(reply+areaDeviationSuffix+financeSuffix+investmentRiskLine+premiseCorrection+freshnessCorrection+externalSiteCorrection);
+     // Only a detail-page chat may say the customer "is viewing" a listing (also covers regenerated answers).
+     const viewingFixed=viewedPropertyId ? enrichedReply : enrichedReply.replace(/(^|[.!?\n]\s*)Bạn đang xem(?: có)?(?: các| những)? (?=(?:hai|ba|\d+)?\s*(?:căn|nhà|lô|đất))/gu,'$1Mình gợi ý ');
     // "tầng 12 của tòa nhà có 12 tầng": the unit floor never tells how tall the building is, unless the listing says so.
     const floorsFixed=viewingFixed.replace(/\s*(?:của|trong)\s+tòa(?: nhà)?(?: có)?\s+(\d+)\s+tầng(?=[\s,.;])/giu,(match,floors)=>evidenceItems.some(item=>item.property_type==='Apartment') || !new RegExp(`${floors}\\s*tầng`,'iu').test(listingText.replace(/tầng\s*\d+/giu,'')) ? '' : match);
     // Imported apartment details write the unit floor as "12 tầng", so for apartments the clause is always dropped.

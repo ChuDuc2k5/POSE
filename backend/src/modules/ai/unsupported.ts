@@ -23,7 +23,29 @@ export function unsupportedCriteria(text: string): string[] {
 
 // Accent folding turns "vậy" into "vay", so loan wording is matched on the accented text.
 export function loanWords(text: string): boolean {
-  return /(?<![\p{L}])(?:vay|khoản vay|trả góp)(?![\p{L}])/iu.test(text.normalize('NFC'));
+  const source = text.normalize('NFC');
+  for (const match of source.matchAll(/(?<![\p{L}])(?:vay|khoản vay|trả góp)(?![\p{L}])/giu)) {
+    const index = match.index || 0;
+    const before = source.slice(Math.max(0, index - 24), index);
+    if (!/(?:không|chẳng|chưa)\s*(?:muốn|cần|phải)?\s*$/iu.test(before)) return true;
+  }
+  return false;
+}
+
+export function noLoanWords(text: string): boolean {
+  return /(?:không|chẳng|chưa)\s*(?:muốn|cần|phải)?\s*(?:vay|khoản vay|trả góp)/iu.test(text.normalize('NFC'));
+}
+
+/** Cash creates a 60%-loan budget only when no purchase price is already stated. */
+export function loanBudget(text: string): number | null {
+  if (!loanWords(text)) return null;
+  const purchasePrice = /(?:căn(?:\s+hộ)?|nhà|đất|giá)[^\d]{0,20}[\d.,]+\s*(?:tỷ|tỉ|ty|triệu|tr)(?![\p{L}])/iu.test(text);
+  if (purchasePrice) return null;
+  const cash = text.match(/(?:có|sẵn|tiền mặt|tự có|trong tay|vốn|tài chính)[^\d]{0,24}([\d.,]+\s*(?:tỷ|tỉ|ty|triệu|tr))(?![\p{L}])/iu)?.[1];
+  if (!cash) return null;
+  const value = Number(cash.replace(/\s/g, '').replace(',', '.').replace(/(tỷ|tỉ|ty)$/iu, ''));
+  const amount = /(?:tỷ|tỉ|ty)$/iu.test(cash) ? value * 1e9 : value * 1e6;
+  return Number.isFinite(amount) ? Math.round(amount / 0.4 / 100_000_000) * 100_000_000 : null;
 }
 
 export function contactRequest(text: string): boolean {
@@ -66,6 +88,16 @@ export function noMatchReply(text: string): string {
 
 export function hasNoMatchReply(text: string): boolean {
   return /(?:chưa\s+(?:tìm\s+thấy|có)|không\s+có\s+(?:căn|bất động sản)|không\s+tìm\s+thấy|no\s+match)/iu.test(text);
+}
+
+export function dedupeNoMatchReply(text: string): string {
+  let seen = false;
+  return text.split(/\n+/u).filter(block => {
+    if (!hasNoMatchReply(block)) return true;
+    if (seen) return false;
+    seen = true;
+    return true;
+  }).join('\n');
 }
 
 export function cheaperFallbackReply(items: { number?: number; name?: string; location?: string; price?: number | null }[], area?: string, nearby: string[] = []): string {

@@ -31,14 +31,20 @@ const concreteFeatures: [RegExp, string][] = [
   [/thang may/iu, 'thang máy'],
   [/giam gia|ngop|cat lo|ha gia|chiet khau|gia tot|chi con/iu, 'giảm giá'],
 ];
-concreteFeatures.push([/o to vao|xe hoi|hem xe hoi/iu, '\u0111\u1eadu \u00f4 t\u00f4']);
+concreteFeatures.push([/o to vao|xe hoi|hem xe hoi/iu, 'đậu ô tô']);
 export function concreteSearchKeywords(message: string) {
   const text = fold(message);
   return [...new Set(concreteFeatures.filter(([pattern]) => pattern.test(text)).map(([, keyword]) => keyword))];
 }
+const informationQuestion = (text: string) => {
+  const listingRequest = /(?:tim|kiem|muon mua|can mua|muon thue|can thue|goi y mua|goi y thue|co (?:can|nha|dat|bat dong san) nao)/iu.test(text);
+  if (listingRequest) return false;
+  return /(?:neu[\s\S]{0,80}thi|co chac|co dam|ban se[\s\S]{0,40}the nao|dua vao dau|nen tin|co phai[\s\S]{0,80}khong|khong muon[\s\S]{0,30}rui ro|chac chan sinh loi|tinh[\s\S]{0,40}(?:tien|chi phi|lai suat|khoan vay)|bao nhieu[\s\S]{0,40}(?:tien|chi phi|lai suat|khoan vay)|quy hoach|the chap|chu so huu|dat coc|hoan lai|dien tich[\s\S]{0,40}(?:hop dong|thuc te)|thue phi|con trong|cap nhat|du lieu[\s\S]{0,40}(?:kiem tra|thuc te)|xu ly[\s\S]{0,40}(?:the nao|ra sao))/iu.test(text);
+};
 export function adviceOrServiceQuestion(message: string) {
   const text = fold(message);
   if (/^hien tai ben minh co nhung (?:can|can ho|nha|bat dong san) nao dang (?:cho thue|ban)\s*\??$/iu.test(text)) return true;
+  if (informationQuestion(text)) return true;
   // Process or advice wording is advice even when it mentions buying ("mua nhà lần đầu thì bắt đầu từ đâu").
   if (/tu van(?: giup)?|bat dau tu dau|thu tuc|giay to|lam (?:the nao|sao)|nen .+ hay .+/iu.test(text)
     && !/(?:co can|(?:can|can ho|chung cu|nha|nha pho|dat|dat nen|lo|lo dat|phong|phong tro|biet thu|van phong|bat dong san) nao)/iu.test(text)) return true;
@@ -47,6 +53,11 @@ export function adviceOrServiceQuestion(message: string) {
     && !/(?:co can|(?:can|can ho|chung cu|nha|nha pho|dat|dat nen|lo|lo dat|phong|phong tro|biet thu|van phong|bat dong san) nao|tim|mua|thue).*(?:duoc khong|co khong)/iu.test(text)
     // "Tôi muốn thuê nhà trong 6 tháng, có hỗ trợ hợp đồng ngắn hạn không?" also wants listings, with the FAQ.
     && !/(?:muon|can|dang tim) (?:thue|mua) (?:nha|can|chung cu|phong|dat|mat bang|van phong)/iu.test(text);
+}
+export function historyReferenceQuestion(message: string, history: { role: string; content: string }[]) {
+  const text = fold(message);
+  if (!history.some(turn => turn.role === 'assistant' && /(?:can|nha|lo|danh sach|gioi thieu|\[\d+\])/iu.test(fold(turn.content)))) return false;
+  return /(?:can vua gioi thieu|ba can|bon can|cac can tren|nhung can tren|c[aă]n phia tren|nhung can vua)/iu.test(text);
 }
 export function genericSearchQuestion(message: string) {
   const text = fold(message);
@@ -206,6 +217,7 @@ export function clarificationFor(message: string, history: { role: string; conte
   const ownerText=message.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').toLowerCase();
   if (/(?:cho\s+thue\s+(?:nha|can)|dang\s+tin|tim\s+nguoi\s+thue|ky\s+gui|ban\s+nha\s+cua\s+toi|muon\s+cho\s+thue|(?:muon|can)\s+ban\s+(?:nha|can|dat|lo)|ban\s+nha\s+qua|nho\s+ban|phi\s+moi\s+gioi|hoa\s+hong)/u.test(ownerText)) return { needed: false, question: null, options: [] };
   if (adviceOrServiceQuestion(message)) return { needed: false, question: null, options: [] };
+  if (historyReferenceQuestion(message, history)) return { needed: false, question: null, options: [] };
   if (isMoreRequest(message)) return { needed: false, question: null, options: [] };
   // A named listing ("Đặt lịch xem căn RVL-…") or a booking/saving request is never a new search.
   // A question about the listing just discussed ("Tiền cọc mấy tháng?") is answered from that listing.

@@ -1,4 +1,5 @@
 import { moneyAmounts } from './money.js';
+import { loanWords, noLoanWords } from './unsupported.js';
 
 export type InferredSearch = { location?: string; locations?: string[]; location_aliases?: string[]; type?: string; minPrice?: number; maxPrice?: number; maxPriceExclusive?: boolean; minArea?: number; maxArea?: number; bedrooms?: number; transaction_type?: 'Sale'|'Rent'; keywords?: string[] };
 export const centralFormerDistricts = ['Quận 1', 'Quận 2', 'Quận 3', 'Quận 4', 'Quận 5', 'Quận 7', 'Quận 10', 'Quận Bình Thạnh', 'Phú Nhuận'];
@@ -117,9 +118,33 @@ export function inferSearch(text: string): InferredSearch | null {
     if (/\d\s*(?:tỷ|tỉ)(?![\p{L}])/iu.test(text)) filters.transaction_type = 'Sale';
     else if (/(?:triệu|tr)\s*(?:\/|một|mỗi)\s*tháng/iu.test(text)) filters.transaction_type = 'Rent';
   }
-  // "có (khoảng) 2 tỷ tiền mặt… vay thêm": the amount is cash in hand; the ceiling assumes a ~60% loan.
-  const cash = /\bvay\b/i.test(normalized) ? moneyAmounts(text)[0] : undefined;
-  if (cash) { filters.maxPrice = Math.round(cash * 2.5); delete filters.minPrice; }
+  const statedCash = text.match(/(?:có|sẵn|tiền mặt|tự có|trong tay|vốn|tài chính)[^\d]{0,24}([\d.,]+\s*(?:tỷ|tỉ|ty|triệu|tr))(?![\p{L}])/iu)?.[1];
+  const cash = statedCash ? moneyAmounts(statedCash)[0] : undefined;
+  const purchasePriceMatch = text.match(/(?:căn|nhà|đất|giá)[^\d]{0,20}([\d.,]+\s*(?:tỷ|tỉ|ty|triệu|tr))(?![\p{L}])/iu);
+  const purchasePrice = cash && purchasePriceMatch && (purchasePriceMatch.index || 0) > (statedCash ? text.indexOf(statedCash) : -1) ? moneyAmounts(purchasePriceMatch[1])[0] : undefined;
+  const statedLoan = text.match(/(?:vay|khoản vay|trả góp)[^\d]{0,20}([\d.,]+\s*(?:tỷ|tỉ|ty|triệu|tr))(?![\p{L}])/iu)?.[1];
+  const loanAmount = statedLoan ? moneyAmounts(statedLoan)[0] : undefined;
+  // A purchase price is a price, cash is equity, and an amount after "vay" is debt.
+  // Never turn the debt amount into cash, and never infer a 60%-loan budget after
+  // the customer explicitly says that borrowing is not wanted.
+  if (purchasePrice) {
+    filters.maxPrice = purchasePrice;
+    delete filters.minPrice;
+    filters.maxPriceExclusive = false;
+  } else if (loanWords(text) && cash && !loanAmount) {
+    filters.maxPrice = Math.round(cash * 2.5);
+    delete filters.minPrice;
+    filters.maxPriceExclusive = false;
+  } else if (loanWords(text) && loanAmount && !cash) {
+    delete filters.minPrice;
+    delete filters.maxPrice;
+    delete filters.maxPriceExclusive;
+  }
+  if (noLoanWords(text) && cash) {
+    filters.maxPrice = cash;
+    delete filters.minPrice;
+    filters.maxPriceExclusive = true;
+  }
   if (filters.minPrice !== undefined && filters.maxPrice !== undefined && filters.minPrice > filters.maxPrice) delete filters.minPrice;
   return filters;
 }
