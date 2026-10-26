@@ -1,10 +1,7 @@
-import type { Metadata } from 'next';
+import { redirect } from 'next/navigation';
 import { requireCrmSession } from '@/lib/crm-session';
-import { appointmentLocal } from '@/lib/appointments';
-import { CrmPage } from '@/components/crm/crm-workspace';
-import { AppointmentWorkspace } from '@/components/appointments/appointment-workspace';
-export const metadata: Metadata = { title: 'Lịch hẹn | TERAVA', robots: { index: false, follow: false } };
-export default async function AppointmentsPage() {
+// Kept so old links keep working: Sales use /sales/appointments, Admin uses /admin/appointments.
+export default async function AppointmentsRedirectPage() {
   const identity = await requireCrmSession('/appointments');
-  return <CrmPage {...identity}><AppointmentWorkspace today={appointmentLocal(new Date().toISOString()).slice(0, 10)}/></CrmPage>;
+  redirect(identity.role === 'Admin' ? '/admin/appointments' : '/sales/appointments');
 }

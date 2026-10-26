@@ -157,6 +157,7 @@ try {
   check((await fetch(`${origin}/account`, { redirect: 'manual' })).status === 307, 'Account page must be protected on the server');
   check((await protectedPage('/admin')).headers.get('location')?.endsWith('/forbidden'), 'User must not open admin page directly');
   check((await protectedPage('/sales')).headers.get('location')?.endsWith('/forbidden'), 'User must not open sales page directly');
+  for (const page of ['/sales/leads', '/sales/appointments', '/sales/reports', '/admin/appointments']) check((await protectedPage(page)).headers.get('location')?.endsWith('/forbidden'), `User must not open ${page}`);
   check((await fetch(`${origin}/api/workspace/admin`, { headers: { Cookie: cookie } })).status === 403, 'User must not access admin BFF');
   check((await fetch(`${origin}/api/workspace/sales`)).status === 401, 'Anonymous workspace API must be denied');
   user.user_metadata.role = 'Admin';
@@ -167,11 +168,21 @@ try {
   check((await protectedPage('/customer')).headers.get('location')?.endsWith('/forbidden'), 'Sales cannot open customer-only homepage');
   check((await (await post('signin',valid)).json()).destination === '/', 'Sales login returns to the homepage');
   check((await protectedPage('/sales')).status === 200, 'Sales can open sales page');
+  for (const page of ['leads', 'appointments', 'reports']) {
+    check((await protectedPage(`/sales/${page}`)).status === 200, `Sales can open /sales/${page}`);
+    check((await protectedPage(`/${page}`)).headers.get('location')?.endsWith(`/sales/${page}`), `Old /${page} sends Sales to /sales/${page}`);
+    check((await protectedPage(`/admin/${page}`)).headers.get('location')?.endsWith('/forbidden'), `Sales cannot open /admin/${page}`);
+  }
   check((await protectedPage('/admin')).headers.get('location')?.endsWith('/forbidden'), 'Sales cannot open admin page');
   accessRole = 'Admin';
   await checkGuestEntryRedirects('/');
   check((await (await post('signin',valid)).json()).destination === '/', 'Admin login returns to the homepage');
   check((await protectedPage('/admin')).status === 200, 'Admin can open admin page');
+  check((await protectedPage('/sales')).status === 200, 'Admin can open sales page');
+  for (const page of ['leads', 'appointments', 'reports']) {
+    check((await protectedPage(`/${page}`)).headers.get('location')?.endsWith(`/admin/${page}`), `Old /${page} sends Admin to /admin/${page}`);
+    check((await protectedPage(`/sales/${page}`)).status === 200, `Admin can open /sales/${page}`);
+  }
   accessRole = 'User';
   check((await protectedPage('/admin')).headers.get('location')?.endsWith('/forbidden'), 'Role downgrade must take effect immediately');
   const refreshed = await fetch(`${origin}/api/auth/me`, { headers: { Cookie: 'pose-refresh=fixture-refresh' } });

@@ -11,8 +11,8 @@ let chrome;
 for(const candidate of [process.env.CHROME_PATH,process.env.PROGRAMFILES&&join(process.env.PROGRAMFILES,'Google/Chrome/Application/chrome.exe'),process.env['PROGRAMFILES(X86)']&&join(process.env['PROGRAMFILES(X86)'],'Google/Chrome/Application/chrome.exe')].filter(Boolean)){try{await access(candidate);chrome=candidate;break;}catch{}}
 assert.ok(chrome,'Chrome executable required');
 const root=join(tmpdir(),'pose-admin-shell');await mkdir(root,{recursive:true});
-const routes=['/admin?kind=properties','/admin?kind=projects','/admin?kind=subdivisions','/admin/inquiries','/admin/leads','/admin/campaigns','/admin/calls','/admin/ai-dashboard','/admin/sales'];
-const order=['Sản phẩm','Dự án','Phân khu','Yêu cầu tư vấn','Quản lý Lead','Báo cáo Lead','Lịch hẹn','Chiến dịch gọi','Cuộc gọi','AI Platform','Quản lý Sales'];
+const routes=['/admin?kind=properties','/admin?kind=projects','/admin?kind=subdivisions','/admin/inquiries','/admin/leads','/admin/reports','/admin/appointments','/admin/campaigns','/admin/calls','/admin/ai-dashboard','/admin/sales'];
+const order=['Sản phẩm','Dự án','Phân khu','Yêu cầu tư vấn','Quản lý Lead','Không gian Sales','Báo cáo Lead','Lịch hẹn','Chiến dịch gọi','Cuộc gọi','AI Platform','Quản lý Sales'];
 let server,child,ws,send,checks=0;const problems=[];let current='';
 const check=(value,label)=>{assert.ok(value,label);checks++;};
 try{
@@ -37,10 +37,10 @@ try{
  await send('Runtime.enable');await send('Log.enable');
  await send('Page.enable');
  // The discovery fixture has no M04/M11 routes; answer them in their real shapes.
- const stubs=[[/\/api\/admin\/sales\?/,{items:[],total:0,page:1,pageSize:20,stats:{total:0,active:0,suspended:0}}],[/\/api\/leads\/options/,{sales:[]}],[/\/api\/leads\/property-owners/,{items:[],total:0,page:1,pageSize:20}],[/\/api\/leads\?/,{items:[],total:0,page:1,pageSize:20,stats:{total:0,hot:0,warm:0,cold:0,unrated:0,unassigned:0}}]];
+const stubs=[[/\/api\/admin\/sales\?/,{items:[],total:0,page:1,pageSize:20,stats:{total:0,active:0,suspended:0}}],[/\/api\/leads\/options/,{sales:[]}],[/\/api\/leads\/property-owners/,{items:[],total:0,page:1,pageSize:20}],[/\/api\/leads\?/,{items:[],total:0,page:1,pageSize:20,stats:{total:0,hot:0,warm:0,cold:0,unrated:0,unassigned:0}}],[/\/api\/appointments\/options(?:\?|$)/,{items:[]}],[/\/api\/appointments\?/,{items:[],total:0,page:1,pageSize:12,role:'Admin'}],[/\/api\/reports\/options(?:\?|$)/,{role:'Admin',sales:[]}],[/\/api\/reports\/leads\?/, {stats:{total:0,converted:0,unassigned:0},statuses:[{key:'NEW',count:0},{key:'CONTACTED',count:0},{key:'QUALIFIED',count:0},{key:'FOLLOW_UP',count:0},{key:'CONVERTED',count:0},{key:'LOST',count:0}],temperatures:[{key:'HOT',count:0},{key:'WARM',count:0},{key:'COLD',count:0},{key:'UNRATED',count:0}],trend:[],bucket:'day',timezone:'Asia/Ho_Chi_Minh',generated_at:'2026-10-26T00:00:00.000Z',filters:{date_from:'2026-10-01',date_to:'2026-10-26',archived:'all'},scope:{role:'Admin'}}]];
  ws.addEventListener('message',({data})=>{const m=JSON.parse(data);if(m.method!=='Fetch.requestPaused')return;const body=stubs.find(([pattern])=>pattern.test(m.params.request.url))?.[1];
   void send(body?'Fetch.fulfillRequest':'Fetch.continueRequest',body?{requestId:m.params.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'application/json'}],body:Buffer.from(JSON.stringify(body)).toString('base64')}:{requestId:m.params.requestId});});
- await send('Fetch.enable',{patterns:[{urlPattern:'*/api/admin/sales?*',requestStage:'Request'},{urlPattern:'*/api/leads*',requestStage:'Request'}]});await send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
+ await send('Fetch.enable',{patterns:[{urlPattern:'*/api/admin/sales?*',requestStage:'Request'},{urlPattern:'*/api/leads*',requestStage:'Request'},{urlPattern:'*/api/appointments*',requestStage:'Request'},{urlPattern:'*/api/reports*',requestStage:'Request'}]});await send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
 
  await open('/');await wait(`document.querySelectorAll('[class*="propertyCard"] a[href^="/properties/"]').length>0`,'catalog listings on the landing');
  const landing=await evaluate(`[...document.querySelectorAll('[class*="propertyCard"]')].map(card=>!!card.querySelector('img'))`);
@@ -67,10 +67,11 @@ try{
  await open('/');await wait(`!!document.querySelector('.account-trigger')`,'account menu on the homepage');
  await evaluate(`document.querySelector('.account-trigger').click()`);await wait(`!!document.querySelector('.account-menu')`,'account menu opens');
  const menu=await evaluate(`[...document.querySelectorAll('.account-menu [role=menuitem]')].map(a=>a.textContent.trim()+'>'+(a.getAttribute('href')||''))`);
- check(menu.includes('Admin dashboard>/admin')&&!menu.some(item=>item.startsWith('Quản lý Lead')),`Admin account menu links to the dashboard (${menu.join(', ')})`);
+ check(menu.includes('Admin dashboard>/admin')&&menu.includes('Không gian Sales>/sales')&&!menu.some(item=>item.startsWith('Quản lý Lead')),`Admin account menu links to both workspaces (${menu.join(', ')})`);
  check(!(await evaluate(`document.querySelector('.account-trigger').textContent`)).includes('Tài khoản'),'Account menu shows the user name');
  for(const route of routes){
   await open(route);await wait(`!!document.querySelector('.admin-sidebar')`,route+' sidebar');
+  if(route===routes[0])check(await evaluate(`document.querySelector('.admin-sidebar a[href="/sales"]')?.getAttribute('href')==='/sales'`),'Admin sidebar switches to the Sales workspace');
   const shape=await evaluate(`({sidebars:document.querySelectorAll('.admin-sidebar').length,legacy:document.querySelectorAll('.catalog-sidebar:not(.admin-sidebar)').length,topbars:document.querySelectorAll('.catalog-topbar').length,items:[...document.querySelectorAll('.admin-sidebar nav a')].map(a=>a.textContent.replace(/\\d+/g,'').trim()),active:[...document.querySelectorAll('.admin-sidebar nav a[aria-current="page"]')].map(a=>a.getAttribute('href'))})`);
   check(shape.sidebars===1&&shape.legacy===0&&shape.topbars===1,`${route}: one sidebar and one header strip ${JSON.stringify(shape)}`);
   check(JSON.stringify(shape.items)===JSON.stringify(order),`${route}: sidebar items in order (${shape.items.join(', ')})`);
@@ -83,6 +84,11 @@ try{
  await evaluate(`document.querySelector('.admin-sidebar a[href="/admin?kind=projects"]').click()`);
  await wait(`location.search==='?kind=projects'&&document.querySelector('.admin-sidebar a[aria-current="page"]')?.getAttribute('href')==='/admin?kind=projects'`);
  check(await evaluate(`window.__sidebar?.isConnected`),'Sidebar node survives return to the catalog');
+ for(const href of ['/admin/reports','/admin/appointments','/admin/leads']){
+  await evaluate(`document.querySelector('.admin-sidebar a[href="${href}"]').click()`);
+  await wait(`location.pathname==='${href}'&&document.querySelector('.admin-sidebar a[aria-current="page"]')?.getAttribute('href')==='${href}'`,href+' active in admin shell');
+  check(await evaluate(`window.__sidebar?.isConnected`),`${href} keeps the admin sidebar`);
+ }
  await send('Emulation.setDeviceMetricsOverride',{width:375,height:800,deviceScaleFactor:1,mobile:true});await delay(300);
  check(await evaluate(`document.documentElement.scrollWidth<=innerWidth`),'No horizontal overflow at 375px');
  await evaluate(`document.querySelector('.admin-menu-button').click()`);

@@ -75,19 +75,19 @@ function WorkspaceShell({ children }: { children: ReactNode }) {
     return () => { cancelAnimationFrame(focusFrame); document.body.style.overflow = overflow; document.removeEventListener('keydown', keyboard); button?.focus({ preventScroll: true }); };
   }, [open]);
   const links = [
-    { href: '/leads', label: 'Quản lý Lead', module: 'leads', Icon: Contact },
+    { href: '/sales/leads', label: 'Quản lý Lead', module: 'leads', Icon: Contact },
     { href: '/sales', label: 'Không gian Sales', module: 'sales', Icon: BriefcaseBusiness },
-    { href: '/appointments', label: 'Lịch hẹn', module: null, Icon: CalendarDays },
-    { href: '/reports', label: 'Báo cáo Lead', module: null, Icon: ChartColumn },
+    { href: '/sales/appointments', label: 'Lịch hẹn', module: null, Icon: CalendarDays },
+    { href: '/sales/reports', label: 'Báo cáo Lead', module: null, Icon: ChartColumn },
   ] as const;
-  const title = pathname === '/appointments' ? 'Lịch hẹn' : pathname === '/reports' ? 'Báo cáo Lead' : pathname === '/sales' ? 'Không gian Sales' : 'Quản lý Lead';
+  const title = pathname.endsWith('/appointments') ? 'Lịch hẹn' : pathname.endsWith('/reports') ? 'Báo cáo Lead' : pathname === '/sales' ? 'Không gian Sales' : 'Quản lý Lead';
   return <div className={s.workspace}>
     {open && <button type="button" className={s.backdrop} tabIndex={-1} onClick={close} aria-label="Đóng menu điều hướng"/>}
     <aside ref={sidebar} id="lead-sales-sidebar" className={`${s.sidebar} ${open ? s.sidebarOpen : ''}`} data-crm-sidebar role={open ? 'dialog' : undefined} aria-modal={open || undefined} aria-label="Menu Lead và Sales">
       <div className={s.sidebarBrand}><Brand light={false} href="/"/><button type="button" className={s.closeMenu} onClick={close} aria-label="Đóng menu"><X size={19}/></button></div>
       <p className={s.sidebarLabel}>KHÔNG GIAN LÀM VIỆC</p>
       <nav className={s.navigation} aria-label="Điều hướng Lead và Sales">{links.map(({ href, label, module, Icon }) => <Link key={href} href={href} prefetch className={pathname === href ? s.active : ''} aria-current={pathname === href ? 'page' : undefined} onClick={close} onPointerEnter={() => { if (module) void store.prefetch(module); }} onFocus={() => { if (module) void store.prefetch(module); }}><Icon size={19} aria-hidden="true"/><span>{label}</span><ArrowRight size={15} aria-hidden="true"/></Link>)}</nav>
-      <div className={s.sidebarBottom}><Link href="/account" onClick={close}><UserRound size={17} aria-hidden="true"/>Hồ sơ cá nhân<ArrowRight size={14} aria-hidden="true"/></Link><Link href="/" onClick={close}><Home size={17} aria-hidden="true"/>Trang chủ<ArrowRight size={14} aria-hidden="true"/></Link></div>
+      <div className={s.sidebarBottom}>{role === 'Admin' && <Link href="/admin" onClick={close}><BriefcaseBusiness size={17} aria-hidden="true"/>Về trang quản trị<ArrowRight size={14} aria-hidden="true"/></Link>}<Link href="/account" onClick={close}><UserRound size={17} aria-hidden="true"/>Hồ sơ cá nhân<ArrowRight size={14} aria-hidden="true"/></Link><Link href="/" onClick={close}><Home size={17} aria-hidden="true"/>Trang chủ<ArrowRight size={14} aria-hidden="true"/></Link></div>
     </aside>
     <div className={s.main} inert={open}>
       <header className={s.topbar} data-crm-header><div className={s.topbarStart}><button ref={trigger} type="button" className={s.menuButton} onClick={() => setOpen(true)} aria-expanded={open} aria-controls="lead-sales-sidebar" aria-label="Mở menu"><Menu size={20}/></button><div className={s.breadcrumb} aria-label="Đường dẫn"><span>Không gian làm việc</span><ChevronRight size={13} aria-hidden="true"/><strong>{title}</strong></div></div><AccountDropdown role={role} name={name}/></header>
