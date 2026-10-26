@@ -106,14 +106,21 @@ export type Evidence={id:string;code:string;name:string;price:number|null;availa
 const clauses=(text:string)=>text.split(/\n|[;!?]|(?<!\d)[.,](?!\d)/).filter(Boolean);
 function negated(text:string,index:number){
   const prefix=text.slice(Math.max(0,index-90),index).split(/nhưng|tuy nhiên|\bbut\b|\bhowever\b/i).at(-1) || '';
-  if(/(?:không|chưa) (?:có (?:thông tin(?: xác nhận)?|xác nhận)|thể cung cấp|thể chia sẻ|được phép (?:cung cấp|chia sẻ)).{0,65}$/i.test(prefix))return true;
-  return /(?:không|chưa|chẳng|not|never|cannot|no longer)(?:\s+(?:thể|được|có|xác nhận|đưa ra|tư vấn|hỗ trợ|nên|cần|còn|đang|sẵn|sàng|bất kỳ|any|confirm|offer|provide|make|currently|a|the|able|to|legal|payment|or|pháp lý|thanh toán|hoặc)){0,12}\s*$/i.test(prefix);
+  if(/(?:không|chưa)\s+(?:có\s+(?:thông tin(?:\s+xác nhận)?|xác nhận)|thể\s+(?:cung cấp|chia sẻ)|được phép\s+(?:cung cấp|chia sẻ))\s*$/iu.test(prefix))return true;
+  if(/(?:không|chưa)\s+có\s+(?:thông tin(?:\s+xác nhận)?|xác nhận)(?:\s+\p{L}+){0,12}\s*$/iu.test(prefix))return true;
+  if(/(?:không|chưa|chẳng)\s*$/iu.test(prefix))return true;
+  if(/không\s+thể(?:\s+\p{L}+){0,12}\s*$/iu.test(prefix))return true;
+  if(/không\s+còn\s*$/iu.test(prefix))return true;
+  if(/không\s+có(?:\s+\p{L}+){0,8}\s+nào(?:\s+\p{L}+){0,12}\s*$/iu.test(prefix))return true;
+  if(/không\s+phải\s+lúc\s+nào\s+cũng\s*$/iu.test(prefix))return true;
+  if(/không\s+(?:cam\s+kết|bảo\s+đảm|chắc\s+chắn)\s*$/iu.test(prefix))return true;
+  return /có\s+thể\s+chỉ(?:\s+được)?\s*$/iu.test(prefix);
 }
 // `grounded.legal`: the cited listing text itself states its papers (sổ hồng, sẵn sổ…).
 // `grounded.practice`: general FAQ knowledge was supplied, so usual-practice advice about deposits,
 // payments and percentages is allowed. Promises ("cam kết"), and asking to pay now are never allowed.
 function commitment(text:string,grounded:{legal?:boolean;practice?:boolean}={}){
-  const patterns:[RegExp,'strict'|'legal'|'practice'][]=[[/cam kết|(?<!(?:để|giúp|nhằm|nhằm mục đích)\s)(?:đảm bảo|bảo đảm)(?!\s+(?:quốc phòng|an ninh|quyền lợi))|guarantee/gi,'strict'],[/(?:pháp lý|sổ đỏ|sổ hồng|legal).{0,30}(?:đầy đủ|hợp lệ|hoàn chỉnh|an toàn|approved)/gi,'legal'],[/(?:có|được cấp|sở hữu).{0,20}(?:sổ đỏ|sổ hồng|giấy phép)/gi,'legal'],[/(?:đã có|đầy đủ|hợp lệ).{0,20}(?:pháp lý|sổ đỏ|sổ hồng)/gi,'legal'],[/(?:có|được|sẽ|áp dụng|tặng|giảm giá|chiết khấu).{0,30}(?:khuyến mãi|khuyến mại|ưu đãi|miễn phí|\d+\s*%)/gi,'practice'],[/(?:hãy|vui lòng|cần|phải|có thể|nên).{0,30}(?:thanh toán|chuyển khoản|đặt cọc)/gi,'practice'],[/(?:thanh toán|chuyển khoản|đặt cọc).{0,30}(?:ngay|tài khoản|cho tôi|cho TERAVA)/gi,'strict']];
+  const patterns:[RegExp,'strict'|'legal'|'practice'][]=[[/(?<!\p{L})(?:cam kết|(?<!(?:để|giúp|nhằm|nhằm mục đích)\s)(?:đảm bảo|bảo đảm)|guarantee)(?!\p{L})(?!\s+(?:quốc phòng|an ninh|quyền lợi))/giu,'strict'],[/(?<!\p{L})chắc chắn sinh lời(?!\p{L})/giu,'strict'],[/(?:pháp lý|sổ đỏ|sổ hồng|legal).{0,30}(?:đầy đủ|hợp lệ|hoàn chỉnh|an toàn|approved)/giu,'legal'],[/(?:có|được cấp|sở hữu).{0,20}(?:sổ đỏ|sổ hồng|giấy phép)/giu,'legal'],[/(?:đã có|đầy đủ|hợp lệ).{0,20}(?:pháp lý|sổ đỏ|sổ hồng)/giu,'legal'],[/(?:có|được|sẽ|áp dụng|tặng|giảm giá|chiết khấu).{0,30}(?:khuyến mãi|khuyến mại|ưu đãi|miễn phí|\d+\s*%)/giu,'practice'],[/(?:hãy|vui lòng|cần|phải|có thể|nên).{0,30}(?:thanh toán|chuyển khoản|đặt cọc)/giu,'practice'],[/(?:thanh toán|chuyển khoản|đặt cọc).{0,30}(?:ngay|tài khoản|cho tôi|cho TERAVA)/giu,'strict']];
   // Advice from the FAQ is general, never a request about this listing right now.
   const generalPractice=!/(?:căn|nhà|lô|đất) này|ngay|hôm nay/iu.test(text);
   // "Chưa có căn … đã có sổ hồng" restates a search criterion, not a claim about a listing.
@@ -141,7 +148,7 @@ function moneyText(text:string,evidence:Evidence[]){
   for(const e of evidence)result=result.replace(new RegExp(`(?<![a-z0-9_-])${e.code.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?![a-z0-9_-])`,'gi'),'');
   return result;
 }
-export function outputReason(reply:string,evidence:Evidence[],customerText='',context?:{retrievalFound?:boolean;faqOnly?:boolean;filterAmounts?:number[];previousPrices?:number[];sourceText?:string;listingText?:string;practice?:boolean}) {
+export function outputReason(reply:string,evidence:Evidence[],customerText='',context?:{retrievalFound?:boolean;faqOnly?:boolean;filterAmounts?:number[];previousPrices?:number[];financeAmounts?:number[];financeRanges?:[number,number][];financePresent?:boolean;faqEvidence?:boolean;sourceText?:string;listingText?:string;practice?:boolean}) {
   const returned=new Set(evidence.map(e=>e.number).filter((n):n is number=>typeof n==='number'));
   for(const match of reply.matchAll(/\[(\d+)\]/g))if(returned.size&&!returned.has(Number(match[1])))return 'INVALID_CITATION';
   const customerAmounts=moneyAmounts(customerText);
@@ -149,13 +156,17 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
   const honestNoData=/(?:chưa có(?:\s+căn)?|hiện chưa có căn|không có căn|chưa tìm thấy căn|chưa có .*?phù hợp|chưa có (?:thông tin|dữ liệu)|chưa được cung cấp|không có dữ liệu)/iu.test(reply);
   const effectiveLimits=new Set([...(context?.filterAmounts || []), ...(context?.previousPrices || [])]);
   const onlyLimits=ungroundedReplyAmounts.every(amount=>effectiveLimits.has(amount));
-  if(context?.retrievalFound===false&&!evidence.length && (/\b(?:rv[-_][a-z0-9]+|q\d+[-_][a-z0-9]+)\b/i.test(reply)||ungroundedReplyAmounts.length&&!onlyLimits||(/\b(?:available|còn bán|đang mở bán|có sẵn)\b/i.test(reply))||(/\bcho thuê\b/i.test(reply)&&!honestNoData)))return 'NO_ANSWER_UNGROUNDED';
+  const financeTolerance=(value:number)=>Math.max(value*0.01,100_000);
+  const financeAmountGrounded=(amount:number)=>(context?.financeAmounts || []).some(value=>Math.abs(value-amount)<=financeTolerance(value)) || (context?.financeRanges || []).some(([low,high])=>amount>=low-financeTolerance(low)&&amount<=high+financeTolerance(high));
+  const financeGroundedAnswer=Boolean(context?.financePresent) && ungroundedReplyAmounts.every(financeAmountGrounded);
+  if(context?.retrievalFound===false&&!evidence.length&&!financeGroundedAnswer && (/\b(?:rv[-_][a-z0-9]+|q\d+[-_][a-z0-9]+)\b/i.test(reply)||ungroundedReplyAmounts.length&&!onlyLimits||(/\b(?:available|còn bán|đang mở bán|có sẵn)\b/i.test(reply))||(/\bcho thuê\b/i.test(reply)&&!honestNoData)))return 'NO_ANSWER_UNGROUNDED';
   if(context?.faqOnly && (moneyAmounts(reply).length||/\b(?:rv[-_][a-z0-9]+|q\d+[-_][a-z0-9]+)\b/i.test(reply)))return 'FAQ_UNGROUNDED';
   // Small local models sometimes slip Chinese/Japanese/Korean words into Vietnamese replies.
   if(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(reply))return 'UNSUPPORTED_LANGUAGE';
   if(secrets.test(reply) || clauses(reply).some(clause=>[...clause.matchAll(privateCustomers)].some(m=>!negated(clause,m.index!))))return 'PRIVATE_DATA_OR_SECRET';
   if(links.test(reply))return 'PRIVATE_OR_UNSUPPORTED_LINK';
   const grounded={legal:/sổ hồng|sổ đỏ|sẵn sổ|sổ riêng|có sổ|pháp lý/iu.test(context?.listingText||''),practice:!!context?.practice};
+  Object.assign(grounded,{legal:grounded.legal || !!context?.faqEvidence});
   if(clauses(reply).some(clause=>commitment(clause,grounded)))return 'UNSUPPORTED_COMMITMENT';
   // Travel times and distances ("khoảng 15-30 phút", "3 km") are only allowed when a cited source states them.
   const sourceText=`${context?.sourceText||''} ${evidence.map(e=>`${e.name||''} ${e.location||''}`).join(' ')}`;
@@ -172,7 +183,7 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
   // Amounts stated in the listing text or FAQ, and a listing's price per m², are grounded too.
   const perSquareMetre=evidence.flatMap(e=>e.price!==null&&e.area ? [e.price/e.area] : []);
   const sourceAmounts=moneyAmounts(context?.sourceText||'');
-  const sourced=(amount:number)=>sourceAmounts.includes(amount)||perSquareMetre.some(value=>Math.abs(value-amount)<=value*0.03);
+  const sourced=(amount:number)=>sourceAmounts.includes(amount)||perSquareMetre.some(value=>Math.abs(value-amount)<=value*0.03)||financeAmountGrounded(amount);
   const allowed=[...customerAmounts,...effectiveLimits,...evidence.flatMap(e=>e.price===null ? []:[e.price])];
   // A listing price rounded for reading (5.199.900.000 → "5,2 tỷ") is still that price.
   const listed=(amount:number)=>evidence.some(p=>p.price!==null&&Math.abs(p.price-amount)<=p.price*0.01);
@@ -217,4 +228,22 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
     if(related.some(e=>e.availability!=='Available'))return 'UNSUPPORTED_AVAILABILITY';
   }
   return null;
+}
+
+export function removeReplyArtifacts<T extends { number?: number; name?: string; availability?: string }>(reply:string, sources:T[], allowMore=false) {
+  let result=reply.replace(/\[market_summary\]/giu,'');
+  if(!allowMore) result=result.replace(/(?:^|\n)\s*Mình (?:chỉ còn \d+ căn khác đúng tiêu chí trong dữ liệu hiện có|gửi 5 căn khác đúng tiêu chí; dữ liệu còn \d+ căn phù hợp|gửi \d+ căn khác đúng tiêu chí trong dữ liệu hiện có)\.\s*/giu,'');
+  const sourceNumbers=new Set(sources.map(source=>source.number).filter((number):number is number=>typeof number==='number'));
+  return result.split(/\n/u).map(line=>{
+    // Only a bare "[n] title – price" line (a raw citation title) is replaced; descriptive lines stay.
+    const match=line.match(/^\s*\[(\d+)\]\s+([^\n]+?)\s+[–-]\s+[\d.,]+\s*(?:tỷ|triệu)(?:\s*đồng)?(?:\s*\/\s*tháng)?\s*$/u);
+    if(!match || !sourceNumbers.has(Number(match[1])) || !moneyAmounts(line).length)return line;
+    const source=sources.find(item=>item.number===Number(match[1]));
+    const status=source?.availability==='Sold' ? 'Đã bán, không còn mở bán' : source?.availability==='Reserved' ? 'Đã giữ chỗ, không còn mở bán' : source?.availability==='Unavailable' ? 'Chưa khả dụng, không còn mở bán' : source?.availability==='Available' ? 'Đang mở bán' : '';
+    return `[${match[1]}]${status ? ` ${status}.` : ''}`;
+  }).join('\n').replace(/\n{3,}/gu,'\n\n').trim();
+}
+
+export function correctUnknownReply(reply:string) {
+  return reply.replace(/(?:Mình\s+)?không tự ý đoán hay nói không biết/iu,'Tin đăng chưa có thông tin; mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn.');
 }

@@ -481,7 +481,7 @@ try{
    const explicitHouseFilters=ragRequests.slice().reverse().find(filters=>filters.location==='Quận 9'&&filters.transaction_type==='Rent');
    check(explicitHouseFilters?.type==='House','Explicit nhà phố keeps the House filter');
    const range=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Giá 5-8 triệu',history:refinementHistory},flowCookie);const rangeData=await range.json();
-   check(rangeData.sources.length===4&&rangeData.sources.every(p=>[6000000,6500000,7000000,7500000].includes(p.price))&&!rangeData.sources.some(p=>p.location.includes('Bình Đông')),'Budget range keeps Quận 9 Rent and excludes Quận 8');
+   check(rangeData.sources.length===5&&rangeData.sources.every(p=>[6000000,6500000,7000000,7500000,8000000].includes(p.price))&&!rangeData.sources.some(p=>p.location.includes('Bình Đông')),'Budget range keeps Quận 9 Rent and includes the 8-million endpoint');
    const cheaperHistory=[...refinementHistory,{role:'user',content:'Giá 5-8 triệu'},{role:'assistant',content:rangeData.reply,sources:rangeData.sources}];
    const cheaper=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Rẻ hơn',history:cheaperHistory},flowCookie);const cheaperData=await cheaper.json();
    check(cheaperData.sources.every(p=>p.transaction_type==='Rent'&&!p.location.includes('Bình Đông')),'Rẻ hơn keeps Rent and Quận 9');

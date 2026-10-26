@@ -13,6 +13,13 @@ export type RateChange = LoanPayment & {
   paymentDifference: number;
 };
 
+export type FinanceEvidence = {
+  note: string;
+  amounts: number[];
+  ranges: [number, number][];
+  ratios: number[];
+};
+
 const monthlyRate = (annualRate: number) => annualRate / 100 / 12;
 const numberWords: Record<string, number> = { một: 1, hai: 2, ba: 3, bốn: 4, năm: 5, sáu: 6, bảy: 7, tám: 8, chín: 9, mười: 10 };
 const smallNumber = (value: string) => Number.isFinite(Number(value)) ? Number(value) : numberWords[value.toLocaleLowerCase('vi')] || 0;
@@ -118,6 +125,28 @@ function formatYield(text: string, listingPrice?: number, marketNote?: string): 
   return null;
 }
 
+const yieldQuestionPattern = /(?:cho\s+thuê|lợi\s+suất|doanh\s+thu|sinh\s+lời|đầu\s+tư\s+cho\s+thuê|cho\s+thue|loi\s+suat|doanh\s+thu|sinh\s+loi|dau\s+tu\s+cho\s+thue)/iu;
+
+function extractFinanceEvidence(note: string): FinanceEvidence {
+  const amounts = moneyAmounts(note);
+  const ranges: [number, number][] = [];
+  for (const match of note.matchAll(/([\d.,]+\s*(?:tỷ|tỉ|triệu|tr))\s*(?:–|-|—)\s*([\d.,]+\s*(?:tỷ|tỉ|triệu|tr))/giu)) {
+    const values = moneyAmounts(`${match[1]} - ${match[2]}`);
+    if (values.length >= 2) ranges.push([values[0], values[1]]);
+  }
+  if (!ranges.length) for (const match of note.matchAll(/(\d[\d.,]*\s*\p{L}+)\s*\p{Pd}\s*(\d[\d.,]*\s*\p{L}+)/gu)) {
+    const values = moneyAmounts(`${match[1]} - ${match[2]}`);
+    if (values.length >= 2) ranges.push([values[0], values[1]]);
+  }
+  const ratios = [...note.matchAll(/(\d+(?:[.,]\d+)?)\s*%/gu)].map(match => Number(match[1].replace(',', '.')) / 100).filter(Number.isFinite);
+  return { note, amounts: [...new Set(amounts)], ranges, ratios };
+}
+
+export function financeEvidenceForQuestion(text: string, listingPrice?: number, marketNote?: string): FinanceEvidence | null {
+  const note = formatLoanScenario(text) || formatAffordability(text) || (yieldQuestionPattern.test(text) ? formatYield(text, listingPrice, marketNote) : null);
+  return note ? extractFinanceEvidence(note) : null;
+}
+
 export function financeNoteForQuestion(text: string, listingPrice?: number, marketNote?: string): string | null {
-  return formatLoanScenario(text) || formatAffordability(text) || formatYield(text, listingPrice, marketNote);
+  return financeEvidenceForQuestion(text, listingPrice, marketNote)?.note || null;
 }

@@ -15,11 +15,14 @@ const district = (location: string) => withFormerDistrict(location).match(/\(([^
 const ward = (location: string) => location.match(/(?:Phường|Xã)\s+[^,]+/u)?.[0] || '';
 const median = (values: number[]) => { const sorted = [...values].sort((a, b) => a - b); return sorted[Math.floor(sorted.length / 2)]; };
 
-async function rows(filters: { transaction_type: 'Sale' | 'Rent'; type?: string; maxPrice?: number; place?: string }): Promise<Row[]> {
+async function rows(filters: { transaction_type: 'Sale' | 'Rent'; type?: string; maxPrice?: number; place?: string; area?: number }): Promise<Row[]> {
   let query = authClient().from('property_public_catalog').select('location,price,area,property_type,transaction_type,name').eq('transaction_type', filters.transaction_type).eq('availability', 'Available').not('price', 'is', null);
   if (filters.type) query = query.eq('property_type', filters.type);
   if (filters.maxPrice !== undefined) query = query.lte('price', filters.maxPrice * 1.05);
   if (filters.place) query = query.ilike('location', `%${filters.place.replace(/[%_\\]/g, '\\$&')}%`);
+  if (typeof filters.area === 'number' && filters.area > 0) {
+    query = query.gte('area', filters.area * 0.8).lte('area', filters.area * 1.2);
+  }
   const result = await query.limit(400);
   return result.error ? [] : (result.data || []) as Row[];
 }
@@ -31,11 +34,11 @@ export async function areaSummary(filters: { transaction_type: 'Sale' | 'Rent'; 
 }
 
 /** Observed price level around one listing: rent range for "cho thuê được bao nhiêu", price per m² for land. */
-export async function marketSummary(listing: { location?: string | null; property_type?: string; transaction_type?: string }, kind: 'rent' | 'per_m2'): Promise<string> {
+export async function marketSummary(listing: { location?: string | null; property_type?: string; transaction_type?: string; area?: number | null }, kind: 'rent' | 'per_m2'): Promise<string> {
   const place = ward(listing.location || '') || district(listing.location || '');
   if (!place) return '';
   if (kind === 'rent') {
-    const prices = (await rows({ transaction_type: 'Rent', type: listing.property_type, place })).map(row => Number(row.price)).filter(value => value > 0);
+    const prices = (await rows({ transaction_type: 'Rent', type: listing.property_type, area: listing.area ?? undefined, place })).map(row => Number(row.price)).filter(value => value > 0);
     if (prices.length < 2) return '';
     return `Theo ${prices.length} tin cho thuê cùng loại ở ${place} trên TERAVA: giá thuê từ ${priceLabel(Math.min(...prices), true)} đến ${priceLabel(Math.max(...prices), true)}, phổ biến khoảng ${priceLabel(median(prices), true)}.`;
   }

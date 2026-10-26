@@ -67,10 +67,15 @@ export function genericSearchQuestion(message: string) {
 export type CatalogueOverviewKind = 'areas' | 'types' | 'projects' | 'prices';
 export function catalogueOverviewIntent(message: string): CatalogueOverviewKind | null {
   const text = fold(message);
+  const specificAmount = /\d[\d.,]*\s*(?:ty|trieu|tr|m2|m\s*2)/iu.test(text);
+  const comparison = /(?:so sanh|giua|cai nao|hieu qua hon|khac nhau|cao hon|re hon)/iu.test(text);
+  const hypothetical = /(?:neu|gia su|n?eu ma)/iu.test(text);
+  const listingReference = /(?:tin dang|tin rao|cung dia chi|can nay|nha nay|hai tin|dien tich)/iu.test(text);
+  if (specificAmount || comparison || hypothetical || listingReference) return null;
   if (/(?:nhung|cac)\s+(?:du an|khu do thi)/iu.test(text)) return 'projects';
-  if (/(?:gia|muc gia).*(?:nha|can|bat dong san)|(?:nha|can|bat dong san).*gia.*(?:bao nhieu|khoang)/iu.test(text)) return 'prices';
-  if (/(?:khu vuc|o dau|nhung dau|nhung khu).*(?:bat dong san|bds|nha|can)|bat dong san.*(?:khu vuc|o dau)/iu.test(text)) return 'areas';
-  if (/cho\s+thue/iu.test(text) || /(?:loai|bds|bat dong san)/iu.test(text) && /(?:ban|thue|cho thue|dang)/iu.test(text) || /bat dong san nao/iu.test(text)) return 'types';
+  if (/(?:nhung\s+loai|cac\s+loai|loai nao|bat dong san nao.*(?:ban|thue|dang)|co cho thue khong)/iu.test(text)) return 'types';
+  if (/(?:nhung khu vuc nao|bat dong san.*nhung khu vuc nao|o dau.*bat dong san)/iu.test(text)) return 'areas';
+  if (/(?:gia|muc gia)\s+khoang\s+bao nhieu|(?:gia|muc gia).*bao nhieu/iu.test(text)) return 'prices';
   return null;
 }
 export function isMoreRequest(message: string) {
