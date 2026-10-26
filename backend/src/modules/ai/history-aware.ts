@@ -1,5 +1,6 @@
 import { hcmWards } from './hcm-wards.js';
 import { inferSearch } from './infer-search.js';
+import { moneyAmounts } from './money.js';
 
 export type Clarification = { needed: boolean; question: string | null; options: string[] };
 const listingCodePattern = /(?<![\p{L}\d])[A-Z][A-Z\d]{0,7}-[A-Z\d]{4,40}(?![\p{L}\d])/gu;
@@ -114,6 +115,29 @@ export function previousSearchLocation(history: { role: string; content: string 
   return null;
 }
 export function listingCodes(text: string) { return [...new Set(text.match(listingCodePattern) || [])]; }
+
+export type TextListingReference = { number: number; price: number; area?: number; bedrooms?: number; name: string };
+export function textListingReferences(history: { role: string; content: string }[]): TextListingReference[] {
+  const assistant = [...history].reverse().find(turn => turn.role === 'assistant' && /\[\d+\][^\n]+giá/iu.test(turn.content));
+  if (!assistant) return [];
+  const references: TextListingReference[] = [];
+  for (const match of assistant.content.matchAll(/\[(\d+)\]\s*([^;\.\n]+?)(?=;|\.|$)/gu)) {
+    const text = match[2].trim();
+    const price = moneyAmounts(text).find(value => value >= 50_000_000);
+    if (!price) continue;
+    const areaMatch = text.match(/(\d+(?:[.,]\d+)?)\s*m(?:²|2)/iu);
+    const bedroomMatch = text.match(/(\d+)\s*PN/iu);
+    references.push({
+      number: Number(match[1]),
+      price,
+      area: areaMatch ? Number(areaMatch[1].replace(',', '.')) : undefined,
+      bedrooms: bedroomMatch ? Number(bedroomMatch[1]) : undefined,
+      name: text.replace(/\s+giá\s+.*$/iu, '').trim(),
+    });
+  }
+  return references.sort((left, right) => left.number - right.number);
+}
+
 export function referencedListingCodes(message: string, history: { role: string; content: string }[]) {
   const direct = listingCodes(message);
   if (direct.length) return { codes: direct, ambiguous: false };

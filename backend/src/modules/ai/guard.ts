@@ -87,7 +87,7 @@ export function scopeFromTopic(topic:'real_estate'|'smalltalk'|'out_of_scope', t
 }
 export const outOfScopeReply='Tôi chỉ hỗ trợ tìm hiểu bất động sản TERAVA, xem thông tin căn hộ/dự án và kết nối chuyên viên. Bạn có thể hỏi về giá, khu vực, loại hình hoặc lịch xem nhà.';
 export function correctionData(reason:string){
-  const corrections:Record<string,string>={UNSUPPORTED_PRICE_PERIOD:'Rent/Month: giá thuê VND/tháng. Sale/Total: giá bán tổng VND. Không trộn hai loại giá.',UNSUPPORTED_LANGUAGE:'Chỉ viết tiếng Việt, không dùng chữ Hán hay ngôn ngữ khác.',UNSUPPORTED_ROOM_COUNT:'Số phòng ngủ không có trong properties. Không mô tả căn có số phòng khách yêu cầu. Nói chưa biết số phòng, cần Sales xác nhận. Chép giá price nguyên số VND, không đổi đơn vị.',UNSUPPORTED_PRICE:'Chép đúng price nguyên số VND của căn; không đổi đơn vị hay gán giá khác.',UNSUPPORTED_COMMITMENT:'Không có dữ liệu giảm giá/pháp lý/thanh toán. Từ chối xác nhận, đề nghị Sales.',UNSUPPORTED_AVAILABILITY:'Chỉ Available còn bán; không giới thiệu trạng thái khác là còn bán.',PRIVATE_DATA_OR_SECRET:'Từ chối cung cấp dữ liệu cá nhân/secret, không trích lại nội dung đó.'};
+  const corrections:Record<string,string>={UNSUPPORTED_PRICE_PERIOD:'Rent/Month: giá thuê VND/tháng. Sale/Total: giá bán tổng VND. Không trộn hai loại giá.',UNSUPPORTED_LANGUAGE:'Chỉ viết tiếng Việt, không dùng chữ Hán hay ngôn ngữ khác.',UNSUPPORTED_ROOM_COUNT:'Số phòng ngủ không có trong properties. Không mô tả căn có số phòng khách yêu cầu. Nói chưa biết số phòng, cần Sales xác nhận. Chép giá price nguyên số VND, không đổi đơn vị.',UNSUPPORTED_PRICE:'Chép đúng price nguyên số VND của căn; không đổi đơn vị hay gán giá khác.',UNSUPPORTED_COMMITMENT:'Không có dữ liệu giảm giá/pháp lý/thanh toán. Từ chối xác nhận, đề nghị Sales.',UNSUPPORTED_AVAILABILITY:'Chỉ Available còn bán; không giới thiệu trạng thái khác là còn bán.',PRIVATE_DATA_OR_SECRET:'Từ chối cung cấp dữ liệu cá nhân/secret, không trích lại nội dung đó.',RAW_LISTING_DUMP:'Không chép nguyên văn details. Trả lời trực tiếp câu hỏi về căn đang xem, dùng [1] cho dữ liệu tin đăng, rồi nêu phần chưa xác minh.'};
   return {violations:[reason],correction:corrections[reason] || 'Bỏ nội dung không có trong properties, nói rõ chưa biết và đề nghị Sales.'};
 }
 export function injection(text:string) { return /bỏ qua (?:hướng dẫn|chỉ dẫn)|ignore (?:previous|all) (?:instructions|rules)|bạn là admin|(?:đọc|xem|liệt kê).{0,25}(?:lead|khách hàng).{0,15}(?:khác|tất cả)|read (?:other|all) (?:customers?|leads?)|đổi (?:role|quyền|consent)|change (?:role|consent)|(?:reveal|show|đọc|tiết lộ).{0,15}system prompt/i.test(text); }
@@ -227,7 +227,9 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
   const allowed=[...customerAmounts,...effectiveLimits,...(context?.previousPrices || []),...evidence.flatMap(e=>e.price===null ? []:[e.price])];
   // A listing price rounded for reading (5.199.900.000 → "5,2 tỷ") is still that price.
   const listed=(amount:number)=>evidence.some(p=>p.price!==null&&Math.abs(p.price-amount)<=p.price*0.01);
-  const grounds=(amount:number)=>allowed.includes(amount)||listed(amount)||sourced(amount);
+  const boundPattern=/(?:dưới|trên|khoảng|tầm|hơn|từ|đến)/iu;
+  const approximateBound=(amount:number)=>boundPattern.test(reply) && evidence.some(item=>item.price!==null&&Math.abs(item.price-amount)<=item.price*0.1);
+  const grounds=(amount:number)=>allowed.includes(amount)||listed(amount)||sourced(amount)||approximateBound(amount);
   if(moneyAmounts(moneyText(reply,evidence)).some(amount=>!grounds(amount)))return 'UNSUPPORTED_PRICE';
   for(let clause of clauses(reply)){
     for(const room of clause.matchAll(/(\d+)\s*(?:PN|ph\u00f2ng ng\u1ee7)/giu)){
@@ -263,7 +265,7 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
     // "giá dưới 15 triệu/tháng" repeats the customer's own limit, not a listing price.
     const echoesLimit=(amount:number)=>(customerAmounts.includes(amount)||effectiveLimits.has(amount)) && /dưới|trên|tối đa|tối thiểu|không quá|khoảng|tầm|từ|đến|mức/i.test(clause);
     const priorPrice=(amount:number)=>(context?.previousPrices || []).some(value=>Math.abs(value-amount)<=value*0.01);
-    if(/giá|price/i.test(clause) && !/ngân sách|bạn (?:đề nghị|nêu|có)|theo yêu cầu/i.test(clause) && moneyAmounts(moneyText(clause,evidence)).some(amount=>!echoesLimit(amount) && !priorPrice(amount) && !(mentioned.length ? mentioned:evidence).some(p=>p.price!==null&&Math.abs(p.price-amount)<=p.price*0.01) && !sourced(amount)))return 'UNSUPPORTED_PRICE';
+     if(/giá|price/i.test(clause) && !/ngân sách|bạn (?:đề nghị|nêu|có)|theo yêu cầu/i.test(clause) && moneyAmounts(moneyText(clause,evidence)).some(amount=>!echoesLimit(amount) && !priorPrice(amount) && !(mentioned.length ? mentioned:evidence).some(p=>p.price!==null&&Math.abs(p.price-amount)<=p.price*0.01) && !sourced(amount) && !approximateBound(amount)))return 'UNSUPPORTED_PRICE';
     const availability=[...clause.matchAll(/\bAvailable\b|còn (?:bán|hàng|để bán|cho thuê)|đang (?:mở bán|bán|cho thuê)|mở bán|chào bán|sẵn hàng|có sẵn|có thể (?:mua|thuê)|for (?:sale|rent)/gi)].filter(m=>!negated(clause,m.index!));
     if(!availability.length)continue;
     if(related.some(e=>e.availability!=='Available'))return 'UNSUPPORTED_AVAILABILITY';
@@ -335,6 +337,7 @@ export function dedupeListings<T extends { name?: string; price?: number|null; a
 export function rewriteUnverifiedAvailability(reply:string, question:string, sources:{ availability?: string }[]) {
   if(!sources.some(source=>source.availability==='Available') || !/(?:còn\s+trống|còn\s+bán|thực\s+sự|kiểm\s+tra.*còn)/iu.test(question))return reply;
   let result=reply
+    .replace(/tin đăng đang cập nhật tình trạng tin đăng đang ghi là còn bán/giu, 'tin đăng đang ghi là còn bán')
     .replace(/(?:căn(?:\s+hộ)?|nhà)\s+tin\s+đăng\s+(?:đang|được)\s+ghi\s+là\s+còn\s+bán(?:\s+hay\s+không)?/giu,'tin đăng đang ghi là còn bán; mình không thể xác nhận theo thời gian thực')
     .replace(/căn(?:\s+này)?\s+hiện\s+trạng(?:\s+là)?\s+còn\s+trống/giu,'căn này vẫn được tin đăng ghi là còn bán')
     .replace(/hiện\s+trạng(?:\s+là)?\s+còn\s+trống/giu,'tin đăng đang ghi là còn bán')
@@ -354,5 +357,16 @@ export function removeUnpromptedNegotiation(reply:string, question:string) {
 }
 
 export function correctUnknownReply(reply:string) {
-  return reply.replace(/(?:Mình\s+)?không tự ý đoán hay nói không biết/iu,'Tin đăng chưa có thông tin; mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn.');
+  if (/chưa có thông tin/iu.test(reply)) return reply;
+  return reply.replace(/(^|[.!?\n]\s*)(?:Mình\s+)?không tự ý đoán hay nói không biết(?=[.!?\n]|$)/giu, '$1Tin đăng chưa có thông tin; mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn');
+}
+
+export function isRawListingDump(reply: string) {
+  const markers = [/Mã căn:/iu, /Nguồn: dữ liệu/iu, /Bất động sản bán ·/iu];
+  return markers.filter(pattern => pattern.test(reply)).length >= 2;
+}
+
+export function removeUnpromptedOwnerTemplate(reply: string, allowed: boolean) {
+  if (allowed) return reply;
+  return reply.replace(/(?:Chuyên viên tư vấn của TERAVA|TERAVA) có thể liên hệ[^.!?\n]*(?:đăng tin|quản lý giao dịch)[^.!?\n]*[.!?]?/giu, '').replace(/\n{3,}/gu, '\n\n').trim();
 }

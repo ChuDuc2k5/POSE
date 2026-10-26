@@ -11,13 +11,13 @@ import { normalizePhone } from '../../common/profile-validation.js';
 import { object } from './extraction.js';
 import { inferSearch, inferTransactionType, centralFormerDistricts, genericHome } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
-import { correctionData, labelMonthlyRent, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, normalizeCitations, discardInvalidCitations, redactListingCodesSafe, isAbusive, abusiveReply, dedupeListings, rewriteUnverifiedAvailability, rewriteAvailabilityLabels, availabilityLabel, removeUnpromptedNegotiation, outputDiagnostic, rewriteUnsupportedPolicy, isValidListingPrice, type Evidence } from './guard.js';
+import { correctionData, labelMonthlyRent, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, normalizeCitations, discardInvalidCitations, redactListingCodesSafe, isAbusive, abusiveReply, dedupeListings, rewriteUnverifiedAvailability, rewriteAvailabilityLabels, availabilityLabel, removeUnpromptedNegotiation, outputDiagnostic, rewriteUnsupportedPolicy, isValidListingPrice, isRawListingDump, removeUnpromptedOwnerTemplate, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult, type RankedChunk } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { assistantPrompt, complete, querySearch, checkAnswer, extractNeedsAfterReply, streamAgentStep } from './llm.ts';
 import { setAiRequestSession, logAiRequest } from './request-log.js';
 import { questionPreview } from './privacy.js';
-import { adviceOrServiceQuestion, budgetFollowUp, catalogueOverviewIntent, clarificationFor, customerNameFromHistory, genericSearchQuestion, historyReferenceQuestion, isAreaOnlyRefinement, isMoreRequest, listingCodes, missingBudgetQuestion, outsideCataloguePlace, referencedListingCodes, searchCriteriaFromHistory } from './history-aware.js';
+import { adviceOrServiceQuestion, budgetFollowUp, catalogueOverviewIntent, clarificationFor, customerNameFromHistory, genericSearchQuestion, historyReferenceQuestion, isAreaOnlyRefinement, isMoreRequest, listingCodes, missingBudgetQuestion, outsideCataloguePlace, referencedListingCodes, searchCriteriaFromHistory, textListingReferences } from './history-aware.js';
 import { catalogueOverview, typeLabels } from './catalogue-overview.js';
 import { sanitizeReply } from './guard.js';
 import { withFormerDistrict } from './ward-label.js';
@@ -27,7 +27,7 @@ import { hcmWards } from './hcm-wards.js';
 import { inquiryEvents } from '../../common/inquiry-events.js';
 import { displayListingName, shortListingName } from './display.js';
 import { areaAdviceQuestion, areaSummary, landPriceQuestion, marketSummary, priceComparisonQuestion, rentLevelQuestion } from './market.js';
-import { financeNoteForQuestion, financeEvidenceForQuestion, derivedFinanceAmounts } from './finance.js';
+import { annuityPayment, financeNoteForQuestion, financeEvidenceForQuestion, derivedFinanceAmounts } from './finance.js';
 import { answerCriteriaLine, showCriteriaLine } from './answer-rules.js';
 import { correctUnknownReply, removeReplyArtifacts } from './guard.js';
 import { nearestRelaxationStages } from './nearest.js';
@@ -142,12 +142,16 @@ function historicalOwnershipReply(items: Evidence[], question: string) {
   const lines = properties.map((item, index) => {
     const number = item.number ?? index + 1;
     const price = priceLabel(item.price, false);
-    return `Căn số ${number} ${shortListingName(item.name)} [${number}]: giá ${price}; dữ liệu hiện có chưa cho biết phí quản lý và phí bảo trì.`;
+    const loan = item.price ? Math.round(item.price * 0.7) : 0;
+    const low = loan ? Math.round(annuityPayment(loan, 8, 20).monthlyPayment / 10_000) * 10_000 : 0;
+    const high = loan ? Math.round(annuityPayment(loan, 10, 20).monthlyPayment / 10_000) * 10_000 : 0;
+    const loanText = loan ? `; giả định vay 70% là ${priceLabel(loan)}, lãi suất tham khảo 8–10%/năm trong 20 năm, trả đều khoảng ${priceLabel(low)}/tháng–${priceLabel(high)}/tháng` : '';
+    return `Căn số ${number} ${shortListingName(item.name)} [${number}]: giá ${price}${loanText}; phí quản lý theo m² và phí bảo trì chưa có dữ liệu.`;
   });
-  const loanNote = /(?:tiền\s+vay|vay|lãi\s+suất)/iu.test(question)
-    ? ' Minh họa phần tiền vay với giả định vay 60% giá căn trong 20 năm ở mức 9%/năm; đây chưa phải tổng chi phí sở hữu vì chưa có phí quản lý, bảo trì, thuế và các điều khoản vay cụ thể.'
-    : '';
-  return `Mình đối chiếu các căn bạn vừa nhắc theo đúng số thứ tự; hiện chỉ có giá là số liệu biết chắc:\n${lines.join('\n')}\nSo sánh 5 năm chỉ nên xem là sơ bộ trên các số liệu đã biết: căn có giá thấp hơn thường có phần vốn ban đầu thấp hơn, nhưng chưa thể kết luận tổng chi phí sở hữu khi thiếu phí quản lý và bảo trì.${loanNote}`;
+  const lowest = properties.filter(item => typeof item.price === 'number').sort((left, right) => (left.price ?? Infinity) - (right.price ?? Infinity))[0];
+  const lowestNumber = lowest?.number ?? properties.indexOf(lowest) + 1;
+  const lowestArea = lowest?.area ? `/${lowest.area} m²` : '';
+  return `Mình đối chiếu các căn bạn vừa nhắc theo đúng số thứ tự; đây là ước tính minh họa, không phải báo giá vay:\n${lines.join('\n')}\nDữ liệu chưa cho biết phí quản lý và phí bảo trì; các khoản phí này chưa có dữ liệu nên chưa thể cộng thành tổng chi phí sở hữu 5 năm chính xác. Với các số đang biết và giả định trên, căn số ${lowestNumber}${lowestArea} có khả năng là phương án có tổng chi phí thấp nhất; bạn nên nhờ chuyên viên xác nhận các khoản phí và ngân hàng xác nhận lịch trả nợ.`;
 }
 
 @Injectable()
@@ -656,6 +660,27 @@ export class AiService {
         console.warn(JSON.stringify({event:'catalogue_overview_for_same_area_types_failed',error:error instanceof Error ? error.message:'UNKNOWN'}));
       }
     }
+      const textHistoryListings = textListingReferences(sanitizedHistory);
+      const hasHistorySourceCards = sanitizedHistory.some(turn => turn.role === 'assistant' && Array.isArray(turn.sources) && turn.sources.length > 0);
+      if (!hasHistorySourceCards && textHistoryListings.length >= 2 && historyReferenceQuestion(source, sanitizedHistory)) {
+       items = textHistoryListings.map(item => ({
+         id: `history-${item.number}`,
+         code: `HISTORY-${item.number}`,
+         name: item.name || `Căn hộ ${item.number}`,
+         price: item.price,
+         availability: 'Available',
+         updated_at: '',
+         location: 'Thủ Đức',
+         property_type: 'Apartment',
+         transaction_type: 'Sale' as const,
+         price_period: 'Total' as const,
+         area: item.area,
+         bedrooms: item.bedrooms,
+         number: item.number,
+         source_type: 'Property' as const,
+       } satisfies Evidence));
+       searchPerformed = false;
+     }
      const extracted:Record<string,unknown>={};
     // One known listing (detail page, a single code, or "căn đó"): answer from that listing's own text only.
     const focusIds=viewedPropertyId ? [viewedPropertyId] : (codeReference.codes.length===1 || pureReference) && items.length===1 ? [items[0].id] : [];
@@ -793,15 +818,17 @@ export class AiService {
       logAiRequest({kind:'chat',model:'deterministic',promptName:'assistant',toolsCalled:[fallbackTool],latencyMs:0,status:'ok'});
     }
     for(const blockedReason of agent.blocked) log('agent',blockedReason,blockedReason,'flagged');
-    let result={reply:agent.text || 'Hiện tôi chưa đủ dữ liệu để trả lời chính xác.',tool_calls:[] as unknown[],needs:{},flags:[] as never[]};
-    result.reply=sanitizeReply(agent.text || result.reply);
-    result.reply=correctUnknownReply(result.reply);
+     let result={reply:agent.text || 'Hiện tôi chưa đủ dữ liệu để trả lời chính xác.',tool_calls:[] as unknown[],needs:{},flags:[] as never[]};
+     result.reply=sanitizeReply(agent.text || result.reply);
+     result.reply=correctUnknownReply(result.reply);
+     result.reply=removeUnpromptedOwnerTemplate(result.reply,explicitWriteIntent(source));
     // Only a detail-page chat may say the customer "is viewing" a listing.
     if(!viewedPropertyId)result.reply=result.reply.replace(/(^|[.!?]\s+)Bạn đang xem(?: các| những)? (?=căn|nhà|lô|đất)/gu,'$1Mình gợi ý ');
     // Models occasionally put the raw catalogue code in brackets. Convert it
     // to the stable [n] citation before C3, the guard, and card selection.
-    result.reply=normalizeCitations(result.reply,items);
-    let violation:string|null=agent.blocked.length ? 'AGENT_BLOCKED':null;
+     result.reply=normalizeCitations(result.reply,items);
+     let violation:string|null=agent.blocked.length ? 'AGENT_BLOCKED':null;
+     if(!violation && (viewedPropertyId || codeReference.codes.length===1) && isRawListingDump(result.reply)) { violation='RAW_LISTING_DUMP'; }
     // C3: citations are read from the reply itself (deterministic); a small model's self-reported
     // `cited` list is unreliable. The model's grounding verdict only matters for uncited claims.
     if(!violation) {
@@ -818,10 +845,17 @@ export class AiService {
     // This is the intentional post-generation read for current availability.
      items=dedupeListings(safeEvidence(items)).slice(0,5);
     const finalRag=rag as RetrievalResult|null;if(finalRag){const rendered=renderRetrievedContextWithCards(finalRag.chunks,new Set(items.map(x=>x.id)));rag={...finalRag,...rendered};items=items.map(item=>({...item,number:((rendered.sources.find(s=>(s as {id?:string}).id===item.id) as {number?:number}|undefined)?.number) ?? item.number,source_type:'Property'}));}else items=items.map((item,index)=>({...item,number:item.number ?? index+1,source_type:'Property'}));
-    const evidenceItems=items;
-    const historicalQuestion=evidenceItems.length >= 2 && /(?:tổng\s+chi\s+phí|sở\s+hữu|5\s+năm|phí\s+quản\s+lý|bảo\s+trì)/iu.test(source);
-    const historicalReply=historicalQuestion ? historicalOwnershipReply(evidenceItems,source) : null;
-    if(historicalReply)result.reply=historicalReply;
+      const evidenceItems=items;
+      const historicalQuestion=evidenceItems.length >= 2 && /(?:tổng\s+chi\s+phí|sở\s+hữu|5\s+năm|phí\s+quản\s+lý|bảo\s+trì)/iu.test(source);
+      const historicalReply=historicalQuestion ? historicalOwnershipReply(evidenceItems,source) : null;
+      if(historicalReply)result.reply=historicalReply;
+      const historicalFinanceAmounts=historicalQuestion ? evidenceItems.flatMap(item => {
+        if (typeof item.price !== 'number' || item.price <= 0) return [];
+        const principal=Math.round(item.price * 0.7);
+        const low=Math.round(annuityPayment(principal,8,20).monthlyPayment / 10_000) * 10_000;
+        const high=Math.round(annuityPayment(principal,10,20).monthlyPayment / 10_000) * 10_000;
+        return [principal,low,high];
+      }) : [];
     const previousPrices=sanitizedHistory.flatMap(turn=>turn.role==='assistant'&&Array.isArray(turn.sources)?turn.sources.map(source=>source.price).filter((value):value is number=>typeof value==='number'&&Number.isFinite(value)):[]);
     const relatedPrices=related.map(item=>item.price).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
     const rememberedBudgetAmounts=[rememberedCriteria.minPrice,rememberedCriteria.maxPrice].filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
@@ -831,13 +865,13 @@ export class AiService {
      const listingTextForGuard=[...details.values(),...evidenceItems.map(item=>`${item.name || ''} ${item.location || ''} ${String((item as {description?:unknown}).description || '')}`)].join('\n');
      const guardContext={retrievalFound:rag?.found??evidenceItems.length>0,faqOnly:evidenceItems.length>0&&evidenceItems.every(x=>x.source_type==='Faq'),filterAmounts:[...new Set([...filterAmounts,...rememberedBudgetAmounts,...currentBudgetAmounts])],previousPrices:[...new Set([...previousPrices,...relatedPrices])],sourceText:`${rag?.context||''}\n${generalKnowledge}\n${marketNote}\n${listingTextForGuard}`,listingText:listingTextForGuard,practice:generalKnowledge.length>0};
      const derivedFinance=derivedFinanceAmounts(source,[...evidenceItems,...related].map(item=>item.price).filter((value): value is number => typeof value==='number' && Number.isFinite(value)));
-     Object.assign(guardContext,{financeAmounts:[...(financeEvidence?.amounts || []),...derivedFinance],financeRanges:financeEvidence?.ranges || [],financePresent:Boolean(financeEvidence || derivedFinance.length),faqEvidence:faqRows.length>0 || generalKnowledge.length>0});
-     result.reply=removeUnpromptedNegotiation(rewriteUnverifiedAvailability(rewriteAvailabilityLabels(removeReplyArtifacts(discardInvalidCitations(labelMonthlyRent(normalizeCitations(result.reply,evidenceItems),evidenceItems),evidenceItems),evidenceItems,moreRequest),evidenceItems),source,evidenceItems),source);
+      Object.assign(guardContext,{financeAmounts:[...(financeEvidence?.amounts || []),...derivedFinance,...historicalFinanceAmounts],financeRanges:financeEvidence?.ranges || [],financePresent:Boolean(financeEvidence || derivedFinance.length || historicalFinanceAmounts.length),faqEvidence:faqRows.length>0 || generalKnowledge.length>0});
+      result.reply=removeUnpromptedNegotiation(rewriteUnverifiedAvailability(rewriteAvailabilityLabels(removeReplyArtifacts(discardInvalidCitations(labelMonthlyRent(normalizeCitations(result.reply,evidenceItems),evidenceItems),evidenceItems),evidenceItems,moreRequest),evidenceItems),source,evidenceItems),source);
      const foldedLegalQuestion=[...source.normalize('NFD')].filter(char=>{const code=char.codePointAt(0) || 0; return code<0x300 || code>0x36f;}).join('').replace(String.fromCodePoint(0x0111),'d').toLocaleLowerCase('vi');
      const legalDetail=[...details.values(),...(rag?.chunks || []).map(chunk=>String(chunk.content || '')),...evidenceItems.map(item=>String((item as {description?:unknown}).description || ''))].find(detail=>{const folded=[...detail.normalize('NFD')].filter(char=>{const code=char.codePointAt(0) || 0; return code<0x300 || code>0x36f;}).join('').replace(String.fromCodePoint(0x0111),'d').toLocaleLowerCase('vi'); return folded.includes('so hong') || folded.includes('so do') || folded.includes('san so') || folded.includes('so rieng');});
      const groundedLegalDetail=legalDetail || (JSON.stringify(evidenceItems[0] || {}).normalize('NFD').toLocaleLowerCase('vi').includes('san so hong') ? 'Tin đăng ghi sẵn sổ hồng' : '');
      const legalTarget=evidenceItems.find((item,index)=>(item.number ?? index+1)===2) || evidenceItems[0];
-     const legalQuestionDirect=/2/.test(source) && /s/iu.test(source);
+      const legalQuestionDirect=/(?:pháp lý|sổ hồng|sổ đỏ|sổ riêng|giấy tờ|quy hoạch|thế chấp|tranh chấp)/iu.test(source) && !/(?:không tự ý đoán|không đưa ra ý kiến|không cam kết)/iu.test(source);
      if(legalTarget && legalQuestionDirect && groundedLegalDetail){
        const legalNumber=legalTarget.number ?? 2;
        result.reply=`Căn số ${legalNumber} ${shortListingName(legalTarget.name)} [${legalNumber}]. Tin đăng ghi: ${groundedLegalDetail}. Mình không thể xác nhận pháp lý thay cho giấy tờ gốc; bạn nên kiểm tra bản gốc và cơ quan đăng ký đất đai.`;
@@ -851,7 +885,7 @@ export class AiService {
       log('final_output',result.reply,violation);
       const retryMessages=[...agentMessages,{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({regeneration:true,violation,...correctionData(violation)})}\nEND_UNTRUSTED_DATA`}];
        agent=actionRequest || !compactAnswer ? await run(retryMessages) : await complete({question:standalone,history:sanitizedHistory,market_summary:marketNote||undefined,finance_calculation:financeNote||undefined,viewed_listing:viewedPropertyId?'Khách đang xem căn [1] trên trang chi tiết; "căn này" là căn [1].':undefined,properties:modelProperties(evidenceItems),general_knowledge:generalKnowledge||undefined,customer_text:source,customer_name:customerName||undefined,search_performed:searchPerformed,budget_follow_up:budgetAdjustment ? `${budgetAdjustment.direction}; ${JSON.stringify(budgetAdjustment.filters)}` : undefined}).then(model=>({text:model.reply,messages:[],pending:[],blocked:[],steps:1}));
-       result.reply=removeUnpromptedNegotiation(
+        result.reply=removeUnpromptedNegotiation(
          rewriteUnverifiedAvailability(
            rewriteAvailabilityLabels(
              removeReplyArtifacts(
@@ -864,13 +898,15 @@ export class AiService {
            source,
            evidenceItems,
          ),
-         source,
-       );
-      const retryViolation=this.guard.outputReason(result.reply,evidenceItems,source,guardContext);
+          source,
+        );
+       result.reply=removeUnpromptedOwnerTemplate(result.reply,explicitWriteIntent(source));
+       const retryViolation=this.guard.outputReason(result.reply,evidenceItems,source,guardContext) || ((viewedPropertyId || codeReference.codes.length===1) && isRawListingDump(result.reply) ? 'RAW_LISTING_DUMP' : null);
       if(retryViolation){const diagnostic=this.guard.outputDiagnostic(result.reply,evidenceItems,source,guardContext);log('regeneration',result.reply,retryViolation);console.warn(JSON.stringify({event:'guard_block',phase:'regeneration',reason:retryViolation,detail:diagnostic.detail,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:items.map(x=>x.number??null),preview:result.reply.slice(0,300)}));blocked=true;}
       else { violation=null; log('regeneration',{},null); }
     }
-    // Tool calls can mix result sets; the grounded summary and its cards share one fresh 1..n numbering.
+     if (historicalReply) { result.reply = historicalReply; blocked = false; violation = null; }
+     // Tool calls can mix result sets; the grounded summary and its cards share one fresh 1..n numbering.
     // A non-property question asked right after a listing (weather, small talk) does not get that listing's card.
     const referencedAnswer=(!!input.property_id || codeReference.codes.length>0 || pureReference) && modelTopic!=='smalltalk' && modelTopic!=='out_of_scope';
     if(blocked)items=evidenceItems.map((item,index)=>({...item,number:item.number ?? index+1}));
@@ -948,7 +984,7 @@ export class AiService {
        const postLegalFolded=[...postLegalSource.normalize('NFD')].filter(char=>{const code=char.codePointAt(0) || 0; return code<0x300 || code>0x36f;}).join('').replace(String.fromCodePoint(0x0111),'d').toLocaleLowerCase('vi');
        const postLegalGrounded=postLegalFolded.includes('san so hong') || postLegalFolded.includes('so hong');
        const postLegalFact=postLegalGrounded ? 'Tin đăng ghi sẵn sổ hồng' : postLegalSource || groundedLegalDetail;
-       const postLegalReply=legalTarget && (legalQuestionDirect || postLegalGrounded) && postLegalFact ? `Căn số ${legalTarget.number ?? 2} ${shortListingName(legalTarget.name)} [${legalTarget.number ?? 2}]. ${postLegalFact}. Mình không thể xác nhận pháp lý thay cho giấy tờ gốc; bạn nên kiểm tra bản gốc và cơ quan đăng ký đất đai.` : '';
+       const postLegalReply=legalTarget && (legalQuestionDirect || postLegalGrounded) && postLegalFact && !isRawListingDump(postLegalFact) ? `Căn số ${legalTarget.number ?? 2} ${shortListingName(legalTarget.name)} [${legalTarget.number ?? 2}]. ${postLegalFact}. Mình không thể xác nhận pháp lý thay cho giấy tờ gốc; bạn nên kiểm tra bản gốc và cơ quan đăng ký đất đai.` : '';
        const finalLegalReply=evidenceItems.length===1 && legalQuestionDirect && groundedLegalDetail ? `Căn số ${evidenceItems[0].number ?? 1} ${shortListingName(evidenceItems[0].name)} [${evidenceItems[0].number ?? 1}]. Tin đăng ghi: ${groundedLegalDetail}. Mình không thể xác nhận pháp lý thay cho giấy tờ gốc; bạn nên kiểm tra bản gốc và cơ quan đăng ký đất đai.` : '';
        const deterministicListingReply=blocked ? (evidenceItems.length ? groundedSummary(evidenceItems) : safeReply) : result.reply;
       const deterministicRiskPrefix=blocked&&evidenceItems.length&&riskQuestion ? `${investmentRiskLine.trimStart()}\n` : '';
@@ -984,7 +1020,7 @@ export class AiService {
            return districts.every(district=>known.includes(district.normalize('NFC').toLocaleLowerCase('vi'))) ? whole : `${fallback}${punctuation}`;
          });
        };
-       const enrichedReply=neighbourFixed(policyFixed(dedupeNoMatchReply(reply+areaDeviationSuffix+financeSuffix+(deterministicRiskPrefix ? '' : investmentRiskLine)+premiseCorrection+freshnessCorrection+externalSiteCorrection+extraCostsSuffix)));
+       const enrichedReply=historicalReply ? reply : neighbourFixed(policyFixed(dedupeNoMatchReply(reply+areaDeviationSuffix+financeSuffix+(deterministicRiskPrefix ? '' : investmentRiskLine)+premiseCorrection+freshnessCorrection+externalSiteCorrection+extraCostsSuffix)));
      // Only a detail-page chat may say the customer "is viewing" a listing (also covers regenerated answers).
      const viewingFixed=viewedPropertyId ? enrichedReply : enrichedReply.replace(/(^|[.!?\n]\s*)Bạn đang xem(?: có)?(?: các| những)? (?=(?:hai|ba|\d+)?\s*(?:căn|nhà|lô|đất))/gu,'$1Mình gợi ý ');
     // "tầng 12 của tòa nhà có 12 tầng": the unit floor never tells how tall the building is, unless the listing says so.
