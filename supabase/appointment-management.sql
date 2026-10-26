@@ -92,7 +92,8 @@ $$;
 
 create or replace function pose_private.appointment_visible(p_id uuid) returns boolean
 language sql stable security definer set search_path='' as $$
-  select exists(select 1 from public.appointments ap where ap.id=p_id and ap.source in ('Sales','Admin')
+  -- Appointments booked through the AI chat (source AI/User) are managed here too, once they have a Lead and a Sales.
+  select exists(select 1 from public.appointments ap where ap.id=p_id and ap.source in ('Sales','Admin','AI','User')
     and ap.lead_id is not null and ap.sales_id is not null and
     (pose_private.lead_staff()='Admin' or (ap.sales_id=pose_private.lead_directory() and exists(
       select 1 from public.lead_assignments a where a.lead_id=ap.lead_id and a.is_active and a.sales_id=ap.sales_id))));
@@ -100,13 +101,14 @@ $$;
 create or replace function pose_private.appointment_item(p_id uuid) returns jsonb
 language sql stable security definer set search_path='' as $$
   select to_jsonb(ap)-'created_by'-'idempotency_key'-'payload_fingerprint'-'appointment_time'||jsonb_build_object(
-    'title',coalesce(nullif(btrim(ap.title),''),'Lịch hẹn chưa có tiêu đề'),'starts_at',ap.appointment_time,
+    'title',coalesce(nullif(btrim(ap.title),''),case when ap.source in ('AI','User') then left('Xem nhà: '||coalesce(p.name,'bất động sản khách chọn'),200) else 'Lịch hẹn chưa có tiêu đề' end),'starts_at',ap.appointment_time,
     'location',coalesce(ap.location,''),'notes',coalesce(ap.notes,''),'result',coalesce(ap.result,''),'cancel_reason',coalesce(ap.cancel_reason,''),
     'updated_at',coalesce(ap.updated_at,ap.created_at),'needs_details',not pose_private.appointment_ready(ap.id),
     'customer',jsonb_build_object('id',c.id,'name',c.full_name,'phone',c.phone,'email',c.email),
     'sales_name',u.full_name,'lead_status',l.status,'lead_archived',l.archived,
     'property',case when p.id is not null then jsonb_build_object('id',p.id,'code',p.code,'name',p.name,'location',p.location) end,
-    'can_manage',pose_private.lead_staff()='Admin' or (ap.status in ('SCHEDULED','CONFIRMED') and pose_private.appointment_ready(ap.id) and not l.archived and l.status not in ('CONVERTED','LOST')
+    -- An open appointment that still needs details (e.g. booked by AI chat) can be managed so Sales can complete it.
+    'can_manage',pose_private.lead_staff()='Admin' or (ap.status in ('SCHEDULED','CONFIRMED') and not l.archived and l.status not in ('CONVERTED','LOST')
       and ap.sales_id=pose_private.lead_directory() and exists(select 1 from public.lead_assignments a where a.lead_id=l.id and a.is_active and a.sales_id=ap.sales_id)))
   from public.appointments ap join public.leads l on l.id=ap.lead_id
   join public.customers c on c.id=l.customer_id join public.users u on u.id=ap.sales_id
@@ -147,7 +149,7 @@ begin
   perform pose_private.appointment_filters(p_filters,p_page,p_size);
   with filtered as materialized (
     select ap.* from public.appointments ap join public.leads l on l.id=ap.lead_id join public.customers c on c.id=l.customer_id
-    where ap.source in ('Sales','Admin') and ap.sales_id is not null
+    where ap.source in ('Sales','Admin','AI','User') and ap.sales_id is not null
       and (staff_role='Admin' or (ap.sales_id=pose_private.lead_directory() and exists(select 1 from public.lead_assignments a where a.lead_id=l.id and a.is_active and a.sales_id=ap.sales_id)))
       and (not p_filters ? 'q' or position(pose_private.lead_fold(p_filters->>'q') in pose_private.lead_fold(c.full_name||' '||coalesce(c.phone,'')||' '||coalesce(c.email,'')||' '||coalesce(ap.title,'')))>0)
       and (not p_filters ? 'status' or ap.status::text=p_filters->>'status' or p_filters->>'status'='SCHEDULED' and ap.status='CONFIRMED')
@@ -277,7 +279,7 @@ begin
     if p_id is null or p_version is null or p_version<0 then raise exception 'APPOINTMENT_INVALID_INPUT' using errcode='22023'; end if;
     if not pose_private.appointment_visible(p_id) then raise exception 'APPOINTMENT_NOT_FOUND' using errcode='P0002'; end if;
     select * into ap from public.appointments where id=p_id for update;
-    if ap.source is null or ap.source not in ('Sales','Admin') or ap.lead_id is null or ap.sales_id is null then raise exception 'APPOINTMENT_NOT_FOUND' using errcode='P0002'; end if;
+    if ap.source is null or ap.source not in ('Sales','Admin','AI','User') or ap.lead_id is null or ap.sales_id is null then raise exception 'APPOINTMENT_NOT_FOUND' using errcode='P0002'; end if;
     select * into l from public.leads where id=ap.lead_id for share;
     -- Recheck current ownership after locks; never trust a stale page/session.
     perform 1 from public.lead_assignments a where a.lead_id=l.id and a.is_active and a.sales_id=ap.sales_id for share;
@@ -286,7 +288,8 @@ begin
     if staff_role='Sales' and ap.status not in ('SCHEDULED','CONFIRMED') then raise exception 'APPOINTMENT_LOCKED' using errcode='55000'; end if;
     if ap.version<>p_version then raise exception 'APPOINTMENT_VERSION_CONFLICT' using errcode='40001'; end if;
     if ap.status not in ('SCHEDULED','CONFIRMED') and p_action<>'correct' then raise exception 'APPOINTMENT_LOCKED' using errcode='55000'; end if;
-    if not pose_private.appointment_ready(ap.id) and (staff_role='Sales' or p_action not in ('correct','cancel')) then
+    -- Missing details are filled with "edit"; only completing or rescheduling needs a complete appointment.
+    if not pose_private.appointment_ready(ap.id) and p_action not in ('edit','cancel','correct') then
       raise exception 'APPOINTMENT_INCOMPLETE' using errcode='55000';
     end if;
     previous:=to_jsonb(ap)-'payload_fingerprint'-'idempotency_key'||jsonb_build_object('starts_at',ap.appointment_time);

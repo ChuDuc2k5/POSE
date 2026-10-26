@@ -10,6 +10,8 @@ export type Appointment = {
   id: string; lead_id: string; sales_id: string; property_id: string | null;
   title: string; starts_at: string; ends_at: string | null; channel: AppointmentChannel | null; location: string; notes: string;
   status: keyof typeof appointmentDisplayStatusLabels; result: string; cancel_reason: string; version: number; created_at: string; updated_at: string; needs_details: boolean;
+  /** AI/User: booked by the customer through the AI chat; Sales/Admin: created in M09. */
+  source: 'AI' | 'User' | 'Sales' | 'Admin';
   customer: { id: string; name: string; phone: string | null; email: string | null };
   sales_name: string; lead_status: Lead['status']; lead_archived: boolean;
   property: { id: string; name: string; code: string; location: string } | null; can_manage: boolean;
@@ -38,5 +40,6 @@ export function appointmentInstant(local: string) {
   if (!/^[1-9]\d{3}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(local) || !Number.isFinite(Date.parse(local + ':00+07:00')) || appointmentLocal(local + ':00+07:00') !== local) throw new Error('Chọn ngày giờ hợp lệ theo giờ Việt Nam.');
   return new Date(local + ':00+07:00').toISOString();
 }
+export const appointmentFromChat = (ap: Pick<Appointment, 'source'>) => ap.source === 'AI' || ap.source === 'User';
 export function appointmentChannelName(channel: AppointmentChannel | null) { return channel ? appointmentChannelLabels[channel] : 'Chưa xác định hình thức'; }
 export function appointmentOverdue(ap: Appointment, now = Date.now()) { return ['SCHEDULED','CONFIRMED'].includes(ap.status) && !!ap.ends_at && Date.parse(ap.ends_at) < now; }

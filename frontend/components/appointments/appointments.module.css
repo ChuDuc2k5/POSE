@@ -41,6 +41,8 @@
 .customer span { color: #737f8c; margin-top: 5px; }
 .iconButton { display: inline-flex; justify-content: center; align-items: center; width: 32px; height: 32px; flex-shrink: 0; padding: 0; border: 1px solid #e7e9e1; border-radius: 8px; color: #7a8490; background: white; }
 .badge { display: inline-block; border-radius: 20px; background: #f1edfa; color: #81729e; padding: 5px 10px; font-size: 10px; white-space: nowrap; }
+.chat { margin-left: 6px; background: #e8f2ee; color: #3f7a63; }
+.needsDetails { display: block; color: #a8742c; font-weight: 600; }
 .completed { color: #3c7a61; background: #edf6ed; }
 .cancelled { color: #8a7773; background: #f3eeeb; }
 .overdue { display: inline-block; margin: 7px 6px 0; padding: 3px 7px; color: #a86b38; background: #fff5e6; border-radius: 5px; font-size: 9px; }
