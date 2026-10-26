@@ -17,7 +17,7 @@ import { runAgent } from './agent.ts';
 import { complete, querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
 import { setAiRequestSession, logAiRequest } from './request-log.js';
 import { questionPreview } from './privacy.js';
-import { adviceOrServiceQuestion, budgetFollowUp, clarificationFor, genericSearchQuestion, missingBudgetQuestion, referencedListingCodes } from './history-aware.js';
+import { adviceOrServiceQuestion, budgetFollowUp, clarificationFor, genericSearchQuestion, missingBudgetQuestion, referencedListingCodes, searchCriteriaFromHistory } from './history-aware.js';
 import { sanitizeReply } from './guard.js';
 import { withFormerDistrict } from './ward-label.js';
 import { moneyAmounts, priceLabel } from './money.js';
@@ -212,7 +212,8 @@ export class AiService {
     }
     // Small models rarely ask for a search on their own; search the catalogue from the
     // question itself, and if nothing matches widen once so the answer can compare.
-    const inferred=searchPerformed ? null:(budgetAdjustment?.filters || inferSearch(source));
+    const rememberedCriteria=searchCriteriaFromHistory(source,sanitizedHistory);
+    const inferred=searchPerformed ? null:{...rememberedCriteria,...(budgetAdjustment?.filters || {})};
     // `inferSearch` is only an input to the validated query step below.
     const actions:{tool:string;args_hash:string;decision:string;reason:string;rule_version:string}[]=[];
     const log=(tool:string,args:unknown,reason:string|null,decision?:'flagged')=>actions.push({tool,args_hash:hash(JSON.stringify(args) || 'null'),decision:decision || (reason ? 'blocked':'allowed'),reason:reason || 'VALIDATED',rule_version:GUARD_VERSION});
@@ -247,7 +248,8 @@ export class AiService {
         const inferredTransaction=inferTransactionType(source);
         if(inferredTransaction)queryFilters.transaction_type=inferredTransaction;
         // The model rarely fills area bounds and reads "có 2 tỷ… vay" as a 2 tỷ ceiling; the deterministic parse wins there.
-        const inferredFilters=inferSearch(source);
+         const inferredFilters=inferSearch(source);
+         for(const key of ['location','locations','type','transaction_type','minPrice','maxPrice','minArea','maxArea','bedrooms'] as const)if(queryFilters[key]===undefined && rememberedCriteria[key]!==undefined)queryFilters[key]=rememberedCriteria[key];
         if(inferredFilters?.keywords?.length)queryKeywords=[...new Set([...queryKeywords,...inferredFilters.keywords])].slice(0,8);
         if(inferredFilters?.minArea!==undefined && queryFilters.minArea===undefined)queryFilters.minArea=inferredFilters.minArea;
         if(inferredFilters?.maxArea!==undefined && queryFilters.maxArea===undefined)queryFilters.maxArea=inferredFilters.maxArea;
@@ -256,11 +258,11 @@ export class AiService {
         // The newest message wins: what it states explicitly replaces the model's reading of earlier turns,
         // and a price from an earlier turn is never carried into a message that names none.
         if(inferredFilters){
-          for(const key of ['location','locations','type','transaction_type','minPrice','maxPrice'] as const)if(inferredFilters[key]!==undefined)queryFilters[key]=inferredFilters[key];
+          for(const key of ['location','locations','type','transaction_type','minPrice','maxPrice','minArea','maxArea','bedrooms'] as const)if(inferredFilters[key]!==undefined)queryFilters[key]=inferredFilters[key];
           if(inferredFilters.location)delete queryFilters.locations;
           if(inferredFilters.locations)delete queryFilters.location;
         }
-        if(!moneyAmounts(source).length){delete queryFilters.minPrice;delete queryFilters.maxPrice;}
+         if(!moneyAmounts(source).length && rememberedCriteria.minPrice===undefined && rememberedCriteria.maxPrice===undefined){delete queryFilters.minPrice;delete queryFilters.maxPrice;}
         if(genericHome(source))delete queryFilters.type;
         referenceIds=query.refers_to_previous.map(index=>interestIds[index-1]).filter((value):value is string=>typeof value==='string');
       } catch(error) { if(!(error instanceof Error && error.message==='NOT_A_PROPERTY_QUERY'))log('query_step',source,'invalid_query','flagged'); }
@@ -536,13 +538,22 @@ export class AiService {
     const hasDisclosure=sanitizedHistory.some(turn=>turn.role==='assistant' && turn.content.includes(disclosure));
     const nearbyFor=(location?:string)=>{if(!location)return [];const district=location.normalize('NFC').match(/(?:quận|q\.?|district)\s*(\d{1,2})/iu)?.[1];const known:Record<string,string[]>={'7':['Quận 8','Nhà Bè'],'8':['Quận 7','Bình Chánh']};if(district&&known[district])return known[district];const row=hcmWards.find(item=>item.formerDistricts.some(value=>value.normalize('NFC').toLocaleLowerCase('vi')===location.normalize('NFC').toLocaleLowerCase('vi')));return row?.formerWards.slice(0,2)||[];};
     const area=String(budgetAdjustment?.filters.location || queryFilters.location || '') || undefined;
+    const criteriaLabel=(value: unknown)=>typeof value==='string' && value.trim() ? value.trim() : '';
+    const rememberedLocation=criteriaLabel(queryFilters.location || (Array.isArray(queryFilters.locations) ? queryFilters.locations[0] : ''));
+    const locationForReply=rememberedLocation ? (/(?:quận|q\.?)\s*9\b/iu.test(rememberedLocation) ? `${rememberedLocation} (Thủ Đức)` : withFormerDistrict(rememberedLocation)) : '';
+    const typeForReply=queryFilters.type==='House' ? 'Nhà' : queryFilters.type==='Apartment' ? 'Căn hộ' : queryFilters.type==='Villa' ? 'Biệt thự' : queryFilters.type==='Land' ? 'Đất' : '';
+    const transactionForReply=queryFilters.transaction_type==='Rent' ? `${typeForReply ? `${typeForReply} ` : ''}thuê` : queryFilters.transaction_type==='Sale' ? `${typeForReply ? `${typeForReply} ` : ''}mua` : '';
+    const budgetForReply=typeof queryFilters.maxPrice==='number' ? `dưới ${priceLabel(queryFilters.maxPrice,queryFilters.transaction_type==='Rent')}` : typeof queryFilters.minPrice==='number' ? `từ ${priceLabel(queryFilters.minPrice,queryFilters.transaction_type==='Rent')}` : '';
+    const roomsForReply=typeof queryFilters.bedrooms==='number' ? `${queryFilters.bedrooms} phòng ngủ` : '';
+    const criteriaParts=[transactionForReply,locationForReply && `ở ${locationForReply}`,budgetForReply,roomsForReply].filter(Boolean);
+    const criteriaLine=searchPerformed && sanitizedHistory.some(turn=>turn.role==='user') && criteriaParts.length ? `\nTiêu chí đã ghi nhớ: ${criteriaParts.join(', ')}:` : '';
     const modelAlreadyNoMatch=hasNoMatchReply(result.reply);
     const followUpQuestion=budgetQuestion || genericClarification?.question || null;
     const appendBudget=followUpQuestion && !/[?？]\s*$/.test(result.reply.trim()) ? `\n${followUpQuestion}` : '';
     // No listing matched: always point to the consultant, even when the model only suggested widening the search.
     const handoffLine=searchPerformed && !items.length && Object.keys(queryFilters).length>0 && input.filters===undefined && !input.property_id && !contactOnly && !ownerRequest(source) && !/chuyên viên|nhân viên tư vấn/iu.test(result.reply) ? ' Nếu chưa ưng, mình nhờ chuyên viên tư vấn tìm thêm giúp bạn nhé.' : '';
     const nearestLine=nearestReason && related.length && !items.length ? `\nMình gửi bên dưới ${related.length} căn gần tiêu chí nhất (${nearestReason.toLocaleLowerCase('vi')}) để bạn tham khảo nhé.${handoffLine}` : handoffLine ? `\n${handoffLine.trim()}` : '';
-    const reply=(!hasDisclosure && count===0 ? `${disclosure}\n`:'')+(cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatch && !modelAlreadyNoMatch ? `${noMatchReply(source)}\n` : related.length && !items.length && !modelAlreadyNoMatch ? `${noMatchReply(source).split('. ')[0]}.\n` : '')+(cheaperNoMatch || blocked && !items.length && noMatch && !modelAlreadyNoMatch ? '' : (blocked ? groundedSummary(items):result.reply))+unsupportedSuffix+ownerSuffix+loanSuffix+bookingLine+contactLine+nearestLine+similarLine+appendBudget;
+     const reply=(!hasDisclosure && count===0 ? `${disclosure}\n`:'')+criteriaLine+(cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatch && !modelAlreadyNoMatch ? `${noMatchReply(source)}\n` : related.length && !items.length && !modelAlreadyNoMatch ? `${noMatchReply(source).split('. ')[0]}.\n` : '')+(cheaperNoMatch || blocked && !items.length && noMatch && !modelAlreadyNoMatch ? '' : (blocked ? groundedSummary(items):result.reply))+unsupportedSuffix+ownerSuffix+loanSuffix+bookingLine+contactLine+nearestLine+similarLine+appendBudget;
     // Only a detail-page chat may say the customer "is viewing" a listing (also covers regenerated answers).
     const viewingFixed=viewedPropertyId ? reply : reply.replace(/(^|[.!?\n]\s*)Bạn đang xem(?: có)?(?: các| những)? (?=(?:hai|ba|\d+)?\s*(?:căn|nhà|lô|đất))/gu,'$1Mình gợi ý ');
     // "tầng 12 của tòa nhà có 12 tầng": the unit floor never tells how tall the building is, unless the listing says so.

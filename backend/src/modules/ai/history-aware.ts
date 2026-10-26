@@ -114,6 +114,42 @@ const previousSearch = (history: { role: string; content: string }[]) => {
   }
   return {};
 };
+const vagueCriteriaAnswer = /^(?:chưa rõ|không rõ|chưa biết|tùy|gợi ý|không giới hạn)(?:[\s,.:;-].*)?$/iu;
+const explicitNewSearch = /(?:tìm|kiếm)\s+(?:[^\n]{0,40}\s+)?(?:mua|thuê|nhà|căn|đất|phòng)|(?:muốn|cần)\s+(?:mua|thuê)|khác\s+hoàn\s+toàn/iu;
+const bedroomCount = (text: string) => {
+  const match = text.match(/(?<!\d)(\d+)\s*(?:phòng\s*ngủ|pn|phòng)(?!\p{L})/iu);
+  return match ? Number(match[1]) : undefined;
+};
+const inferredCriteria = (text: string) => {
+  const inferred = inferSearch(text) || {};
+  const bedrooms = bedroomCount(text);
+  return bedrooms === undefined ? inferred : { ...inferred, bedrooms };
+};
+export function searchCriteriaFromHistory(message: string, history: { role: string; content: string }[]) {
+  const criteria: Record<string, unknown> = {};
+  const current = inferredCriteria(message);
+  if (!Object.keys(current).length && !vagueCriteriaAnswer.test(message) && !/(?:rẻ hơn|cao hơn|tăng ngân sách|ngân sách cao hơn)/iu.test(message)) return current as ReturnType<typeof inferSearch> & { bedrooms?: number };
+  const reset = explicitNewSearch.test(message) && history.some(turn => turn.role === 'user');
+  if (!reset) {
+    for (const turn of history) {
+      if (turn.role !== 'user') continue;
+      Object.assign(criteria, inferredCriteria(turn.content));
+    }
+  }
+  Object.assign(criteria, current);
+  const previousAssistant = [...history].reverse().find(turn => turn.role === 'assistant')?.content || '';
+  if (vagueCriteriaAnswer.test(message)) {
+    if (/khu vực|quận|phường/iu.test(previousAssistant)) {
+      delete criteria.location;
+      delete criteria.locations;
+    }
+    if (/ngân sách|triệu|tỷ/iu.test(previousAssistant)) {
+      delete criteria.minPrice;
+      delete criteria.maxPrice;
+    }
+  }
+  return criteria as ReturnType<typeof inferSearch> & { bedrooms?: number };
+}
 export function budgetFollowUp(message: string, history: HistoryTurn[]): BudgetFollowUp | null {
   const explicit = inferSearch(message);
   const cheaper = cheaperBudget.test(message);
@@ -144,21 +180,36 @@ export function clarificationFor(message: string, history: { role: string; conte
   // A named listing ("Đặt lịch xem căn RVL-…") or a booking/saving request is never a new search.
   // A question about the listing just discussed ("Tiền cọc mấy tháng?") is answered from that listing.
   if (referencedListingCodes(message, history).codes.length) return { needed: false, question: null, options: [] };
-  if (!searchIntent.test(message) || budgetFollowUp(message, history) || locationPattern.test(message) || namesPlace(message) || !!(inferSearch(message)?.location || inferSearch(message)?.locations?.length) || isFollowUp(message) || listingCodes(message).length || /(?<![\p{L}])(?:đặt\s+lịch|hẹn\s+xem|lưu\s+căn|yêu\s+thích|liên\s+hệ|chuyên\s+viên)(?![\p{L}])/iu.test(message)) return { needed: false, question: null, options: [] };
-  const location = previousSearchLocation(history);
   const inferred = inferSearch(message) || {};
-  const hasBudget = inferred.minPrice !== undefined || inferred.maxPrice !== undefined;
-  const concrete = concreteSearchKeywords(message).length > 0 || /(?:\d+\s*(?:m²|m2|m\s*2|phòng|pn)|diện\s+tích|nội\s+thất|đầy\s+đủ|nguyên\s+căn|kinh\s+doanh|trong\s+\d+\s+tháng|hợp\s+đồng(?:\s+ngắn)?\s+hạn|dự\s+án|tên\s+(?:dự\s+án|khu)|khoảng\s+\d+)/iu.test(message);
-  // A new search must establish the two fields that make a catalogue search useful.
+  const criteria = searchCriteriaFromHistory(message, history);
   const previousAssistant = [...history].reverse().find(turn => turn.role === 'assistant')?.content || '';
   const previousWasClarification = /khu vực nào|ngân sách.*(?:tháng|triệu|tỷ)|chưa rõ,? gợi ý/iu.test(previousAssistant);
+  const criteriaReply = history.length > 0 && !explicitNewSearch.test(message) && (Object.keys(inferred).length > 0 || vagueCriteriaAnswer.test(message)) && previousWasClarification;
+  const budgetAdjustment = budgetFollowUp(message, history);
+  if ((!searchIntent.test(message) && !criteriaReply) || (budgetAdjustment && !criteriaReply) || (!criteriaReply && (locationPattern.test(message) || namesPlace(message) || !!(inferred.location || inferred.locations?.length))) || isFollowUp(message) || listingCodes(message).length || /(?<![\p{L}])(?:đặt\s+lịch|hẹn\s+xem|lưu\s+căn|yêu\s+thích|liên\s+hệ|chuyên\s+viên)(?![\p{L}])/iu.test(message)) return { needed: false, question: null, options: [] };
+  const location = typeof criteria.location === 'string' ? criteria.location : criteria.locations?.[0] || previousSearchLocation(history);
+  const hasBudget = criteria.minPrice !== undefined || criteria.maxPrice !== undefined;
+  const concrete = concreteSearchKeywords(message).length > 0 || /(?:\d+\s*(?:m²|m2|m\s*2|phòng|pn)|diện\s+tích|nội\s+thất|đầy\s+đủ|nguyên\s+căn|kinh\s+doanh|trong\s+\d+\s+tháng|hợp\s+đồng(?:\s+ngắn)?\s+hạn|dự\s+án|tên\s+(?:dự\s+án|khu)|khoảng\s+\d+)/iu.test(message);
+  // A new search must establish the two fields that make a catalogue search useful.
   const kind = /chung\s+cư|căn\s+hộ/iu.test(message) ? 'chung cư' : /đất/iu.test(message) ? 'đất' : 'nhà';
+  const action = criteria.transaction_type === 'Rent' ? 'thuê' : criteria.transaction_type === 'Sale' ? 'mua' : /thuê/iu.test(message) ? 'thuê' : 'tìm';
+  if (criteriaReply && vagueCriteriaAnswer.test(message)) return { needed: false, question: null, options: [] };
+  if (criteriaReply && !location && hasBudget) return {
+    needed: true,
+    question: `Bạn muốn ${action} ở khu vực nào (quận/phường)? Nếu chưa chắc, mình gợi ý vài khu nhé.`,
+    options: ['Quận 7', 'Bình Thạnh', 'Thủ Đức', 'Chưa rõ, gợi ý giúp tôi'],
+  };
+  if (criteriaReply && location && !hasBudget) return {
+    needed: true,
+    question: `Ngân sách ${action} của bạn khoảng bao nhiêu${action === 'thuê' ? ' mỗi tháng' : ''}?`,
+    options: action === 'thuê' ? ['Dưới 10 triệu', '10–20 triệu', 'Chưa rõ, gợi ý giúp tôi'] : ['Dưới 3 tỷ', '3–6 tỷ', 'Chưa rõ, gợi ý giúp tôi'],
+  };
   if (!location && !hasBudget && !concrete && !genericSearchQuestion(message) && (!history.length || !previousWasClarification)) return {
     needed: true,
     question: /thuê/iu.test(message) ? `Bạn đang tìm ${kind} thuê ở khu vực nào (quận, phường hay tuyến đường) và ngân sách khoảng bao nhiêu mỗi tháng ạ? Nếu chưa chắc, mình gợi ý vài khu phù hợp nhé.` : `Bạn đang tìm mua ${kind} ở khu vực nào (quận, phường hay tuyến đường) và ngân sách khoảng bao nhiêu ạ? Nếu chưa chắc, mình gợi ý vài khu phù hợp nhé.`,
     options: /thuê/iu.test(message) ? ['Dưới 10 triệu', '10–20 triệu', 'Chưa rõ, gợi ý giúp tôi'] : ['Dưới 3 tỷ', '3–6 tỷ', 'Chưa rõ, gợi ý giúp tôi'],
   };
-  // A budget alone is concrete enough to search; the area question can follow the results.
+  // Preserve the legacy direct one-message budget search; a budget answer in a clarification flow asks for area first.
   if (!location && hasBudget) return { needed: false, question: null, options: [] };
   if (!location) return { needed: false, question: null, options: [] };
   if (!hasBudget && !locationPattern.test(message) && !namesPlace(message)) {
@@ -166,6 +217,6 @@ export function clarificationFor(message: string, history: { role: string; conte
     return { needed: true, question: `Bạn muốn ${action} ở ${location} như trước hay khu vực khác?`, options: [location, 'Khu vực khác', 'Không giới hạn khu vực'] };
   }
   if (!hasBudget) return { needed: false, question: null, options: [] };
-  const action = /thuê/iu.test(message) ? 'thuê' : /mua/iu.test(message) ? 'mua' : 'tìm';
+  if (criteriaReply) return { needed: false, question: null, options: [] };
   return { needed: true, question: `Bạn muốn ${action} ở ${location} như trước hay khu vực khác?`, options: [location, 'Khu vực khác', 'Không giới hạn khu vực'] };
 }

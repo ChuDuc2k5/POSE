@@ -28,7 +28,7 @@ describe('cards without [n] citations', () => {
   });
 });
 
-import { clarificationFor, missingBudgetQuestion, referencedListingCodes } from '../src/modules/ai/history-aware.js';
+import { clarificationFor, missingBudgetQuestion, referencedListingCodes, searchCriteriaFromHistory } from '../src/modules/ai/history-aware.js';
 import { ownerRequest, ownerValuationQuestion, listingFollowUpFallback } from '../src/modules/ai/unsupported.js';
 import { explicitWriteIntent } from '../src/modules/ai/guard.js';
 describe('picking a listing that was just shown', () => {
@@ -54,6 +54,58 @@ describe('search clarification', () => {
   });
   it('searches when only a budget is supplied', () => {
     expect(clarificationFor('Tìm căn hộ dưới 3 tỷ', []).needed).toBe(false);
+  });
+  it('asks for the area after a budget chip in a clarification flow', () => {
+    const history = [
+      { role: 'user', content: 'Tôi muốn thuê nhà' },
+      { role: 'assistant', content: 'Bạn đang tìm nhà thuê ở khu vực nào và ngân sách khoảng bao nhiêu mỗi tháng ạ?' },
+    ];
+    const result = clarificationFor('Dưới 10 triệu', history);
+    expect(result).toMatchObject({ needed: true });
+    expect(result.question).toMatch(/khu vực/iu);
+    expect(result.options).toEqual(['Quận 7', 'Bình Thạnh', 'Thủ Đức', 'Chưa rõ, gợi ý giúp tôi']);
+  });
+  it('accepts an area after the budget chip without listing before the area is known', () => {
+    const history = [
+      { role: 'user', content: 'Tôi muốn thuê nhà' },
+      { role: 'assistant', content: 'Bạn đang tìm nhà thuê ở khu vực nào và ngân sách khoảng bao nhiêu mỗi tháng ạ?' },
+      { role: 'user', content: 'Dưới 10 triệu' },
+      { role: 'assistant', content: 'Bạn muốn thuê ở khu vực nào (quận/phường)? Nếu chưa chắc, mình gợi ý vài khu nhé.' },
+    ];
+    expect(clarificationFor('Ở Quận 9', history).needed).toBe(false);
+    expect(searchCriteriaFromHistory('Ở Quận 9', history)).toMatchObject({ transaction_type: 'Rent', maxPrice: 10000000, location: 'Quận 9' });
+  });
+  it('searches without an area when the area answer is vague', () => {
+    const history = [
+      { role: 'user', content: 'Tôi muốn thuê nhà' },
+      { role: 'assistant', content: 'Bạn muốn thuê ở khu vực nào (quận/phường)? Nếu chưa chắc, mình gợi ý vài khu nhé.' },
+      { role: 'user', content: 'Dưới 10 triệu' },
+    ];
+    expect(clarificationFor('Chưa rõ, gợi ý giúp tôi', history).needed).toBe(false);
+    expect(searchCriteriaFromHistory('Chưa rõ, gợi ý giúp tôi', history)).toMatchObject({ transaction_type: 'Rent', maxPrice: 10000000 });
+    expect(searchCriteriaFromHistory('Chưa rõ, gợi ý giúp tôi', history).location).toBeUndefined();
+  });
+  it('asks for budget after an area-only answer in the first clarification flow', () => {
+    const history = [
+      { role: 'user', content: 'Tôi muốn mua căn hộ' },
+      { role: 'assistant', content: 'Bạn đang tìm mua căn hộ ở khu vực nào và ngân sách khoảng bao nhiêu ạ?' },
+    ];
+    const result = clarificationFor('Quận 7', history);
+    expect(result).toMatchObject({ needed: true });
+    expect(result.question).toMatch(/ngân sách/iu);
+    expect(result.options).toEqual(['Dưới 3 tỷ', '3–6 tỷ', 'Chưa rõ, gợi ý giúp tôi']);
+  });
+  it('resets old rent budget for an explicit new purchase search', () => {
+    const history = [
+      { role: 'user', content: 'Tôi muốn thuê nhà dưới 10 triệu ở Quận 9' },
+      { role: 'assistant', content: 'Mình đã tìm thấy các căn phù hợp.' },
+    ];
+    expect(searchCriteriaFromHistory('Tìm nhà mua ở Quận 7', history)).toMatchObject({ transaction_type: 'Sale', type: 'House', location: 'Quận 7' });
+    expect(searchCriteriaFromHistory('Tìm nhà mua ở Quận 7', history).maxPrice).toBeUndefined();
+  });
+  it('searches immediately when all criteria are in one message', () => {
+    expect(clarificationFor('Thuê nhà Quận 7 dưới 15 triệu', []).needed).toBe(false);
+    expect(searchCriteriaFromHistory('Thuê nhà Quận 7 dưới 15 triệu', [])).toMatchObject({ transaction_type: 'Rent', type: 'House', location: 'Quận 7', maxPrice: 15000000 });
   });
   it('answers a follow-up about the listing in history instead of clarifying', () => {
     expect(clarificationFor('Tiền cọc mấy tháng và hợp đồng thuê tối thiểu bao lâu?', [{ role: 'user', content: 'Chi tiết căn CFR-0FC7C10BB520419B' }]).needed).toBe(false);

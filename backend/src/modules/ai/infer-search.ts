@@ -1,6 +1,6 @@
 import { moneyAmounts } from './money.js';
 
-export type InferredSearch = { location?: string; locations?: string[]; type?: string; minPrice?: number; maxPrice?: number; minArea?: number; maxArea?: number; transaction_type?: 'Sale'|'Rent'; keywords?: string[] };
+export type InferredSearch = { location?: string; locations?: string[]; type?: string; minPrice?: number; maxPrice?: number; minArea?: number; maxArea?: number; bedrooms?: number; transaction_type?: 'Sale'|'Rent'; keywords?: string[] };
 export const centralFormerDistricts = ['Quận 1', 'Quận 2', 'Quận 3', 'Quận 4', 'Quận 5', 'Quận 7', 'Quận 10', 'Quận Bình Thạnh', 'Phú Nhuận'];
 const landmarkLocations: [RegExp, string | string[]][] = [
   [/RMIT|Tôn Đức Thắng|Phú Mỹ Hưng/i, 'Quận 7'],
@@ -63,6 +63,8 @@ export function inferSearch(text: string): InferredSearch | null {
   if (nearCentre) { filters.locations = centralFormerDistricts; delete filters.location; }
   const type = types.find(([pattern]) => pattern.test(text));
   if (type) filters.type = type[1];
+  const bedrooms = text.match(/(?<!\d)(\d+)\s*(?:phòng\s*ngủ|pn|phòng)(?!\p{L})/iu);
+  if (bedrooms) filters.bedrooms = Number(bedrooms[1]);
   const keywords = searchKeywords(text);
   if (keywords.length) filters.keywords = keywords;
   const below = text.match(/(?:dưới|tối đa|không quá|<=?|tầm|khoảng|budget|ngân sách)[^\d]{0,12}([\d.,]+\s*(?:tỷ|tỉ|triệu|tr))/i);

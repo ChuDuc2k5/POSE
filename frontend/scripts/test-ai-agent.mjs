@@ -131,7 +131,7 @@ const userId='f6000000-0000-4000-8000-000000000001',otherId='f6000000-0000-4000-
 const users={User:userId,Other:otherId,Sales:'f6000000-0000-4000-8000-000000000003',Admin:'f6000000-0000-4000-8000-000000000004'};
 const directory={Sales:'f6500000-0000-4000-8000-000000000003',Admin:'f6500000-0000-4000-8000-000000000004'};
 let mode='ok',modelCalls=0,prompt,providerOffline=false,verifiedPhone=false,searchReads=0,catalogSearchReads=0,ragCalls=0,rerankNoAnswer=false;
-const modelData=[],modelOutputs=[];
+const modelData=[],modelOutputs=[],ragRequests=[];
 const sessions=new Map(),messages=[],logs=[],requestLogs=[],tasks=new Map(),appointments=new Map(),leads=new Map(),customers=new Map(),preferences=new Map(),assignments=[],bookingRows=[];let lastRequestSessionId=null,unsafeSessionId=null,unsafePending=false;
 const customerFor=uid=>uid ? [...customers.values()].find(c=>c.auth_user_id===uid):undefined;
 const leadFor=uid=>[...leads.values()].find(l=>l.customer_id===customerFor(uid)?.id && !l.archived && !['CONVERTED','LOST'].includes(l.status));
@@ -323,9 +323,10 @@ const provider=createServer(async(req,res)=>{
   if(role!=='Admin' && !(role==='Sales' && assigned(input.p_lead,directory.Sales)))return error('42501','FORBIDDEN',403);
   const lead=leads.get(input.p_lead);if(lead.version!==input.p_version)return error('40001','VERSION_CONFLICT',409);lead.temperature=input.p_classification==='Unrated' ? null:input.p_classification.toUpperCase();lead.version++;return reply(200,{classification:input.p_classification,version:lead.version});
  }
- if(url.pathname.endsWith('/pose_system_search_knowledge')){
-  ragCalls++;
-  if(mode==='rag-failure')return reply(500,{message:'fixture retrieval failure'});
+  if(url.pathname.endsWith('/pose_system_search_knowledge')){
+   ragCalls++;
+   ragRequests.push(input.p_filters || {});
+   if(mode==='rag-failure')return reply(500,{message:'fixture retrieval failure'});
   const context=Array.isArray(input.p_context)?input.p_context:[];
   const knownContext=context.filter(id=>properties.some(p=>p.id===id));
   const rows=properties.filter(p=>p.publication==='Published'&&!p.archived&&(!context.length||knownContext.includes(p.id))).map((p,i)=>({chunk_id:`chunk-${i}`,document_id:`doc-${i}`,source_id:p.id,source_type:'Property',header:`${p.code} ${p.name}`,content:`${p.name} ${p.location} published listing.`,vector_rank:context.includes(p.id)?Math.max(1,i):i+1,text_rank:context.includes(p.id)?1:i+1,similarity:context.includes(p.id)?.95:.9,embed_model:'fixture',code:p.code,name:p.name,location:p.location,property_type:p.property_type,transaction_type:p.transaction_type,price:p.price,price_period:p.price_period,availability:p.availability,updated_at:p.updated_at})).sort((a,b)=>(b.similarity-a.similarity)||(a.vector_rank-b.vector_rank));
@@ -397,8 +398,49 @@ try{
  for(const [path,cookie,expected] of [['/properties','','AiChatPage'],[`/properties/${properties[0].id}`,'','AiChatPage'],['/','pose-access=fixture-User','AiChatPage'],['/sales','pose-access=fixture-Sales','Bàn giao từ trợ lý AI'],['/admin','pose-access=fixture-Admin','AI Agent']]){
   const page=await call(path,null,cookie);check(page.ok && (await page.text()).includes(expected),`UI mounted on ${path}`);
  }
- const ragBeforeNormal=ragCalls,catalogBeforeNormal=catalogSearchReads;
- const clarificationBefore=ragCalls;const clarificationResponse=await call('/api/ai/chat',{...base,message:'Tôi muốn thuê chung cư'});const clarificationChat=await clarificationResponse.json();check(clarificationResponse.status===200&&clarificationChat.clarify?.needed&&clarificationChat.sources.length===0&&ragCalls===clarificationBefore,'Broad first search asks for area and budget before retrieval');check(clarificationChat.clarify.options.includes('Chưa rõ, gợi ý giúp tôi'),'Clarification offers a no-preference option');
+  const ragBeforeNormal=ragCalls,catalogBeforeNormal=catalogSearchReads;
+  const clarificationBefore=ragCalls;const clarificationResponse=await call('/api/ai/chat',{...base,message:'Tôi muốn thuê chung cư'});const clarificationChat=await clarificationResponse.json();check(clarificationResponse.status===200&&clarificationChat.clarify?.needed&&clarificationChat.sources.length===0&&ragCalls===clarificationBefore,'Broad first search asks for area and budget before retrieval');check(clarificationChat.clarify.options.includes('Chưa rõ, gợi ý giúp tôi'),'Clarification offers a no-preference option');
+  {
+   const start=await call('/api/ai/chat',base);
+   const startData=await start.json();
+   const flowCookie=start.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];
+   const firstHistory=[{role:'user',content:'Tôi muốn thuê nhà'},{role:'assistant',content:'Bạn đang tìm nhà thuê ở khu vực nào và ngân sách khoảng bao nhiêu mỗi tháng ạ?'}];
+   const budgetTurn=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Dưới 10 triệu',history:firstHistory},flowCookie);
+   const budgetData=await budgetTurn.json();
+   check(budgetData.clarify?.needed&&budgetData.sources.length===0&&budgetData.clarify.options.includes('Quận 7')&&budgetData.clarify.options.includes('Chưa rõ, gợi ý giúp tôi'),'Budget chip asks for area with area chips and no listings');
+   const secondHistory=[...firstHistory,{role:'user',content:'Dưới 10 triệu'},{role:'assistant',content:budgetData.reply}];
+   const areaTurn=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Ở Quận 9',history:secondHistory},flowCookie);
+   const areaData=await areaTurn.json();
+   const areaFilters=ragRequests.slice().reverse().find(filters=>filters.location==='Quận 9'&&filters.transaction_type==='Rent'&&filters.maxPrice===10000000);
+   check(!areaData.clarify?.needed&&areaFilters&&/Quận 9|Thủ Đức/iu.test(areaData.reply)&&/10 triệu/iu.test(areaData.reply),'Area refinement carries Rent and budget, searches Quận 9, and names criteria');
+   const vagueTurn=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Chưa rõ, gợi ý giúp tôi',history:secondHistory},flowCookie);
+   const vagueData=await vagueTurn.json();
+   const vagueFilters=ragRequests.slice().reverse().find(filters=>filters.transaction_type==='Rent'&&filters.maxPrice===10000000&&!filters.location&&!filters.locations);
+   check(!vagueData.clarify?.needed&&vagueFilters&&vagueData.sources.length>0,'Vague area answer searches with remembered budget and no area');
+   const newSearch=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Tìm nhà mua ở Quận 7',history:secondHistory},flowCookie);
+   const newSearchData=await newSearch.json();
+   const newSearchFilters=ragRequests.slice().reverse().find(filters=>filters.location==='Quận 7'&&filters.transaction_type==='Sale');
+   check(newSearchFilters&&!Object.hasOwn(newSearchFilters,'maxPrice')&&!Object.hasOwn(newSearchFilters,'minPrice'),'Explicit new purchase search drops old rent and budget');
+   check(!newSearchData.clarify?.needed,'Explicit new purchase search does not loop');
+  }
+  {
+   const start=await call('/api/ai/chat',base);
+   const startData=await start.json();
+   const flowCookie=start.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];
+   const history=[{role:'user',content:'Tôi muốn mua căn hộ'},{role:'assistant',content:'Bạn đang tìm mua căn hộ ở khu vực nào và ngân sách khoảng bao nhiêu ạ?'}];
+   const area=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Quận 7',history},flowCookie);
+   const areaData=await area.json();
+   check(areaData.clarify?.needed&&areaData.sources.length===0&&areaData.clarify.options.includes('Dưới 3 tỷ'),'Area-only answer asks for budget chips');
+   const budget=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Dưới 3 tỷ',history:[...history,{role:'user',content:'Quận 7'},{role:'assistant',content:areaData.reply}]},flowCookie);
+   const budgetData=await budget.json();
+   check(!budgetData.clarify?.needed,'Budget answer after area does not loop');
+  }
+  {
+   const allCriteria=await call('/api/ai/chat',{...base,message:'Thuê nhà Quận 7 dưới 15 triệu'});
+   const allCriteriaData=await allCriteria.json();
+   const allFilters=ragRequests.slice().reverse().find(filters=>filters.location==='Quận 7'&&filters.transaction_type==='Rent'&&filters.maxPrice===15000000);
+   check(!allCriteriaData.clarify?.needed&&allFilters,'All-in-one search retrieves immediately with all criteria');
+  }
  const first=await call('/api/ai/chat',base);check(first.status===200,'Guest chat succeeds');const chat=await first.json();const firstModelReply=modelOutputs.at(-1).reply;
   await delay(50);const turnLogs=requestLogs.filter(row=>row.p_session_id===chat.session.id&&row.p_kind!=='embed');check(turnLogs.length>=2 && turnLogs.every(row=>row.p_prompt_version && row.p_total_tokens>0),'Every model call is logged with prompt versions and fake usage');
  check(chat.reply.startsWith('Tôi là trợ lý AI của TERAVA.'),'First message disclosure');
