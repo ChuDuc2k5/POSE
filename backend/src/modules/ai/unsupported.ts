@@ -26,12 +26,19 @@ export function loanWords(text: string): boolean {
   return /(?<![\p{L}])(?:vay|khoản vay|trả góp)(?![\p{L}])/iu.test(text.normalize('NFC'));
 }
 
+export function contactRequest(text: string): boolean {
+  return /(?:liên hệ(?: lại)?|gọi lại|nhân viên tư vấn|chuyên viên tư vấn|gặp chuyên viên|tư vấn trực tiếp|để lại số|số điện thoại|liên hệ tư vấn)/iu.test(text);
+}
+
 export function ownerRequest(text: string): boolean {
   const normalized = normalize(text);
   // A buyer or renter ("muốn tìm", "mua", "thuê", comparing options) is never an owner unless they name their own property.
   const ownProperty = /(?:cua\s+(?:toi|minh|em|nha minh)|ky gui|dang tin|tim nguoi thue|toi\s+co\s+(?:mot\s+|1\s+)?(?:can|nha|lo|dat|bat dong san))/i.test(normalized);
-  if (!ownProperty && /(?<![a-z])(?:tim|mua|so sanh|nen chon|phuong an|dau tu|muon\s+thue|can\s+thue|(?<!cho\s)thue\s+(?:nha|can|phong|chung cu))(?![a-z])/i.test(normalized)) return false;
-  return /(?:toi\s+co\s+(?:mot\s+|1\s+)?(?:can|nha|lo|dat|bat dong san).*(?:muon\s+(?:ban|cho thue))|muon[\s\S]{0,30}(?:ban|cho thue)[\s\S]{0,20}(?:nha|can|dat)|can\s+(?:ban|cho thue)[\s\S]{0,20}(?:nha|can|dat)\s+cua\s+(?:toi|minh)|ky gui|dang tin|dang ban|tim nguoi thue|khong muon tu quan ly|ban nha cua toi|ban (?:nha|can|dat) qua (?:ben|terava)|nho (?:ben ban|terava) ban)/iu.test(normalized) || ownProperty && /phi moi gioi|hoa hong/i.test(normalized);
+  const ownerSignal = /(?:toi\s+co\s+(?:mot\s+|1\s+)?(?:can|nha|lo|dat|bat dong san).*(?:muon\s+(?:ban|cho thue)|dang ban)|muon[\s\S]{0,30}(?:ban|cho thue)[\s\S]{0,20}(?:nha|can|dat)|can\s+(?:ban|cho thue)[\s\S]{0,20}(?:nha|can|dat)\s+cua\s+(?:toi|minh)|ky gui|dang tin|tim nguoi thue|khong muon tu quan ly|ban nha cua toi|ban (?:nha|can|dat) qua (?:ben|terava)|nho (?:ben ban|terava) ban)/iu.test(normalized);
+  // "đang bán" and "bên mình có bán" describe catalogue availability unless
+  // the customer also identifies a property they own.
+  if (!ownProperty && /(?:dang ban|ben minh co|ben ban co|co\s+(?:ban|cho thue)\s+(?:nha|can|dat)|tim|mua|so sanh|nen chon|phuong an|dau tu|muon\s+thue|can\s+thue|(?<!cho\s)thue\s+(?:nha|can|phong|chung cu))/i.test(normalized)) return false;
+  return ownerSignal || ownProperty && /phi moi gioi|hoa hong/i.test(normalized);
 }
 
 export function ownerValuationQuestion(text: string): boolean {

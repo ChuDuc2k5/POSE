@@ -5,6 +5,52 @@ export type Clarification = { needed: boolean; question: string | null; options:
 const listingCodePattern = /(?<![\p{L}\d])[A-Z][A-Z\d]{0,7}-[A-Z\d]{4,40}(?![\p{L}\d])/gu;
 const searchIntent = /(?:căn|nhà|đất|phòng|mua|thuê|tìm|bất động sản|giá|chung cư|villa|shop|office)/iu;
 const locationPattern = /(?:quận|q\.?\s*\d{1,2}|huyện|thủ\s*đức|phường|xã|thành phố|tp\.?\s*hồ\s*chí\s*minh|hcm|sài\s*gòn)/iu;
+const fold = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').toLocaleLowerCase('vi');
+const concreteFeatures: [RegExp, string][] = [
+  [/nhan nha ngay|don vao o ngay/iu, 'nhận nhà ngay'],
+  [/khu dan cu/iu, 'khu dân cư'],
+  [/nho/iu, 'nhỏ'],
+  [/vo chong/iu, 'vợ chồng'],
+  [/truong hoc/iu, 'trường học'],
+  [/benh vien/iu, 'bệnh viện'],
+  [/cho(?! thue)/iu, 'chợ'],
+  [/sieu thi/iu, 'siêu thị'],
+  [/trung tam thuong mai/iu, 'trung tâm thương mại'],
+  [/hem/iu, 'hẻm'],
+  [/yen tinh/iu, 'yên tĩnh'],
+  [/may lanh/iu, 'máy lạnh'],
+  [/may giat/iu, 'máy giặt'],
+  [/noi that/iu, 'nội thất'],
+  [/dau o to|gara/iu, 'đậu ô tô'],
+  [/tang thap/iu, 'tầng thấp'],
+  [/tang cao/iu, 'tầng cao'],
+  [/ban cong/iu, 'ban công'],
+  [/\bview\b/iu, 'view'],
+  [/ho boi/iu, 'hồ bơi'],
+  [/\bgym\b/iu, 'gym'],
+  [/thang may/iu, 'thang máy'],
+  [/giam gia|ngop|cat lo|ha gia|chiet khau|gia tot|chi con/iu, 'giảm giá'],
+];
+export function concreteSearchKeywords(message: string) {
+  const text = fold(message);
+  return [...new Set(concreteFeatures.filter(([pattern]) => pattern.test(text)).map(([, keyword]) => keyword))];
+}
+export function adviceOrServiceQuestion(message: string) {
+  const text = fold(message);
+  // Process or advice wording is advice even when it mentions buying ("mua nhà lần đầu thì bắt đầu từ đâu").
+  if (/tu van(?: giup)?|bat dau tu dau|thu tuc|giay to|lam (?:the nao|sao)|nen .+ hay .+/iu.test(text)
+    && !/(?:co can|(?:can|can ho|chung cu|nha|nha pho|dat|dat nen|lo|lo dat|phong|phong tro|biet thu|van phong|bat dong san) nao)/iu.test(text)) return true;
+  return /co ho tro|duoc khong/iu.test(text)
+    // "Có đất nền nào ở Hóc Môn, đường ô tô vào được không?" asks for listings, not advice.
+    && !/(?:co can|(?:can|can ho|chung cu|nha|nha pho|dat|dat nen|lo|lo dat|phong|phong tro|biet thu|van phong|bat dong san) nao|tim|mua|thue).*(?:duoc khong|co khong)/iu.test(text)
+    // "Tôi muốn thuê nhà trong 6 tháng, có hỗ trợ hợp đồng ngắn hạn không?" also wants listings, with the FAQ.
+    && !/(?:muon|can|dang tim) (?:thue|mua) (?:nha|can|chung cu|phong|dat|mat bang|van phong)/iu.test(text);
+}
+export function genericSearchQuestion(message: string) {
+  const text = fold(message);
+  if (adviceOrServiceQuestion(message) || concreteSearchKeywords(message).length || /(?:\d+\s*(?:ty|trieu|tr)|quan\s*\d+|phuong|thu duc|binh thanh|tan phu|go vap)/iu.test(text)) return false;
+  return /(?:gioi thieu|goi y|nhung|vai|co .*(?:can|nha|bat dong san)|can nao|nha nao|bat dong san nao)/iu.test(text);
+}
 // "căn hộ này", "nhà đó", "dự án này"… point back at the listing discussed in the previous turn.
 // "quan tâm căn …", "chọn căn …" pick one of the listings just shown.
 const backReference = /(?<![\p{L}])(?:(?:căn(?:\s+hộ)?|can(?:\s+ho)?|nhà|nha|đất|dat|lô\s+đất|dự\s+án|du\s+an)\s+(?:này|nay|đó|vừa\s+rồi|trên|kia)|quan\s+tâm|quan\s+tam|(?:chọn|lấy|thích)\s+căn)(?![\p{L}])/iu;
@@ -94,6 +140,7 @@ export function budgetFollowUp(message: string, history: HistoryTurn[]): BudgetF
 export function clarificationFor(message: string, history: { role: string; content: string }[]): Clarification {
   const ownerText=message.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').toLowerCase();
   if (/(?:cho\s+thue\s+(?:nha|can)|dang\s+tin|tim\s+nguoi\s+thue|ky\s+gui|ban\s+nha\s+cua\s+toi|muon\s+cho\s+thue|(?:muon|can)\s+ban\s+(?:nha|can|dat|lo)|ban\s+nha\s+qua|nho\s+ban|phi\s+moi\s+gioi|hoa\s+hong)/u.test(ownerText)) return { needed: false, question: null, options: [] };
+  if (adviceOrServiceQuestion(message)) return { needed: false, question: null, options: [] };
   // A named listing ("Đặt lịch xem căn RVL-…") or a booking/saving request is never a new search.
   // A question about the listing just discussed ("Tiền cọc mấy tháng?") is answered from that listing.
   if (referencedListingCodes(message, history).codes.length) return { needed: false, question: null, options: [] };
@@ -101,12 +148,12 @@ export function clarificationFor(message: string, history: { role: string; conte
   const location = previousSearchLocation(history);
   const inferred = inferSearch(message) || {};
   const hasBudget = inferred.minPrice !== undefined || inferred.maxPrice !== undefined;
-  const concrete = /(?:\d+\s*(?:m²|m2|m\s*2|phòng|pn)|diện\s+tích|nội\s+thất|đầy\s+đủ|nguyên\s+căn|kinh\s+doanh|trong\s+\d+\s+tháng|hợp\s+đồng(?:\s+ngắn)?\s+hạn|dự\s+án|tên\s+(?:dự\s+án|khu)|khoảng\s+\d+)/iu.test(message);
+  const concrete = concreteSearchKeywords(message).length > 0 || /(?:\d+\s*(?:m²|m2|m\s*2|phòng|pn)|diện\s+tích|nội\s+thất|đầy\s+đủ|nguyên\s+căn|kinh\s+doanh|trong\s+\d+\s+tháng|hợp\s+đồng(?:\s+ngắn)?\s+hạn|dự\s+án|tên\s+(?:dự\s+án|khu)|khoảng\s+\d+)/iu.test(message);
   // A new search must establish the two fields that make a catalogue search useful.
   const previousAssistant = [...history].reverse().find(turn => turn.role === 'assistant')?.content || '';
   const previousWasClarification = /khu vực nào|ngân sách.*(?:tháng|triệu|tỷ)|chưa rõ,? gợi ý/iu.test(previousAssistant);
   const kind = /chung\s+cư|căn\s+hộ/iu.test(message) ? 'chung cư' : /đất/iu.test(message) ? 'đất' : 'nhà';
-  if (!location && !hasBudget && !concrete && (!history.length || !previousWasClarification)) return {
+  if (!location && !hasBudget && !concrete && !genericSearchQuestion(message) && (!history.length || !previousWasClarification)) return {
     needed: true,
     question: /thuê/iu.test(message) ? `Bạn đang tìm ${kind} thuê ở khu vực nào (quận, phường hay tuyến đường) và ngân sách khoảng bao nhiêu mỗi tháng ạ? Nếu chưa chắc, mình gợi ý vài khu phù hợp nhé.` : `Bạn đang tìm mua ${kind} ở khu vực nào (quận, phường hay tuyến đường) và ngân sách khoảng bao nhiêu ạ? Nếu chưa chắc, mình gợi ý vài khu phù hợp nhé.`,
     options: /thuê/iu.test(message) ? ['Dưới 10 triệu', '10–20 triệu', 'Chưa rõ, gợi ý giúp tôi'] : ['Dưới 3 tỷ', '3–6 tỷ', 'Chưa rõ, gợi ý giúp tôi'],

@@ -37,6 +37,16 @@ export function normalizeCitations<T extends { number?: number; code?: string }>
     return number == null ? whole : `[${number}]`;
   });
 }
+/** Remove citations that do not exist in the evidence before the output guard runs. */
+export function discardInvalidCitations<T extends { number?: number }>(reply:string, sources:T[]) {
+  const valid = new Set(sources.map(source => source.number).filter((number): number is number => typeof number === 'number'));
+  const invalid = (value:string) => [...value.matchAll(/\[(\d{1,3})\]/g)].some(match => !valid.has(Number(match[1])));
+  const missingSourceSentence = (value:string) => {
+    const text = value.replace(/\[\d{1,3}\]/g, '').replace(/^\s*[-•]\s*/u, '').trim();
+    return !text || /(?:chưa có|không có|không tìm thấy|chưa được cung cấp|không thể xác nhận)[\s\S]*(?:thông tin|dữ liệu|nguồn|chi tiết|xác nhận|cung cấp|tìm thấy)/iu.test(text);
+  };
+  return reply.split(/(\r?\n+|(?<=[.!?])\s+)/u).map(part => invalid(part) && missingSourceSentence(part) ? '' : part.replace(/\[(\d{1,3})\]/g, (whole, number:string) => valid.has(Number(number)) ? whole : '')).join('').replace(/[ \t]{2,}/g, ' ').replace(/\s+([,.;!?])/gu, '$1').trim();
+}
 export function sourcesFromCitations<T extends { number?: number; code?: string; price?: number|null }>(reply:string, sources:T[], referencedListing=false) {
   // A refusal never carries cards, even while a listing is being discussed.
   if (refusal.test(reply)) return [];
@@ -149,7 +159,7 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
   if(clauses(reply).some(clause=>commitment(clause,grounded)))return 'UNSUPPORTED_COMMITMENT';
   // Travel times and distances ("khoảng 15-30 phút", "3 km") are only allowed when a cited source states them.
   const sourceText=`${context?.sourceText||''} ${evidence.map(e=>`${e.name||''} ${e.location||''}`).join(' ')}`;
-  for(const m of reply.matchAll(/\d+(?:[,.]\d+)?(?:\s*[-–]\s*\d+(?:[,.]\d+)?)?\s*(?:phút|km|cây số)(?![\p{L}])/giu))if(!sourceText.includes(m[0]) && !customerText.includes(m[0].replace(/\s+/gu,' ')) && !customerText.replace(/\s+/gu,'').includes(m[0].replace(/\s+/gu,'')))return 'UNSUPPORTED_TRAVEL';
+  for(const m of reply.matchAll(/\d+(?:[,.]\d+)?(?:\s*[-–]\s*\d+(?:[,.]\d+)?)?\s*(?:phút|km|cây số)(?![\p{L}])/giu))if(!sourceText.replace(/\s+/gu,'').includes(m[0].replace(/\s+/gu,'')) && !customerText.includes(m[0].replace(/\s+/gu,' ')) && !customerText.replace(/\s+/gu,'').includes(m[0].replace(/\s+/gu,'')))return 'UNSUPPORTED_TRAVEL';
   const uuid=/[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}/gi;
   if([...reply.matchAll(uuid)].some(m=>!evidence.some(e=>e.id.toLowerCase()===m[0].toLowerCase())))return 'UNSUPPORTED_PROPERTY';
   const withoutDates=reply.replace(/(?<![a-z\d_-])\d{4}-\d{2}-\d{2}(?:T[\d:.+Z-]+)?/gi,'').replace(uuid,'');

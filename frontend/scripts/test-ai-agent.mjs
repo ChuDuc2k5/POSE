@@ -408,8 +408,9 @@ try{
  check((await call(`/api/ai/sessions/${chat.session.id}`)).status===404,'Other guest cannot read session');
  check((await call(`/api/ai/sessions/${chat.session.id}`,null,cookie)).status===200,'Own guest reads session');
  check(messages.length===0,'Default no transcript');
- check(chat.sources.length===4 && chat.sources.every(p=>p.updated_at),'Published-only timestamp evidence');
- check(chat.sources.map(p=>p.code).join(',')==='P-2,P-1,P-3,P-4','Chat cards follow the rerank order (relevance desc, then RRF)');
+ // A 3 tỷ budget is a purchase, so the monthly rental Q7-R01 is not offered.
+ check(chat.sources.length===3 && chat.sources.every(p=>p.updated_at) && !chat.sources.some(p=>p.code==='Q7-R01'),'Published-only timestamp evidence');
+ check(chat.sources.map(p=>p.code).join(',')==='P-2,P-1,P-4','Chat cards follow the rerank order (relevance desc, then RRF)');
  check(ragCalls>ragBeforeNormal && catalogSearchReads===catalogBeforeNormal,'Successful RAG turn does not use catalogue search fallback');
  rerankNoAnswer=true;const noAnswerChat=await (await call('/api/ai/chat',{...base,message:'Có biệt thự ở Đà Lạt không?'})).json();rerankNoAnswer=false;
  check(noAnswerChat.sources.length===0&&!/P-\d|\d+\s*(?:tỷ|VND)|còn bán|Available/i.test(noAnswerChat.reply),'Real HTTP has_answer=false is honest and has no cards');
@@ -417,7 +418,7 @@ try{
  check(chat.sources.some(p=>p.price===null) && chat.sources.some(p=>p.price_period==='Month' || p.price_period==='Total'),'Cards preserve null and period-aware prices');
  check(chat.sources.every(p=>!String(p.reason||'').match(/\d{7,}|@|\+\d/)),'Card reasons contain no PII or price');
  check(!chat.related?.some(p=>p.number!==undefined || p.reason?.includes(String(p.price))) || chat.related.every(p=>p.related===true),'Related cards remain uncited');
- check(chat.reply.includes('Đã bán, không còn mở bán') && chat.reply.includes('giá chưa công bố'),'Sold and unknown price honestly stated');
+ check(/đã bán, không còn mở bán/iu.test(chat.reply) && chat.reply.includes('giá chưa công bố'),'Sold and unknown price honestly stated');
  check(!/(?:CFR|CFL|RVL|P)-[A-Z0-9_-]+/i.test(chat.reply),'Answer text contains no catalogue codes');
  mode='rag-failure';
  const fallbackBefore=catalogSearchReads, fallbackResponse=await call('/api/ai/chat',{...base,message:'Tôi muốn tìm căn hộ HCM ngân sách 3 tỷ khi nguồn tri thức tạm lỗi'});

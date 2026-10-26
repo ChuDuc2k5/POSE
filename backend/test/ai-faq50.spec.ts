@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { outputReason, groundedSummary, sanitizeReply, labelMonthlyRent } from '../src/modules/ai/guard.js';
 import { ownerRequest, unsupportedCriteria, loanWords } from '../src/modules/ai/unsupported.js';
 import { inferSearch } from '../src/modules/ai/infer-search.js';
-import { clarificationFor } from '../src/modules/ai/history-aware.js';
+import { adviceOrServiceQuestion, clarificationFor } from '../src/modules/ai/history-aware.js';
 import { displayListingName } from '../src/modules/ai/display.js';
 
 const sale = [{ id: 'a', code: 'RVL-1', name: 'Căn hộ Vinhomes Grand Park', location: 'Phường Long Bình', price: 2950000000, area: 61.4, availability: 'Available', updated_at: '', property_type: 'Apartment', transaction_type: 'Sale', price_period: 'Total', number: 1 }] as never;
@@ -73,5 +73,9 @@ describe('50 common questions regressions', () => {
   it('room counts the customer asked for and price per m² are grounded', () => {
     expect(outputReason('Hiện chưa có căn chung cư 2 phòng ngủ ở Bình Thạnh khoảng 3 tỷ.', [] as never, 'Mình muốn tìm chung cư 2 phòng ngủ ở Bình Thạnh, ngân sách khoảng 3 tỷ', {})).toBeNull();
     expect(outputReason('Căn này giá 2,95 tỷ, tương đương khoảng 48 triệu mỗi m² [1].', sale, '', {})).toBeNull();
+  });
+  it('a listing question ending in "được không" is a search, not advice', () => {
+    expect(adviceOrServiceQuestion('Có đất nền nào ở khu vực Hóc Môn, đường ô tô vào được không?')).toBe(false);
+    expect(adviceOrServiceQuestion('Mình có thể xem nhiều căn hộ trong cùng một buổi được không?')).toBe(true);
   });
 });

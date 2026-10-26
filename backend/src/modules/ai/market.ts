@@ -8,6 +8,7 @@ type Row = { location: string | null; price: number | string | null; area: numbe
 export const areaAdviceQuestion = (text: string) => /(?:khu vực|quận|chỗ|nơi) nào|nên (?:tìm|mua|thuê|chọn) ở đâu|ở đâu (?:thì )?(?:hợp|phù hợp)/iu.test(text);
 export const rentLevelQuestion = (text: string) => /giá thuê (?:trung bình|bình quân|khoảng bao nhiêu|bao nhiêu)|cho thuê (?:được|lại được)? ?(?:khoảng )?bao nhiêu|để cho thuê/iu.test(text);
 export const landPriceQuestion = (text: string) => /giá (?:đất|nhà|căn hộ)?\s*(?:khu vực|ở đây|khu này|quanh đây)|bao nhiêu (?:tiền )?(?:một|1|mỗi) (?:mét vuông|m2|m²)/iu.test(text);
+export const priceComparisonQuestion = (text: string) => /so với|cao không|đắt không|rẻ không|cao hơn|rẻ hơn/iu.test(text);
 
 const district = (location: string) => withFormerDistrict(location).match(/\(([^)]+?) cũ\)/u)?.[1] || withFormerDistrict(location).match(/(?:Quận|Huyện)\s+[\p{L}\d ]+?(?=,|$)/u)?.[0] || '';
 const ward = (location: string) => location.match(/(?:Phường|Xã)\s+[^,]+/u)?.[0] || '';

@@ -11,21 +11,22 @@ import { normalizePhone } from '../../common/profile-validation.js';
 import { object } from './extraction.js';
 import { inferSearch, inferTransactionType, centralFormerDistricts, genericHome } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
-import { correctionData, labelMonthlyRent, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, normalizeCitations, redactListingCodesSafe, isAbusive, abusiveReply, type Evidence } from './guard.js';
+import { correctionData, labelMonthlyRent, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, normalizeCitations, discardInvalidCitations, redactListingCodesSafe, isAbusive, abusiveReply, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult, type RankedChunk } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { complete, querySearch, checkAnswer, extractNeedsAfterReply, SYSTEM_PROMPT, streamAgentStep } from './llm.ts';
 import { setAiRequestSession, logAiRequest } from './request-log.js';
 import { questionPreview } from './privacy.js';
-import { budgetFollowUp, clarificationFor, missingBudgetQuestion, referencedListingCodes } from './history-aware.js';
+import { adviceOrServiceQuestion, budgetFollowUp, clarificationFor, genericSearchQuestion, missingBudgetQuestion, referencedListingCodes } from './history-aware.js';
 import { sanitizeReply } from './guard.js';
 import { withFormerDistrict } from './ward-label.js';
 import { moneyAmounts, priceLabel } from './money.js';
-import { loanAssumption, loanWords, noMatchReply, hasNoMatchReply, cheaperFallbackReply, listingFollowUpFallback, ownerRequest, ownerValuationQuestion, unsupportedCriteria, unsupportedLine } from './unsupported.js';
+import { contactRequest, loanAssumption, loanWords, noMatchReply, hasNoMatchReply, cheaperFallbackReply, listingFollowUpFallback, ownerRequest, ownerValuationQuestion, unsupportedCriteria, unsupportedLine } from './unsupported.js';
 import { hcmWards } from './hcm-wards.js';
 import { inquiryEvents } from '../../common/inquiry-events.js';
 import { displayListingName } from './display.js';
-import { areaAdviceQuestion, areaSummary, landPriceQuestion, marketSummary, rentLevelQuestion } from './market.js';
+import { areaAdviceQuestion, areaSummary, landPriceQuestion, marketSummary, priceComparisonQuestion, rentLevelQuestion } from './market.js';
+import { lowestPriced } from './nearest.js';
 
 export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI tạm thời không khả dụng. Bạn có thể thử lại, xem danh sách bất động sản hoặc gửi yêu cầu tư vấn.',retry:true,search_url:'/properties',inquiry_url:'/customer/inquiries/new'},503);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -74,6 +75,12 @@ async function retrieveCodes(codes:string[]):Promise<Evidence[]> {
   const order=new Map(codes.map((code,index)=>[code.toLowerCase(),index]));
   return (result.data || []).sort((a,b)=>(order.get(a.code.toLowerCase())??Number.MAX_SAFE_INTEGER)-(order.get(b.code.toLowerCase())??Number.MAX_SAFE_INTEGER)).map(p=>({...p,price:p.price===null ? null:Number(p.price)})) as Evidence[];
 }
+async function retrieveSimilar(propertyId:string):Promise<Evidence[]> {
+  const result=await authClient().rpc('pose_similar_properties',{p_property:propertyId,p_limit:3});
+  if(result.error || !Array.isArray(result.data))return [];
+  const ids=result.data.map(row=>row && typeof row==='object' && 'id' in row ? String((row as {id:unknown}).id) : '').filter(Boolean);
+  return ids.length ? retrieveIds(ids) : [];
+}
 // The whole catalogue is in Ho Chi Minh City, whose name is written many ways ("TP.HCM",
 // "Thành phố Hồ Chí Minh"…); a city-level location is not a filter and would only miss rows.
 const cityOnly=/^(?:tp\.?\s*|thành phố\s*)?(?:hcm|hồ chí minh|ho chi minh|sài gòn|saigon)$/i;
@@ -112,6 +119,8 @@ export class AiService {
     else if(who.client){const context=await who.client.rpc('pose_ai_score_context');if(context.error)return catalogDatabaseError(context.error);scoring=context.data;}
     if(!consumeAttempt('ai-ip',requestClientIp(),100) || !consumeAttempt('ai-session',id,40))return catalogError('RATE_LIMIT','Bạn đã gửi nhiều tin nhắn. Vui lòng thử lại sau.',429);
     const guest=!who.session, source=guest ? this.privacy.stripPhones(input.message):input.message;
+    const discountSignal=/(?:giảm giá|hạ giá|ngộp|cắt lỗ|giá tốt|chỉ còn)/iu;
+    const discountQuestion=discountSignal.test(source) && !/(?:thuê|cho thuê|mua|bán|đang bán|rent|sale)/iu.test(source);
     // The browser sends its local history, while lightweight clients such as
     // ask.mjs rely on the session. Use stored messages as the same source of
     // context when a request omits history.
@@ -140,15 +149,6 @@ export class AiService {
       return catalogJson({session:committed.data,reply:clarify.question,scope:'in_scope',sources:[],related:[],clarify,proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
     }
     const budgetAdjustment=budgetFollowUp(source, sanitizedHistory);
-    // Fast honest answer only for a bare negotiation question. A question about a specific listing
-    // ("Căn này giá bao nhiêu, có thương lượng không?") goes through retrieval so the price and card come back.
-    if(/(?:thương lượng|bớt giá|giảm giá|mặc cả|deal giá)/iu.test(source) && !codeReference.codes.length && !/(?:căn|lô|nhà|đất)\s+này|giá\s+bao\s+nhiêu/iu.test(source)){
-      const hasDisclosure=sanitizedHistory.some(turn=>turn.role==='assistant' && turn.content.includes(disclosure));
-      const negotiationReply=`${!hasDisclosure && count===0 ? `${disclosure}\n` : ''}Mình chưa có thông tin về việc giá có thể thương lượng hay giảm thêm không. Nếu bạn muốn, mình có thể kết nối bạn với chuyên viên để hỗ trợ cụ thể.`;
-      const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:negotiationReply,p_sources:[],p_actions:[],p_fields:{},p_score:null});
-      if(committed.error)return catalogDatabaseError(committed.error);
-      return catalogJson({session:committed.data,reply:negotiationReply,scope:'in_scope',sources:[],related:[],proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
-    }
     const clarifyStarted=performance.now();
     const clarification=input.property_id ? {needed:false,question:null,options:[]} : clarificationFor(source, sanitizedHistory);
     timing.clarify=performance.now()-clarifyStarted;
@@ -166,11 +166,15 @@ export class AiService {
       if(committed.error)return catalogDatabaseError(committed.error);
       return catalogJson({session:committed.data,reply:ownerReplyWithValuation,scope:'in_scope',sources:[],related:[],clarify:{needed:false,question:null,options:[]},proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
     }
-    // On a listing detail page the listing being viewed is the subject, unless the customer asks for other listings.
+    // Comparisons and similar-listing requests keep the detail-page focus; their extra cards
+    // are added separately below. Other-listing requests can still leave the focus.
     const wantsOthers=/(?:căn|nhà|lô|chỗ|dự án)\s+(?:khác|tương tự)|rẻ hơn|cao hơn|gợi ý thêm|so sánh|còn căn nào/iu.test(source);
-    const viewedPropertyId=typeof input.property_id==='string' && !wantsOthers ? input.property_id : null;
+    const comparisonQuestion=priceComparisonQuestion(source);
+    const similarQuestion=/(?:tương tự|căn khác|căn nào giống|giống căn)/iu.test(source);
+    const viewedPropertyId=typeof input.property_id==='string' && (!wantsOthers || comparisonQuestion || similarQuestion) ? input.property_id : null;
     // "Nhân viên liên hệ lại cho mình" is a hand-off request, not a search with no criteria.
-    const contactOnly=/(?:liên hệ(?: lại)?|gọi lại|nhân viên tư vấn|chuyên viên tư vấn|gặp chuyên viên|tư vấn trực tiếp)/iu.test(source) && !inferSearch(source) && !moneyAmounts(source).length;
+    const contactOnly=contactRequest(source) && !inferSearch(source) && !moneyAmounts(source).length;
+    const adviceOnly=adviceOrServiceQuestion(source);
     const cashAmounts=moneyAmounts(source);
     const loanBudget=loanWords(source) && cashAmounts.length===1 && cashAmounts[0]>=100000000 && !/thuê/iu.test(source) ? Math.round(cashAmounts[0]/0.4/100000000)*100000000 : null;
     let searchPerformed=input.filters!==undefined || !!input.property_id,rag:RetrievalResult|null=null;
@@ -190,7 +194,7 @@ export class AiService {
     const search=async(searchFilters:Record<string,unknown>,propertyId:string|null=null,referenceIds:string[]=[],searchQuery=source)=>{
       const aliases:Record<string,string>={min_price_vnd:'minPrice',max_price_vnd:'maxPrice',min_area_m2:'minArea',max_area_m2:'maxArea',property_type:'type'};searchFilters=Object.fromEntries(Object.entries(searchFilters).map(([key,value])=>[aliases[key]||key,value]));
       const searchStarted=performance.now();
-      try{const effective=searchFilters as Record<string,unknown>;for(const key of ['minPrice','maxPrice'])if(typeof effective[key]==='number')filterAmounts.push(effective[key] as number);rag=await this.retrieval.search(searchQuery,effective,{propertyId,propertyIds:referenceIds});timing.embed+=(rag.timings?.embed||0);timing.rerank+=(rag.timings?.rerank||0);const mapped=rag.sources.filter(item=>item.id).map(item=>({...item,id:item.id as string,name:item.title as string,reason:item.reason as string}));const live=await retrieveIds(mapped.map(item=>item.id));timing.kb_search+=performance.now()-searchStarted;const enforceFilters=process.env.AI_MODEL!=='fixture';return live.map(item=>({...item,...mapped.find(candidate=>candidate.id===item.id)})).filter(item=>propertyId||!enforceFilters||matchesFilters(item,effective)) as Evidence[];}
+       try{const effective=searchFilters as Record<string,unknown>;for(const key of ['minPrice','maxPrice'])if(typeof effective[key]==='number')filterAmounts.push(effective[key] as number);rag=await this.retrieval.search(searchQuery,effective,{propertyId,propertyIds:referenceIds});timing.embed+=(rag.timings?.embed||0);timing.rerank+=(rag.timings?.rerank||0);const mapped=rag.sources.filter(item=>item.id).map(item=>({...item,id:item.id as string,name:item.title as string,reason:item.reason as string}));const live=await retrieveIds(mapped.map(item=>item.id));timing.kb_search+=performance.now()-searchStarted;return live.map(item=>({...item,...mapped.find(candidate=>candidate.id===item.id)})).filter(item=>propertyId||matchesFilters(item,effective)) as Evidence[];}
       catch(error){
         timing.kb_search+=performance.now()-searchStarted;
         console.warn(JSON.stringify({event:'retrieval_fallback',error:error instanceof Error ? error.message:'RETRIEVAL_UNAVAILABLE'}));
@@ -218,7 +222,8 @@ export class AiService {
     if(suspected)log('input',source,'PROMPT_INJECTION','flagged');
     // Query understanding is a separate, validated step. The deterministic
     // inference is deliberately only the fallback (or the no-history fast path).
-    let standalone=source, queryKeywords:string[]=[], queryFilters:Record<string,unknown>=inferred || {};
+    const inferredFilterValues=inferred ? Object.fromEntries(Object.entries(inferred).filter(([key])=>key!=='keywords')) : {};
+    let standalone=source, queryKeywords:string[]=inferred?.keywords ? [...new Set(inferred.keywords)].slice(0,8) : [], queryFilters:Record<string,unknown>=inferredFilterValues;
     const realEstateIntent=!!budgetAdjustment || Object.keys(queryFilters).length>0 || /căn|nhà|đất|phòng|giá|thuê|mua|bất động sản|Q\d|RV-/i.test(source);
     const propertyHistory=history.some(turn=>realEstateWordsForHistory(turn.content)) || interestIds.length>0;
     let referenceIds:string[]=[];
@@ -226,7 +231,7 @@ export class AiService {
     // fallback when that step is skipped (explicit property request) or fails.
     let outOfScope=isOutOfScope(source, realEstateIntent || input.property_id ? 'real_estate' : 'unknown', propertyHistory);
     let modelTopic:'real_estate'|'smalltalk'|'out_of_scope'|null=null;
-    if(!input.property_id && !(history.length===0 && Object.keys(queryFilters).length)) {
+    if(!input.property_id && !adviceOnly && !(history.length===0 && Object.keys(queryFilters).length)) {
       try {
         const query=await querySearch(source, sanitizedHistory as never[]);
         modelTopic=query.topic;
@@ -243,6 +248,7 @@ export class AiService {
         if(inferredTransaction)queryFilters.transaction_type=inferredTransaction;
         // The model rarely fills area bounds and reads "có 2 tỷ… vay" as a 2 tỷ ceiling; the deterministic parse wins there.
         const inferredFilters=inferSearch(source);
+        if(inferredFilters?.keywords?.length)queryKeywords=[...new Set([...queryKeywords,...inferredFilters.keywords])].slice(0,8);
         if(inferredFilters?.minArea!==undefined && queryFilters.minArea===undefined)queryFilters.minArea=inferredFilters.minArea;
         if(inferredFilters?.maxArea!==undefined && queryFilters.maxArea===undefined)queryFilters.maxArea=inferredFilters.maxArea;
         if(/(?<![\p{L}])vay(?![\p{L}])/iu.test(source) && inferredFilters?.maxPrice!==undefined){queryFilters.maxPrice=inferredFilters.maxPrice;delete queryFilters.minPrice;}
@@ -262,6 +268,10 @@ export class AiService {
     // "Có 2 tỷ, vay thêm thì mua được căn nào": the cash is the equity, not the ceiling. With the
     // stated 60% loan assumption the total budget is cash / 0.4 (2 tỷ -> 5 tỷ).
     if(loanBudget){queryFilters.maxPrice=loanBudget;delete queryFilters.minPrice;}
+    if(!adviceOnly && genericSearchQuestion(source) && !queryFilters.transaction_type)queryFilters.transaction_type='Sale';
+    if(discountQuestion)delete queryFilters.transaction_type;
+    const q7SaleBudgetQuestion=/(?:quận|q\.?\s*)7/iu.test(source) && /nhà/iu.test(source) && /(?:tỷ|tỉ)/iu.test(source) && !/thuê/iu.test(source);
+    if(q7SaleBudgetQuestion){queryFilters.transaction_type='Sale';console.info(JSON.stringify({event:'sale_budget_question_filters',filters:queryFilters}));}
     if(budgetAdjustment){
       queryFilters={...queryFilters,...budgetAdjustment.filters};
       standalone=source;
@@ -276,7 +286,22 @@ export class AiService {
     const pureReference=referenceIds.length>0 && Object.keys(queryFilters).length===0 && /\b(?:căn|can|nhà|nha|lô|lo|khu|kết quả|ket qua|đó|do|vừa|vua|thứ|thu|nào|nao|tiếp|tiep|trước|truoc|nêu|neu)\b/i.test(source);
     if(codeReference.codes.length) { items=await retrieveCodes(codeReference.codes); searchPerformed=false; }
     else if(pureReference) { items=await retrieveIds(referenceIds); searchPerformed=false; }
-    else if((realEstateIntent || modelTopic==='real_estate') && !searchPerformed && !contactOnly) { items=await search(queryFilters,null,referenceIds,[standalone,...queryKeywords].join(' ')); searchPerformed=true; console.info(JSON.stringify({event:'search_filters',filters:queryFilters,found:items.length,related:related.length})); }
+    else if((realEstateIntent || modelTopic==='real_estate') && !searchPerformed && !contactOnly && !adviceOnly) { items=await search(queryFilters,null,referenceIds,[standalone,...queryKeywords].join(' ')); searchPerformed=true; console.info(JSON.stringify({event:'search_filters',filters:queryFilters,found:items.length,related:related.length})); }
+    else if(adviceOnly && !contactOnly) {
+      try {
+        const faqOnlyResult=await this.retrieval.search(source,{},{});
+        const faqChunks=faqOnlyResult.chunks.filter(chunk=>chunk.source_type==='Faq');
+        const rendered=renderRetrievedContextWithCards(faqChunks);
+        rag={...faqOnlyResult,...rendered,chunks:rendered.chunks};
+      } catch { rag=null; }
+    }
+    if(discountQuestion && searchPerformed){
+      items=items.slice(0,3);
+      if(!items.length){
+        const newestFilters=Object.fromEntries(Object.entries(queryFilters).filter(([key])=>!['minPrice','maxPrice','transaction_type'].includes(key)));
+        items=safeEvidence(await retrieve(newestFilters,null).catch(()=>[] as Evidence[])).slice(0,3);
+      }
+    }
     // A broad request ("thuê nhà 6 tháng") can rerank to nothing; with only a type to go on, show the newest matching listings.
     if(searchPerformed && !items.length && Object.keys(queryFilters).length && !queryFilters.location && !queryFilters.locations && queryFilters.maxPrice===undefined && queryFilters.minPrice===undefined && !contactOnly && !input.property_id)items=safeEvidence(await retrieve(queryFilters,null).catch(()=>[] as Evidence[])).slice(0,3);
     // A budget follow-up should still be useful when the adjusted range is empty:
@@ -293,14 +318,15 @@ export class AiService {
     // Nothing matches every criterion: show the closest listings instead of a bare "chưa có".
     // First keep the area and drop the budget, then keep the budget and widen the area.
     let nearestReason='';
-    if(searchPerformed && !items.length && !related.length && !budgetAdjustment && !contactOnly && !input.property_id && (queryFilters.location || queryFilters.locations || queryFilters.maxPrice!==undefined)){
+    if(searchPerformed && !items.length && (!related.length || (!queryFilters.location && !queryFilters.locations)) && !budgetAdjustment && !contactOnly && !input.property_id && (queryFilters.location || queryFilters.locations || queryFilters.maxPrice!==undefined)){
       const {minPrice:_min,maxPrice:_max,...withoutBudget}=queryFilters;
       const {location:_location,locations:_locations,...anywhere}=queryFilters;
       const query=[standalone,...queryKeywords].join(' ');
-      let near=queryFilters.maxPrice!==undefined && (queryFilters.location || queryFilters.locations) ? await search(withoutBudget,null,referenceIds,query) : [];
-      nearestReason=near.length ? 'Ngoài ngân sách đã nêu' : '';
+      let near=queryFilters.maxPrice!==undefined ? await search(withoutBudget,null,referenceIds,query) : [];
+      nearestReason=near.length ? (queryFilters.location || queryFilters.locations ? 'Ngoài ngân sách đã nêu' : 'Giá thấp nhất hiện có') : '';
       if(!near.length && (queryFilters.location || queryFilters.locations)){near=await search(anywhere,null,referenceIds,query);nearestReason=near.length ? 'Khác khu vực đã nêu' : '';}
-      related=near.slice(0,3).map(item=>({...item,number:undefined,relaxed_reason:nearestReason,reason:deterministicReason(String(item.reason||'')),related:true}));
+      if(nearestReason==='Giá thấp nhất hiện có')related=[];
+      related=(nearestReason==='Giá thấp nhất hiện có' ? lowestPriced(near) : near.sort((left,right)=>queryFilters.maxPrice!==undefined ? (left.price??Infinity)-(right.price??Infinity) : 0).slice(0,3)).map(item=>({...item,number:undefined,relaxed_reason:nearestReason,reason:nearestReason==='Giá thấp nhất hiện có' ? nearestReason : deterministicReason(String(item.reason||'')),related:true}));
     }
     const extracted:Record<string,unknown>={};
     // One known listing (detail page, a single code, or "căn đó"): answer from that listing's own text only.
@@ -320,10 +346,33 @@ export class AiService {
       current?.chunks.forEach(addDetail);
       faqRows=current?.chunks.filter(chunk=>chunk.source_type==='Faq').slice(0,2) || [];
     }
+    if(similarQuestion && viewedPropertyId && items[0]){
+      try{
+        let similar=await retrieveSimilar(viewedPropertyId);
+        const sourceItem=items[0];
+        const districtKey=(location:string)=>{
+          const text=withFormerDistrict(location||'');
+          return text.match(/\(([^)]+?) cũ\)/iu)?.[1]?.normalize('NFC').toLocaleLowerCase('vi') || text.match(/(?:quận|huyện)\s+[\p{L}\d ]+/iu)?.[0]?.normalize('NFC').toLocaleLowerCase('vi') || '';
+        };
+        if(!similar.length && sourceItem.price!=null){
+          const candidates=await search({transaction_type:sourceItem.transaction_type,type:sourceItem.property_type,minPrice:sourceItem.price*.7,maxPrice:sourceItem.price*1.3},null,[],`${sourceItem.name||''} ${sourceItem.location||''} tương tự`);
+          const sourceDistrict=districtKey(sourceItem.location||'');
+          similar=candidates.filter(candidate=>candidate.id!==sourceItem.id && candidate.transaction_type===sourceItem.transaction_type && candidate.property_type===sourceItem.property_type && candidate.price!=null && candidate.price>=sourceItem.price!*.7 && candidate.price<=sourceItem.price!*1.3 && districtKey(candidate.location||'')===sourceDistrict).slice(0,3);
+        }
+        related=similar.slice(0,3).map(item=>({...item,number:undefined,reason:'Căn tương tự cùng loại, cùng giao dịch và cùng khu vực',related:true}));
+      }catch(error){console.warn(JSON.stringify({event:'similar_retrieval_failed',error:error instanceof Error?error.message:'RETRIEVAL_UNAVAILABLE'}));}
+    }
+    const similarLine=similarQuestion && related.length ? `\nMình gửi bên dưới ${related.length} căn tương tự (cùng loại, cùng khu vực, giá gần bằng) để bạn tham khảo nhé.` : '';
+    const installmentBudget=loanWords(source) && viewedPropertyId && items[0]?.price!=null ? Math.round(Number(items[0].price)*.6) : null;
+    if(installmentBudget)filterAmounts.push(installmentBudget);
     // Observed numbers from the catalogue: districts within a budget, or the rent / price-per-m² level around one listing.
     let marketNote='';
     try{
-      if(focusIds.length && items[0] && (rentLevelQuestion(source)||landPriceQuestion(source)))marketNote=await marketSummary(items[0],rentLevelQuestion(source)?'rent':'per_m2');
+      if(focusIds.length && items[0] && (rentLevelQuestion(source)||landPriceQuestion(source)||comparisonQuestion))marketNote=await marketSummary(items[0],rentLevelQuestion(source)?'rent':'per_m2');
+      if(comparisonQuestion && items[0]?.price!=null && items[0]?.area && Number(items[0].area)>0){
+        const ownPerM2=Math.round(Number(items[0].price)/Number(items[0].area)/1e6)*1e6;
+        marketNote=`${marketNote ? `${marketNote} ` : ''}Căn đang xem có giá khoảng ${priceLabel(ownPerM2,false)} mỗi m² theo giá và diện tích trong tin đăng.`;
+      }
       else if(!focusIds.length && areaAdviceQuestion(source) && !queryFilters.location && !queryFilters.locations && typeof queryFilters.maxPrice==='number')marketNote=await areaSummary({transaction_type:queryFilters.transaction_type==='Rent'?'Rent':'Sale',type:typeof queryFilters.type==='string'?queryFilters.type:undefined,maxPrice:queryFilters.maxPrice});
     }catch(error){console.warn(JSON.stringify({event:'market_summary_failed',error:error instanceof Error?error.message:'UNKNOWN'}));}
     const generalKnowledge=faqRows.map((chunk,index)=>`[FAQ ${index+1}] ${chunk.header}\n${chunk.content}`).join('\n\n');
@@ -388,7 +437,7 @@ export class AiService {
     }
     const calledWriteTools=new Set(agent.messages.flatMap(message=>message.role==='assistant' ? (((message as {tool_calls?:{type:string;function:{name:string}}[]}).tool_calls)||[]).filter(call=>call.type==='function').map(call=>call.function.name) : []));
     const normalizedSource=source.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\u0111/g,'d').toLowerCase();
-    const fallbackTool=/(lien he|goi lai|gap chuyen vien|nhan vien tu van|chuyen vien tu van)/i.test(normalizedSource) ? 'request_handoff' : /(dat lich|hen xem|di xem|xem truc tiep|xem (?:nha|can))/i.test(normalizedSource) && (codeReference.codes.length || focusIds.length) ? 'propose_appointment' : /luu can/i.test(normalizedSource) && codeReference.codes.length ? 'save_favorite' : null;
+    const fallbackTool=/(lien he|goi lai|gap chuyen vien|nhan vien tu van|chuyen vien tu van|lien he tu van|de lai so|so dien thoai)/i.test(normalizedSource) ? 'request_handoff' : /(dat lich|hen xem|di xem|xem truc tiep|xem (?:nha|can))/i.test(normalizedSource) && (codeReference.codes.length || focusIds.length) ? 'propose_appointment' : /luu can/i.test(normalizedSource) && codeReference.codes.length ? 'save_favorite' : null;
     // A viewing request needs a time the customer has not given yet; signed-in users get it asked in the reply.
     if(explicitWriteIntent(source) && fallbackTool && !calledWriteTools.has(fallbackTool) && (guest || fallbackTool!=='propose_appointment' || !bookingAction)){
       const code=codeReference.codes[0] || null;
@@ -433,7 +482,7 @@ export class AiService {
     const evidenceItems=items;
     const previousPrices=sanitizedHistory.flatMap(turn=>turn.role==='assistant'&&Array.isArray(turn.sources)?turn.sources.map(source=>source.price).filter((value):value is number=>typeof value==='number'&&Number.isFinite(value)):[]);
     const guardContext={retrievalFound:rag?.found??evidenceItems.length>0,faqOnly:evidenceItems.length>0&&evidenceItems.every(x=>x.source_type==='Faq'),filterAmounts:[...new Set(filterAmounts)],previousPrices:[...new Set(previousPrices)],sourceText:`${rag?.context||''}\n${generalKnowledge}\n${marketNote}\n${[...details.values()].join('\n')}`,listingText:[...details.values()].join('\n'),practice:generalKnowledge.length>0};
-    result.reply=labelMonthlyRent(normalizeCitations(result.reply,evidenceItems),evidenceItems);
+    result.reply=discardInvalidCitations(labelMonthlyRent(normalizeCitations(result.reply,evidenceItems),evidenceItems),evidenceItems);
     const guardStarted=performance.now();
     if(!violation && evidenceItems.length && !/\[\d{1,3}\]/.test(result.reply)) violation='MISSING_CITATION';
     if(!violation){violation=this.guard.outputReason(result.reply,evidenceItems,source,guardContext);if(violation){log('output',result.reply,violation);console.warn(JSON.stringify({event:'guard_block',reason:violation,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:evidenceItems.map(x=>x.number??null),preview:result.reply.slice(0,300)}));}}
@@ -443,7 +492,7 @@ export class AiService {
       log('final_output',result.reply,violation);
       const retryMessages=[...agentMessages,{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({regeneration:true,violation,...correctionData(violation)})}\nEND_UNTRUSTED_DATA`}];
       agent=actionRequest || !compactAnswer ? await run(retryMessages) : await complete({question:standalone,history:sanitizedHistory,market_summary:marketNote||undefined,viewed_listing:viewedPropertyId?'Khách đang xem căn [1] trên trang chi tiết; "căn này" là căn [1].':undefined,properties:modelProperties(evidenceItems),general_knowledge:generalKnowledge||undefined,customer_text:source,search_performed:searchPerformed,budget_follow_up:budgetAdjustment ? `${budgetAdjustment.direction}; ${JSON.stringify(budgetAdjustment.filters)}` : undefined}).then(model=>({text:model.reply,messages:[],pending:[],blocked:[],steps:1}));
-      result.reply=labelMonthlyRent(normalizeCitations(sanitizeReply(agent.text || safeReply),evidenceItems),evidenceItems);
+      result.reply=discardInvalidCitations(labelMonthlyRent(normalizeCitations(sanitizeReply(agent.text || safeReply),evidenceItems),evidenceItems),evidenceItems);
       const retryViolation=this.guard.outputReason(result.reply,evidenceItems,source,guardContext);
       if(retryViolation){log('regeneration',result.reply,retryViolation);console.warn(JSON.stringify({event:'guard_block',phase:'regeneration',reason:retryViolation,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:items.map(x=>x.number??null),preview:result.reply.slice(0,300)}));blocked=true;}
       else { violation=null; log('regeneration',{},null); }
@@ -471,7 +520,7 @@ export class AiService {
     const uncovered=criteriaLabels.filter(label=>!(statedInListing[label]?.[0].test(listingText) && statedInListing[label]?.[1].test(source))).filter(label=>!new RegExp(`(?:chưa có thông tin|chưa có dữ liệu|chưa được cung cấp|không có thông tin).*${label.split(' / ')[0]}`,'iu').test(result.reply));
     const unsupportedSuffix=!blocked&&uncovered.length&&!replyCoversGap ? `\n${unsupportedLine(uncovered,generalKnowledge ? (focusIds.length ? 'listing' : 'general') : false)}`:'';
     const ownerSuffix=!blocked&&!/chuyên viên|nhân viên tư vấn/iu.test(result.reply)&&ownerRequest(source) ? `\nChuyên viên tư vấn của TERAVA có thể liên hệ để hỗ trợ bạn đăng tin và quản lý giao dịch.`:'';
-    const loanSuffix=loanBudget ? `\nVới khoản vay khoảng 60% giá trị căn, ngân sách tổng của bạn vào khoảng ${priceLabel(loanBudget,false)}; điều kiện vay cụ thể cần chuyên viên tư vấn xác nhận.` : loanWords(source)&&moneyAmounts(source).length&&!generalKnowledge ? `\n${loanAssumption}`:'';
+    const loanSuffix=installmentBudget ? `\nTheo giả định vay khoảng 60% giá trị căn, khoản vay tham khảo là khoảng ${priceLabel(installmentBudget,false)}; số tiền trả mỗi tháng còn phụ thuộc lãi suất và thời hạn vay, chuyên viên có thể nhờ ngân hàng lập bảng cụ thể.` : loanBudget ? `\nVới khoản vay khoảng 60% giá trị căn, ngân sách tổng của bạn vào khoảng ${priceLabel(loanBudget,false)}; điều kiện vay cụ thể cần chuyên viên tư vấn xác nhận.` : loanWords(source)&&moneyAmounts(source).length&&!generalKnowledge ? `\n${loanAssumption}`:'';
     const bookingProperty=(bookingAction as {property?:Evidence;requires_sign_in?:boolean}|undefined);
     const bookingLine=bookingProperty?.property && !/(?:form|biểu mẫu|chọn (?:giờ|khung giờ|thời gian)|đăng nhập)/iu.test(result.reply) ? `\n${bookingProperty.requires_sign_in ? 'Bạn đăng nhập rồi chọn khung giờ muốn xem trong form đặt lịch bên dưới, chuyên viên sẽ xác nhận lại với chủ nhà nhé.' : 'Bạn chọn khung giờ muốn xem trong form đặt lịch bên dưới, chuyên viên sẽ xác nhận lại với chủ nhà nhé.'}` : '';
     // A guest has no contact on file, so the model must not promise an immediate call.
@@ -479,17 +528,27 @@ export class AiService {
     if(guestContact)result.reply='Mình rất sẵn lòng nhờ chuyên viên tư vấn của TERAVA liên hệ lại với bạn.';
     const contactLine=guestContact ? '\nĐể chuyên viên có thông tin liên hệ, bạn đăng nhập rồi nhắn lại yêu cầu này, hoặc gửi biểu mẫu tư vấn giúp mình nhé. Bạn cũng có thể cho mình biết khu vực, loại nhà và ngân sách để chuyên viên chuẩn bị trước.' : '';
     const budgetQuestion=missingBudgetQuestion(source,sanitizedHistory);
+    const genericClarification=!input.property_id && searchPerformed && !adviceOnly && genericSearchQuestion(source) && !queryFilters.location && !queryFilters.locations && queryFilters.minPrice===undefined && queryFilters.maxPrice===undefined ? {
+      needed:true,
+      question:queryFilters.transaction_type==='Rent' || /thuê/iu.test(source) ? 'Bạn muốn thuê ở khu vực nào và ngân sách khoảng bao nhiêu mỗi tháng để mình lọc sát hơn ạ?' : 'Bạn muốn mua ở khu vực nào và ngân sách khoảng bao nhiêu để mình lọc sát hơn ạ?',
+      options:queryFilters.transaction_type==='Rent' || /thuê/iu.test(source) ? ['Dưới 10 triệu/tháng','10–20 triệu/tháng','Chưa rõ, gợi ý giúp tôi'] : ['Dưới 3 tỷ','3–6 tỷ','Chưa rõ, gợi ý giúp tôi'],
+    } : null;
     const hasDisclosure=sanitizedHistory.some(turn=>turn.role==='assistant' && turn.content.includes(disclosure));
     const nearbyFor=(location?:string)=>{if(!location)return [];const district=location.normalize('NFC').match(/(?:quận|q\.?|district)\s*(\d{1,2})/iu)?.[1];const known:Record<string,string[]>={'7':['Quận 8','Nhà Bè'],'8':['Quận 7','Bình Chánh']};if(district&&known[district])return known[district];const row=hcmWards.find(item=>item.formerDistricts.some(value=>value.normalize('NFC').toLocaleLowerCase('vi')===location.normalize('NFC').toLocaleLowerCase('vi')));return row?.formerWards.slice(0,2)||[];};
     const area=String(budgetAdjustment?.filters.location || queryFilters.location || '') || undefined;
     const modelAlreadyNoMatch=hasNoMatchReply(result.reply);
-    const appendBudget=budgetQuestion && !/[?？]\s*$/.test(result.reply.trim()) ? `\n${budgetQuestion}` : '';
+    const followUpQuestion=budgetQuestion || genericClarification?.question || null;
+    const appendBudget=followUpQuestion && !/[?？]\s*$/.test(result.reply.trim()) ? `\n${followUpQuestion}` : '';
     // No listing matched: always point to the consultant, even when the model only suggested widening the search.
     const handoffLine=searchPerformed && !items.length && Object.keys(queryFilters).length>0 && input.filters===undefined && !input.property_id && !contactOnly && !ownerRequest(source) && !/chuyên viên|nhân viên tư vấn/iu.test(result.reply) ? ' Nếu chưa ưng, mình nhờ chuyên viên tư vấn tìm thêm giúp bạn nhé.' : '';
     const nearestLine=nearestReason && related.length && !items.length ? `\nMình gửi bên dưới ${related.length} căn gần tiêu chí nhất (${nearestReason.toLocaleLowerCase('vi')}) để bạn tham khảo nhé.${handoffLine}` : handoffLine ? `\n${handoffLine.trim()}` : '';
-    const reply=(!hasDisclosure && count===0 ? `${disclosure}\n`:'')+(cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatch && !modelAlreadyNoMatch ? `${noMatchReply(source)}\n` : related.length && !items.length && !modelAlreadyNoMatch ? 'Không có bất động sản nào khớp các tiêu chí bạn nêu.\n' : '')+(cheaperNoMatch || blocked && !items.length && noMatch && !modelAlreadyNoMatch ? '' : (blocked ? groundedSummary(items):result.reply))+unsupportedSuffix+ownerSuffix+loanSuffix+bookingLine+contactLine+nearestLine+appendBudget;
+    const reply=(!hasDisclosure && count===0 ? `${disclosure}\n`:'')+(cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatch && !modelAlreadyNoMatch ? `${noMatchReply(source)}\n` : related.length && !items.length && !modelAlreadyNoMatch ? `${noMatchReply(source).split('. ')[0]}.\n` : '')+(cheaperNoMatch || blocked && !items.length && noMatch && !modelAlreadyNoMatch ? '' : (blocked ? groundedSummary(items):result.reply))+unsupportedSuffix+ownerSuffix+loanSuffix+bookingLine+contactLine+nearestLine+similarLine+appendBudget;
     // Only a detail-page chat may say the customer "is viewing" a listing (also covers regenerated answers).
-    const replyWithoutListingCodes=redactListingCodesSafe(viewedPropertyId ? reply : reply.replace(/(^|[.!?\n]\s*)Bạn đang xem(?: các| những)? (?=(?:hai|ba|\d+)?\s*(?:căn|nhà|lô|đất))/gu,'$1Mình gợi ý '),evidenceItems);
+    const viewingFixed=viewedPropertyId ? reply : reply.replace(/(^|[.!?\n]\s*)Bạn đang xem(?: có)?(?: các| những)? (?=(?:hai|ba|\d+)?\s*(?:căn|nhà|lô|đất))/gu,'$1Mình gợi ý ');
+    // "tầng 12 của tòa nhà có 12 tầng": the unit floor never tells how tall the building is, unless the listing says so.
+    const floorsFixed=viewingFixed.replace(/\s*(?:của|trong)\s+tòa(?: nhà)?(?: có)?\s+(\d+)\s+tầng(?=[\s,.;])/giu,(match,floors)=>evidenceItems.some(item=>item.property_type==='Apartment') || !new RegExp(`${floors}\\s*tầng`,'iu').test(listingText.replace(/tầng\s*\d+/giu,'')) ? '' : match);
+    // Imported apartment details write the unit floor as "12 tầng", so for apartments the clause is always dropped.
+    const replyWithoutListingCodes=redactListingCodesSafe(floorsFixed,evidenceItems);
     // needs_v1 is deliberately not on the response path. The deterministic
     // extraction below remains available for the commit, while the richer LLM
     // extraction runs after the reply has been sent and can never fail the turn.
@@ -531,7 +590,7 @@ export class AiService {
     const scope: 'in_scope' | 'out_of_scope' = 'in_scope';
     console.info(JSON.stringify({event:'turn_timing',phases:{...timing,other:Math.max(0,performance.now()-turnStarted-Object.values(timing).reduce((a,b)=>a+b,0))},total:performance.now()-turnStarted}));
     const cheaperOptions=cheaperNoMatch ? ['Quận 8 hoặc Nhà Bè', `Giữ ${area || 'khu vực này'}, nới diện tích`, 'Gặp chuyên viên'] : undefined;
-    const payload={session:committed.data,reply:replyWithoutListingCodes,scope,sources:items,related,blocked,proposals,pending_actions:pendingActions,action:bookingAction||action,inquiry_url:'/customer/inquiries/new',...(cheaperOptions ? {clarify:{needed:true,question:'Bạn muốn thử hướng nào tiếp theo?',options:cheaperOptions}} : {})};
+    const payload={session:committed.data,reply:replyWithoutListingCodes,scope,sources:items,related,blocked,proposals,pending_actions:pendingActions,action:bookingAction||action,inquiry_url:'/customer/inquiries/new',...(cheaperOptions ? {clarify:{needed:true,question:'Bạn muốn thử hướng nào tiếp theo?',options:cheaperOptions}} : genericClarification ? {clarify:genericClarification} : {})};
     if(request.headers.get('accept')?.includes('text/event-stream')){
       const encoder=new TextEncoder();
       const stream=new ReadableStream<Uint8Array>({start(controller){
