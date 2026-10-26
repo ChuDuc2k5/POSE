@@ -17,8 +17,8 @@ import { runAgent } from './agent.ts';
 import { assistantPrompt, complete, querySearch, checkAnswer, extractNeedsAfterReply, streamAgentStep } from './llm.ts';
 import { setAiRequestSession, logAiRequest } from './request-log.js';
 import { questionPreview } from './privacy.js';
-import { adviceOrServiceQuestion, budgetFollowUp, catalogueOverviewIntent, clarificationFor, customerNameFromHistory, genericSearchQuestion, historyReferenceQuestion, isAreaOnlyRefinement, isMoreRequest, listingCodes, missingBudgetQuestion, referencedListingCodes, searchCriteriaFromHistory } from './history-aware.js';
-import { catalogueOverview } from './catalogue-overview.js';
+import { adviceOrServiceQuestion, budgetFollowUp, catalogueOverviewIntent, clarificationFor, customerNameFromHistory, genericSearchQuestion, historyReferenceQuestion, isAreaOnlyRefinement, isMoreRequest, listingCodes, missingBudgetQuestion, outsideCataloguePlace, referencedListingCodes, searchCriteriaFromHistory } from './history-aware.js';
+import { catalogueOverview, typeLabels } from './catalogue-overview.js';
 import { sanitizeReply } from './guard.js';
 import { withFormerDistrict } from './ward-label.js';
 import { moneyAmounts, priceLabel } from './money.js';
@@ -129,6 +129,11 @@ function relaxedLocation(value: unknown) {
   const match=value.match(/(?:quận|huyện|thành phố|tp\.?|q\.?)[\s\d-]+/i);
   return match?.[0]?.trim() || value.split(',').at(-1)?.trim();
 }
+function catalogueAreaKey(value: unknown) {
+  const text=String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[đĐ]/g,'d').toLocaleLowerCase('vi');
+  if(/(?:quan\s*2|quan\s*9|thu\s*duc)/u.test(text))return 'thu duc';
+  return text.replace(/\b(?:quan|huyen|thanh pho|tp)\.?\s+/u,'').replace(/\s*\([^)]*\)/gu,'').trim();
+}
 
 function historicalOwnershipReply(items: Evidence[], question: string) {
   if (items.length < 2) return null;
@@ -222,7 +227,24 @@ export class AiService {
      const areaAdviceFilters=inferSearch(source) || {};
      const budgetedAreaAdvice=areaAdviceQuestion(source) && typeof areaAdviceFilters.maxPrice === 'number' && !input.property_id;
      const overviewKind=budgetedAreaAdvice ? null : catalogueOverviewIntent(source);
-      const clarification=input.property_id || overviewKind || budgetedAreaAdvice || (financeIntentNote && !listingRequestIntent) ? {needed:false,question:null,options:[]} : clarificationFor(source, criteriaHistory);
+     const outsideCity=outsideCataloguePlace(source);
+     if(outsideCity && !input.property_id && !codeReference.codes.length){
+       const transactionType=areaAdviceFilters.transaction_type || inferTransactionType(source);
+       const maxPrice=typeof areaAdviceFilters.maxPrice==='number' ? areaAdviceFilters.maxPrice : undefined;
+       const propertyType=typeof areaAdviceFilters.type==='string' ? areaAdviceFilters.type : undefined;
+       const overview=await catalogueOverview('areas',transactionType,maxPrice,propertyType,true);
+       const areas=(overview.areas || []).filter(area=>Number(area.count)>0).slice(0,5);
+       const monthly=transactionType==='Rent';
+       const areaLine=areas.length
+         ? areas.map(area=>`${area.label} (${Number(area.count)} tin${maxPrice!==undefined ? ` ≤ ${priceLabel(maxPrice,monthly)}` : ''})`).join(', ')
+         : 'chưa có khu vực phù hợp trong dữ liệu hiện có';
+       const typeText=propertyType ? `${typeLabels[propertyType] || propertyType} ` : '';
+       const reply=`Hiện TERAVA chưa có tin ${typeText}${transactionType==='Rent' ? 'cho thuê' : transactionType==='Sale' ? 'đang bán' : ''} tại ${outsideCity}. TERAVA hiện có danh mục tại TP.HCM và một số khu vực lân cận; với tiêu chí hiện tại, các khu có tin là: ${areaLine}. Bạn muốn xem khu vực nào trong danh mục này?`;
+       const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:reply,p_sources:[],p_actions:[],p_fields:{},p_score:null});
+       if(committed.error)return catalogDatabaseError(committed.error);
+       return guestCatalog({session:committed.data,reply,scope:'in_scope',sources:[],related:[],clarify:{needed:false,question:null,options:areas.slice(0,3).map(area=>String(area.label))},proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
+     }
+       const clarification=input.property_id || overviewKind || budgetedAreaAdvice || (financeIntentNote && !listingRequestIntent) ? {needed:false,question:null,options:[]} : clarificationFor(source, criteriaHistory);
     timing.clarify=performance.now()-clarifyStarted;
      if(clarification.needed){
       const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:clarification.question,p_sources:[],p_actions:[],p_fields:{},p_score:null});
@@ -564,6 +586,7 @@ export class AiService {
     // Relax in the order customers can evaluate: price, then area, then location.
     let nearestReason='';
     let availableAreasLine='';
+    let sameAreaTypesLine='';
     if(searchPerformed && !items.length && (!related.length || (!queryFilters.location && !queryFilters.locations)) && !budgetAdjustment && !contactOnly && !input.property_id && strictCashBudget===null && (queryFilters.location || queryFilters.locations || queryFilters.maxPrice!==undefined)){
        const query=[standalone,...queryKeywords].join(' ');
        const nearestSearch=async (filters:Record<string,unknown>) => {
@@ -613,7 +636,27 @@ export class AiService {
         console.warn(JSON.stringify({event:'catalogue_overview_for_no_match_failed',error:error instanceof Error ? error.message:'UNKNOWN'}));
       }
     }
-    const extracted:Record<string,unknown>={};
+    if(searchPerformed && !items.length && !contactOnly && !input.property_id && typeof queryFilters.maxPrice==='number' && (queryFilters.location || queryFilters.locations) && queryFilters.transaction_type && typeof queryFilters.type==='string'){
+      try{
+        const requestedArea=String(queryFilters.location || (Array.isArray(queryFilters.locations) ? queryFilters.locations[0] : ''));
+        const targetArea=catalogueAreaKey(requestedArea);
+        const allTypes=await catalogueOverview('areas',queryFilters.transaction_type as 'Sale'|'Rent',queryFilters.maxPrice as number,undefined,true);
+        const otherTypes=[...new Set((allTypes.types || []).map(row=>row.property_type).filter((value):value is string=>typeof value==='string' && value!==queryFilters.type))].slice(0,5);
+        const matches: string[]=[];
+        for(const propertyType of otherTypes){
+          const overview=await catalogueOverview('areas',queryFilters.transaction_type as 'Sale'|'Rent',queryFilters.maxPrice as number,propertyType,true);
+          const area=overview.areas?.find(row=>{const key=catalogueAreaKey(row.label);return (key===targetArea || key.includes(targetArea) || targetArea.includes(key)) && Number(row.count)>0;});
+          if(area)matches.push(`${typeLabels[propertyType] || propertyType} (${Number(area.count)} tin)`);
+        }
+        if(matches.length){
+          const monthly=queryFilters.transaction_type==='Rent';
+          sameAreaTypesLine=`\nTại ${requestedArea}, dữ liệu hiện có ${matches.join(', ')} khác cùng ${queryFilters.transaction_type==='Rent' ? 'mức thuê' : 'giao dịch'} và ngân sách ${priceLabel(queryFilters.maxPrice as number,monthly)}.`;
+        }
+      }catch(error){
+        console.warn(JSON.stringify({event:'catalogue_overview_for_same_area_types_failed',error:error instanceof Error ? error.message:'UNKNOWN'}));
+      }
+    }
+     const extracted:Record<string,unknown>={};
     // One known listing (detail page, a single code, or "căn đó"): answer from that listing's own text only.
     const focusIds=viewedPropertyId ? [viewedPropertyId] : (codeReference.codes.length===1 || pureReference) && items.length===1 ? [items[0].id] : [];
     const details=new Map<string,string>();
@@ -673,7 +716,7 @@ export class AiService {
     const generalKnowledge=faqRows.map((chunk,index)=>`[FAQ ${index+1}] ${chunk.header}\n${chunk.content}`).join('\n\n');
     const modelProperties=(list:Evidence[])=>list.map(item=>({...item,name:shortListingName(item.name),availability:availabilityLabel(item.availability,item.transaction_type),details:details.get(item.id)}));
     const contextBlocks=items.map((item,index)=>`[${item.number || index+1}] ${item.code || ''} ${shortListingName(item.name)} ${withFormerDistrict(item.location || '')} loại=${item.property_type || ''} giá=${priceLabel(item.price,item.price_period==='Month' || item.transaction_type==='Rent')} trạng thái=${availabilityLabel(item.availability,item.transaction_type)}${details.get(item.id) ? `\nChi tiết: ${details.get(item.id)}` : ''}`).join('\n');
-     const agentMessages=[{role:'system' as const,content:assistantPrompt(customerName||undefined)},{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({question:standalone,history:sanitizedHistory,market_summary:marketNote||undefined,finance_calculation:financeNote||undefined,viewed_listing:viewedPropertyId?'Khách đang xem căn [1] trên trang chi tiết; "căn này" là căn [1].':undefined,properties:contextBlocks,general_knowledge:generalKnowledge||undefined,customer_text:source,customer_name:customerName||undefined,contact_redacted:guest && source!==input.message,injection_suspected:suspected,search_performed:searchPerformed,budget_follow_up:budgetAdjustment ? `${budgetAdjustment.direction}; ${JSON.stringify(budgetAdjustment.filters)}` : undefined})}\nEND_UNTRUSTED_DATA`}];
+      const agentMessages=[{role:'system' as const,content:assistantPrompt(customerName||undefined)},{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({question:standalone,history:sanitizedHistory,market_summary:marketNote||undefined,catalogue_overview:(availableAreasLine || sameAreaTypesLine) ? `${availableAreasLine}${sameAreaTypesLine}` : undefined,finance_calculation:financeNote||undefined,viewed_listing:viewedPropertyId?'Khách đang xem căn [1] trên trang chi tiết; "căn này" là căn [1].':undefined,properties:contextBlocks,general_knowledge:generalKnowledge||undefined,customer_text:source,customer_name:customerName||undefined,contact_redacted:guest && source!==input.message,injection_suspected:suspected,search_performed:searchPerformed,budget_follow_up:budgetAdjustment ? `${budgetAdjustment.direction}; ${JSON.stringify(budgetAdjustment.filters)}` : undefined})}\nEND_UNTRUSTED_DATA`}];
     const proposals:{tool:string;args_hash:string;decision:string;reason:string;rule_version:string}[]=[];
     const pendingActions:unknown[]=[];
     let bookingAction:unknown;
@@ -909,7 +952,7 @@ export class AiService {
        const finalLegalReply=evidenceItems.length===1 && legalQuestionDirect && groundedLegalDetail ? `Căn số ${evidenceItems[0].number ?? 1} ${shortListingName(evidenceItems[0].name)} [${evidenceItems[0].number ?? 1}]. Tin đăng ghi: ${groundedLegalDetail}. Mình không thể xác nhận pháp lý thay cho giấy tờ gốc; bạn nên kiểm tra bản gốc và cơ quan đăng ký đất đai.` : '';
        const deterministicListingReply=blocked ? (evidenceItems.length ? groundedSummary(evidenceItems) : safeReply) : result.reply;
       const deterministicRiskPrefix=blocked&&evidenceItems.length&&riskQuestion ? `${investmentRiskLine.trimStart()}\n` : '';
-       const reply=deterministicRiskPrefix+(!hasDisclosure && count===0 ? `${disclosure}\n`:'')+criteriaLine+(moreNoNew ? '' : (cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatchPrefix))+(moreNoNew || cheaperNoMatch || blocked && !items.length && noMatch && !modelAlreadyNoMatch ? '' : (postLegalReply || finalLegalReply || (blocked ? deterministicListingReply:result.reply)))+areaToleranceSuffix+moreStatus+unsupportedSuffix+ownerSuffix+loanSuffix+bookingLine+contactLine+nearestLine+availableAreasLine+similarLine+appendBudget;
+       const reply=deterministicRiskPrefix+(!hasDisclosure && count===0 ? `${disclosure}\n`:'')+criteriaLine+(moreNoNew ? '' : (cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatchPrefix))+(moreNoNew || cheaperNoMatch || blocked && !items.length && noMatch && !modelAlreadyNoMatch ? '' : (postLegalReply || finalLegalReply || (blocked ? deterministicListingReply:result.reply)))+areaToleranceSuffix+moreStatus+unsupportedSuffix+ownerSuffix+loanSuffix+bookingLine+contactLine+nearestLine+availableAreasLine+sameAreaTypesLine+similarLine+appendBudget;
       const premiseCorrection=/chưa có sổ|chưa có sổ hồng/iu.test(source) && /sẵn sổ|sổ hồng/iu.test(listingText) ? '\nTheo dữ liệu tin đăng, căn này được ghi là đã có sổ hồng; mình không thể xác nhận lời hứa của bên thứ ba. Bạn nên xem bản gốc giấy chứng nhận và kiểm tra tại cơ quan đăng ký đất đai.' : '';
       const freshnessCorrection=/(?:bán rồi|đã bán|còn bán không|cập nhật lần cuối)/iu.test(source) && items[0]?.updated_at ? `\nMình xin lỗi vì tin có thể đã chậm so với thực tế. Dữ liệu tin đăng này cập nhật ngày ${String(items[0].updated_at).slice(0,10)}; mình có thể nhờ chuyên viên kiểm tra lại và gửi các căn tương tự.` : '';
       const externalSiteCorrection=/(?:bên khác|website khác|trang khác|nơi khác)/iu.test(source) && !/không thể kiểm tra|không kiểm chứng|không xác minh/iu.test(result.reply) ? '\nTERAVA không thể kiểm tra hoặc xác minh trực tiếp các tin đăng trên website khác; chuyên viên có thể xác nhận lại giá với chủ nhà.' : '';

@@ -51,8 +51,8 @@ export function groupAreaRows(rows: OverviewRow[]): GroupedArea[] {
   return [...grouped.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'vi'));
 }
 
-function filteredTypes(data: Overview, transactionType?: 'Sale' | 'Rent') {
-  return data.types.filter(row => !transactionType || row.transaction_type === transactionType);
+function filteredTypes(data: Overview, transactionType?: 'Sale' | 'Rent', propertyType?: string) {
+  return data.types.filter(row => (!transactionType || row.transaction_type === transactionType) && (!propertyType || row.property_type === propertyType));
 }
 
 export async function catalogueOverview(kind: CatalogueOverviewKind, transactionType?: 'Sale' | 'Rent', maxPrice?: number, propertyType?: string, fresh = false) {
@@ -65,10 +65,10 @@ export async function catalogueOverview(kind: CatalogueOverviewKind, transaction
     value = { areas: getRows(raw.areas), types: getRows(raw.types), projects: getRows(raw.projects), prices: getRows(raw.prices) };
     if (!fresh) cache.set(key, { expires: Date.now() + ttl, value });
   }
-  return formatOverview(kind, value, transactionType, maxPrice);
+  return formatOverview(kind, value, transactionType, maxPrice, propertyType);
 }
 
-function formatOverview(kind: CatalogueOverviewKind, data: Overview, transactionType?: 'Sale' | 'Rent', maxPrice?: number) {
+function formatOverview(kind: CatalogueOverviewKind, data: Overview, transactionType?: 'Sale' | 'Rent', maxPrice?: number, propertyType?: string) {
   if (kind === 'areas') {
     const groupedAreas = groupAreaRows(data.areas);
     const top = groupedAreas.slice(0, 8);
@@ -76,15 +76,15 @@ function formatOverview(kind: CatalogueOverviewKind, data: Overview, transaction
     const monthly = transactionType === 'Rent';
     if (maxPrice !== undefined) {
       const areaLabels = top.map(row => `${row.label} (${row.count} tin${row.min_price != null && row.max_price != null ? `, ${priceLabel(row.min_price, monthly)}\u2013${priceLabel(row.max_price, monthly)}` : ''})`);
-      const types = filteredTypes(data, transactionType).slice(0, 6).map(row => `${typeLabels[row.property_type || ''] || row.property_type || '\u0042ất động sản'} (${Number(row.count) || 0})`);
+      const types = filteredTypes(data, transactionType, propertyType).slice(0, 6).map(row => `${typeLabels[row.property_type || ''] || row.property_type || '\u0042ất động sản'} (${Number(row.count) || 0})`);
       const budget = priceLabel(maxPrice, monthly);
       const reply = top.length
         ? `Với ngân sách tối đa ${budget}, bạn có thể cân nhắc: ${areaLabels.join(', ')}${rest ? ` và ${rest} khu khác` : ''}.\nTrong dữ liệu hiện có, ngân sách này có tin: ${types.join(', ') || 'chưa đủ dữ liệu'}.\nBạn muốn xem kỹ khu nào?`
         : `Hiện chưa có tin ${transactionType === 'Rent' ? 'cho thuê' : 'bán'} nào trong danh mục công bố có giá không vượt ${budget}. Bạn muốn xem kỹ khu nào?`;
-      return { reply, options: top.slice(0, 3).map(row => row.label).concat('Chưa rõ, gợi ý giúp tôi').slice(0, 4), areas: top, types: filteredTypes(data, transactionType) };
+      return { reply, options: top.slice(0, 3).map(row => row.label).concat('Chưa rõ, gợi ý giúp tôi').slice(0, 4), areas: top, types: filteredTypes(data, transactionType, propertyType) };
     }
     const labels = top.map(row => `${row.label} (${row.count})`);
-    return { reply: `Hiện TERAVA có tin đăng tại ${labels.join(', ')}${rest ? ` và ${rest} khu khác` : ''}. Bạn muốn xem bất động sản ở khu vực nào?`, options: top.slice(0, 3).map(row => row.label).concat('Chưa rõ, gợi ý giúp tôi').slice(0, 4), areas: top, types: filteredTypes(data, transactionType) };
+    return { reply: `Hiện TERAVA có tin đăng tại ${labels.join(', ')}${rest ? ` và ${rest} khu khác` : ''}. Bạn muốn xem bất động sản ở khu vực nào?`, options: top.slice(0, 3).map(row => row.label).concat('Chưa rõ, gợi ý giúp tôi').slice(0, 4), areas: top, types: filteredTypes(data, transactionType, propertyType) };
   }
   if (kind === 'projects') {
     const labels = data.projects.slice(0, 12).map(row => `${row.label} (${Number(row.count) || 0})`);

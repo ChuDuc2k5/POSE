@@ -167,7 +167,11 @@ const hotfixProperties=[
   const hotfix19Properties=[...hotfix17Properties,...hotfix19Q7,...hotfix19BinhThanh,hotfix19Raw,hotfix19SaleLow];
   const hotfix20Title={...hotfixProperties[0],id:randomUUID(),code:'HF20-TITLE',name:'Lô đất giá 1 tỷ 033',location:'Phường Long Bình, Quận 9, Thành phố Hồ Chí Minh',price:1000000000,property_type:'Land',transaction_type:'Sale',price_period:'Total',description:'Tin đăng nêu tiêu đề giá 1 tỷ 033; trường giá chuẩn là 1 tỷ.'};
   const hotfix20Properties=[...hotfix19Properties,hotfix20Title];
-  const catalogueRows=()=>mode==='hotfix-10d' ? [...properties,...hotfixProperties] : mode==='hotfix-15' || hotfix15Enabled ? [...properties,...hotfix15Properties] : mode==='hotfix-16' ? [...properties,...hotfix15Properties,...hotfix16Properties] : mode==='hotfix-17' ? [...properties,...hotfix15Properties,...hotfix16Properties,...hotfix17Properties] : mode==='hotfix-19' ? [...properties,...hotfix15Properties,...hotfix19Properties] : mode==='hotfix-20' ? [...properties,...hotfix15Properties,...hotfix20Properties] : properties;
+  const hotfix21BinhThanh={...hotfix17Rent[0],id:randomUUID(),code:'HF21-BT-1',name:'Căn hộ Bình Thạnh một nguồn',location:'Phường Bình Thạnh, Thành phố Hồ Chí Minh',price:5300000};
+  const hotfix21GoVap=Array.from({length:4},(_,index)=>({...hotfix17Rent[index],id:randomUUID(),code:`HF21-G-${index+1}`,name:`Nhà phố Gò Vấp thuê ${5.5+index*.5} triệu`,location:'Phường 5, Gò Vấp, Thành phố Hồ Chí Minh',property_type:'House',price:5500000+index*500000}));
+  const hotfix21Q9=Array.from({length:3},(_,index)=>({...hotfix17Rent[index],id:randomUUID(),code:`HF21-Q9-${index+1}`,name:`Căn hộ Long Bình thuê ${6+index*.5} triệu`,location:'Phường Long Bình, Quận 9, Thành phố Hồ Chí Minh',property_type:'Apartment',price:6000000+index*500000}));
+  const hotfix21Properties=[hotfix21BinhThanh,...hotfix21GoVap,...hotfix21Q9];
+  const catalogueRows=()=>mode==='hotfix-10d' ? [...properties,...hotfixProperties] : mode==='hotfix-15' || hotfix15Enabled ? [...properties,...hotfix15Properties] : mode==='hotfix-16' ? [...properties,...hotfix15Properties,...hotfix16Properties] : mode==='hotfix-17' ? [...properties,...hotfix15Properties,...hotfix16Properties,...hotfix17Properties] : mode==='hotfix-19' ? [...properties,...hotfix15Properties,...hotfix19Properties] : mode==='hotfix-20' ? [...properties,...hotfix15Properties,...hotfix20Properties] : mode==='hotfix-21' ? hotfix21Properties : properties;
 if(previewOnly || live){
  properties[0]={...properties[0],code:'TD-A01',name:'Căn hộ Thủ Đức',location:'Thủ Đức',price:3200000000,transaction_type:'Sale',price_period:'Total'};
  properties[2]={...properties[2],code:'Q7-R01',name:'Căn hộ 2 phòng ngủ Quận 7',location:'Quận 7',price:25000000,availability:'Available',transaction_type:'Rent',price_period:'Month'};
@@ -428,7 +432,7 @@ const app=stack.app;
 let unconfigured;
 let output='';app.stdout.on('data',c=>output+=c);app.stderr.on('data',c=>output+=c);
 const origin='http://localhost:3300';
-const call=(path,body,cookie='',method=body ? 'POST':'GET',requestOrigin=origin)=>fetch(origin+path,{method,headers:{Cookie:cookie,Origin:requestOrigin,'Content-Type':'application/json',...(mode==='hotfix-17'||mode==='hotfix-19' ? {'x-forwarded-for':'203.0.113.17'}:{})},...(body ? {body:JSON.stringify(body)}:{})});
+const call=(path,body,cookie='',method=body ? 'POST':'GET',requestOrigin=origin)=>fetch(origin+path,{method,headers:{Cookie:cookie,Origin:requestOrigin,'Content-Type':'application/json',...(mode==='hotfix-17'||mode==='hotfix-19'||mode==='hotfix-21' ? {'x-forwarded-for':'203.0.113.17'}:{})},...(body ? {body:JSON.stringify(body)}:{})});
 const base={message:'Tôi muốn tìm căn hộ Quận 7 ngân sách 3 tỷ',store_transcript:false,history:[]};
 try{
  let ready=false;for(let i=0;i<60;i++){try{if((await fetch(origin)).ok){ready=true;break;}}catch{}await delay(250);}assert.ok(ready,output);
@@ -841,6 +845,25 @@ mode='search';const search=await (await call('/api/ai/chat',base)).json();check(
  const beforeUnconfigured=sessions.size;
  const noModel=await fetch('http://localhost:3302/api/ai/chat',{method:'POST',headers:{Origin:'http://localhost:3302','Content-Type':'application/json'},body:JSON.stringify(base)});check(noModel.status===503 && (await noModel.json()).code==='AI_UNAVAILABLE' && sessions.size===beforeUnconfigured,'Unconfigured LLM no writes');
  rerankNoAnswer=true;const noAnswerResponse=await fetch(origin+'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',Origin:origin,'x-forwarded-for':'203.0.113.11'},body:JSON.stringify({...base,message:'Có căn biệt thự ở Đà Lạt không?'})});const noAnswer=await noAnswerResponse.json();rerankNoAnswer=false;check(noAnswer.sources.length===0&&!/P-\d|\d+\s*(?:tỷ|VND)|còn bán|Available/i.test(noAnswer.reply),'No-answer HTTP response is honest and ungrounded');
+ mode='hotfix-21';
+ const hf21Base={...base,store_transcript:false};let hf21Session;let hf21History=[];
+ const flowTurn=async(message)=>{
+   const data=await (await call('/api/ai/chat',{...hf21Base,session_id:hf21Session,message,history:hf21History})).json();
+   hf21Session=hf21Session || data.session?.id;
+   hf21History=[...hf21History,{role:'user',content:message},{role:'assistant',content:data.reply,sources:data.sources || []}].slice(-10);
+   check(hf21History.length<=10 && hf21History.filter(turn=>turn.role==='assistant').every(turn=>Array.isArray(turn.sources)),'FLOW-3 widget history keeps sources under the ten-message cap');
+   return {...data,sources:data.sources || []};
+ };
+ const flowStart=await flowTurn('Thuê căn hộ dưới 8 triệu');
+ const flowQ7=await flowTurn('Quận 7');
+  const flowBinhThanh=await flowTurn('Thế Bình Thạnh');
+ check(flowBinhThanh.sources.length===1 && flowBinhThanh.sources[0].code==='HF21-BT-1','FLOW-3 one-card history is grounded in Bình Thạnh');
+  const flowGoVap=await flowTurn('Gò Vấp được không');
+ check(flowGoVap.sources.length===0 && !flowGoVap.reply.includes('HF21-BT-1') && /4|bốn/iu.test(flowGoVap.reply) && /nhà phố/iu.test(flowGoVap.reply),'FLOW-3 location switch does not reuse the one-card source and offers grounded same-area types');
+ const flowQ9=await flowTurn('Thôi Quận 9');
+ check(flowQ9.sources.length===3 && flowQ9.sources.every(source=>source.code.startsWith('HF21-Q9-')) && !flowQ9.sources.some(source=>source.code==='HF21-BT-1'),'FLOW-3 area switch keeps Apartment, Rent, and budget criteria');
+ const unknownCity=await (await call('/api/ai/chat',{...hf21Base,message:'Thuê nhà ở Hà Nội dưới 10 triệu',history:[]})).json();
+ check(!unknownCity.clarify?.needed && unknownCity.sources.length===0 && /Hà Nội/iu.test(unknownCity.reply) && /TP\. ?HCM|TP\.HCM|Hồ Chí Minh/iu.test(unknownCity.reply),'FLOW-3 outside-catalogue city gets a grounded catalogue overview without clarification');
  check(fakeEmbedding('căn hộ')!==fakeEmbedding('biệt thự'),'Embedding fixture is hashed semantic vector, not one-hot');
  console.log(`PASS: ${checks} M06 checks; fake provider and pure logic.`);
  if(process.argv.includes('--preview')){mode='ok';console.log(`PREVIEW READY: ${origin}`);await new Promise(resolve=>{process.once('SIGINT',resolve);process.once('SIGTERM',resolve);});}

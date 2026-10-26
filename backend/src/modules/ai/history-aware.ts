@@ -6,6 +6,8 @@ const listingCodePattern = /(?<![\p{L}\d])[A-Z][A-Z\d]{0,7}-[A-Z\d]{4,40}(?![\p{
 const searchIntent = /(?:căn|nhà|đất|phòng|mua|thuê|tìm|bất động sản|giá|chung cư|villa|shop|office)/iu;
 const locationPattern = /(?:quận|q\.?\s*\d{1,2}|huyện|thủ\s*đức|phường|xã|thành phố|tp\.?\s*hồ\s*chí\s*minh|hcm|sài\s*gòn)/iu;
 const fold = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').toLocaleLowerCase('vi');
+const outsideCataloguePlaces = ['Hà Nội', 'Đà Nẵng', 'Cần Thơ', 'Hải Phòng', 'Nha Trang', 'Đà Lạt', 'Huế', 'Quy Nhơn', 'Vinh', 'Phan Thiết', 'Hạ Long'];
+const areaName = /(?:quận\s*\d{1,2}|q\.?\s*\d{1,2}|huyện\s+[\p{L}\d -]+|phường\s+[\p{L}\d -]+|xã\s+[\p{L}\d -]+|thủ\s*đức|gò\s*vấp|bình\s*thạnh|tân\s*bình|tân\s*phú|phú\s*nhuận|bình\s*tân|nhà\s*bè|củ\s*chi|hóc\s*môn|bình\s*chánh|cần\s*giờ|vũng\s*tàu|bình\s*dương|biên\s*hòa|đồng\s*nai)/iu;
 const concreteFeatures: [RegExp, string][] = [
   [/nhan nha ngay|don vao o ngay/iu, 'nhận nhà ngay'],
   [/khu dan cu/iu, 'khu dân cư'],
@@ -54,8 +56,17 @@ export function adviceOrServiceQuestion(message: string) {
     // "Tôi muốn thuê nhà trong 6 tháng, có hỗ trợ hợp đồng ngắn hạn không?" also wants listings, with the FAQ.
     && !/(?:muon|can|dang tim) (?:thue|mua) (?:nha|can|chung cu|phong|dat|mat bang|van phong)/iu.test(text);
 }
+export function outsideCataloguePlace(message: string) {
+  const normalized = fold(message);
+  return outsideCataloguePlaces.find(place => {
+    const value = fold(place).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?<![\\p{L}])${value}(?![\\p{L}])`, 'u').test(normalized);
+  }) || null;
+}
 export function historyReferenceQuestion(message: string, history: { role: string; content: string }[]) {
   const text = fold(message);
+  const explicitListing = listingCodes(message).length > 0 || /(?:căn|can)(?:\s+hộ|\s+ho)?\s*(?:số|so)?\s*\d+|(?:căn|can)(?:\s+hộ|\s+ho)?\s+(?:này|nay|đó|do|kia|trên|vừa rồi|vua roi)|(?:căn|can)\s+(?:đầu tiên|dau tien|rẻ nhất|re nhat)/iu.test(message);
+  if (areaName.test(message) && !explicitListing) return false;
   if (!history.some(turn => turn.role === 'assistant' && /(?:can|nha|lo|danh sach|gioi thieu|\[\d+\])/iu.test(fold(turn.content)))) return false;
   return /(?:can vua gioi thieu|ba can|bon can|cac can tren|nhung can tren|c[aă]n phia tren|nhung can vua)/iu.test(text);
 }
@@ -125,6 +136,10 @@ export function referencedListingCodes(message: string, history: { role: string;
       : wantsFirst ? listed.slice(0, 1) : numbered.map(index => listed[index]).filter(Boolean);
     return { codes: [...new Set(selected.map(source => source.code).filter((code): code is string => typeof code === 'string'))], ambiguous: false };
   }
+  // A named new area switches the active search. A single previous card must
+  // not leak into that search just because the message is short ("Gò Vấp
+  // được không", "thôi Quận 9"). Explicit card references were resolved above.
+  if (areaName.test(message) && !backReference.test(message)) return { codes: [] as string[], ambiguous: false };
   // Right after one listing was discussed, a question without a new search ("Tiền cọc mấy tháng?",
   // "Khu này có ngập không?") is about that listing.
   const lastTurn = history[history.length - 1] as HistoryTurn | undefined;
