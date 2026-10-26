@@ -165,7 +165,9 @@ const hotfixProperties=[
   for(const property of properties) if(String(property.code).startsWith('Q9-R-')) property.description='Tin dang ghi can nay san so hong.';
   const hotfix19SaleLow={...hotfixProperties[0],id:randomUUID(),code:'HF19-S-LOW',location:'Phường Long Bình, Quận 9, Thành phố Hồ Chí Minh',price:1800000000,name:'Căn hộ Thủ Đức 1,8 tỷ'};
   const hotfix19Properties=[...hotfix17Properties,...hotfix19Q7,...hotfix19BinhThanh,hotfix19Raw,hotfix19SaleLow];
-  const catalogueRows=()=>mode==='hotfix-10d' ? [...properties,...hotfixProperties] : mode==='hotfix-15' || hotfix15Enabled ? [...properties,...hotfix15Properties] : mode==='hotfix-16' ? [...properties,...hotfix15Properties,...hotfix16Properties] : mode==='hotfix-17' ? [...properties,...hotfix15Properties,...hotfix16Properties,...hotfix17Properties] : mode==='hotfix-19' ? [...properties,...hotfix15Properties,...hotfix16Properties,...hotfix19Properties] : properties;
+  const hotfix20Title={...hotfixProperties[0],id:randomUUID(),code:'HF20-TITLE',name:'Lô đất giá 1 tỷ 033',location:'Phường Long Bình, Quận 9, Thành phố Hồ Chí Minh',price:1000000000,property_type:'Land',transaction_type:'Sale',price_period:'Total',description:'Tin đăng nêu tiêu đề giá 1 tỷ 033; trường giá chuẩn là 1 tỷ.'};
+  const hotfix20Properties=[...hotfix19Properties,hotfix20Title];
+  const catalogueRows=()=>mode==='hotfix-10d' ? [...properties,...hotfixProperties] : mode==='hotfix-15' || hotfix15Enabled ? [...properties,...hotfix15Properties] : mode==='hotfix-16' ? [...properties,...hotfix15Properties,...hotfix16Properties] : mode==='hotfix-17' ? [...properties,...hotfix15Properties,...hotfix16Properties,...hotfix17Properties] : mode==='hotfix-19' ? [...properties,...hotfix15Properties,...hotfix19Properties] : mode==='hotfix-20' ? [...properties,...hotfix15Properties,...hotfix20Properties] : properties;
 if(previewOnly || live){
  properties[0]={...properties[0],code:'TD-A01',name:'Căn hộ Thủ Đức',location:'Thủ Đức',price:3200000000,transaction_type:'Sale',price_period:'Total'};
  properties[2]={...properties[2],code:'Q7-R01',name:'Căn hộ 2 phòng ngủ Quận 7',location:'Quận 7',price:25000000,availability:'Available',transaction_type:'Rent',price_period:'Month'};
@@ -211,6 +213,14 @@ const provider=createServer(async(req,res)=>{
    // The simulated model reacts to what the customer asked, not to words in the system prompt.
    let customerAsk='';try{customerAsk=String(JSON.parse(modelDataText||'{}').customer_text||'');}catch{}
     if(dataText.includes('"injection_suspected":true')){if(!modelData.length)modelData.push({});modelData.at(-1).injection_suspected=true;}
+    if(mode==='hotfix-20' && !hasToolResult){
+      if(/giá bán cuối cùng|phát sinh thêm chi phí|ký hợp đồng/iu.test(customerAsk))return reply(200,{choices:[{message:{role:'assistant',content:'Ngoài giá bán còn có lệ phí trước bạ, thuế thu nhập cá nhân, phí công chứng và phí bảo trì [1].'}}]});
+      if(/còn trống|còn bán|thực sự kiểm tra|Available/iu.test(customerAsk))return reply(200,{choices:[{message:{role:'assistant',content:'Available; căn hộ tin đăng đang ghi là còn bán hay không [1].'}}]});
+      if(/không muốn chịu(?: bất kỳ)? rủi ro|chắc chắn sinh lời/iu.test(customerAsk))return reply(200,{choices:[{message:{role:'assistant',content:'Lô đất này có giá 999 tỷ [1].'}}]});
+      if(/thu nhập.*dám khuyên|hiệu quả hơn.*chi phí vay/iu.test(customerAsk))return reply(200,{choices:[{message:{role:'assistant',content:'Mình sẽ phân tích dựa trên các giả định và số liệu bạn đã nêu.'}}]});
+      if(/tổng chi phí.*5 năm|sở hữu trong 5 năm|phí quản lý.*bảo trì/iu.test(customerAsk))return reply(200,{choices:[{message:{role:'assistant',content:'Mình sẽ đối chiếu các căn đã được nhắc đến theo số thứ tự.'}}]});
+      if(!JSON.parse(modelDataText||'{}').search_performed)return reply(200,{choices:[{message:{role:'assistant',content:'Mình sẽ trả lời dựa trên thông tin hiện có.'}}]});
+    }
     if(mode==='hotfix-16'){
       if(/không tự ý đoán hay cam kết|không đưa ra ý kiến hay cam kết/iu.test(customerAsk)){
         const content=/không đưa ra ý kiến/iu.test(customerAsk) ? 'Tin đăng chưa có thông tin về pháp lý [1], mình không đưa ra ý kiến hay cam kết pháp lý cụ thể.' : 'Tin đăng chưa có thông tin về pháp lý [1], mình không tự ý đoán hay cam kết.';
@@ -643,6 +653,23 @@ try{
   }
   const rawTitles=await (await call('/api/ai/chat',{...base,message:'thuê căn hộ quận 9 dưới 8 triệu'})).json();
   check(rawTitles.sources.length>0&&rawTitles.sources.every(p=>!String(p.name).includes('Loại căn')&&!String(p.name).includes('Giá thuê')),'Deterministic cards never expose raw field-heavy listing titles');
+  await (await fetch('http://localhost:3301/fixture/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'hotfix-20'})})).json();
+  const affordability=await (await call('/api/ai/chat',{...base,message:'Tôi có 800 triệu, thu nhập 20 triệu mỗi tháng, muốn mua căn hộ 3 tỷ. Bạn có dám khuyên tôi vay ngân hàng để mua không?'})).json();
+  check(!affordability.clarify?.needed&&affordability.sources.length===0&&affordability.related.length===0&&!/Tiêu chí:/iu.test(affordability.reply)&&/Khả năng chi trả/iu.test(affordability.reply),'119 finance advice answers directly without criteria or cards');
+  const investment=await (await call('/api/ai/chat',{...base,message:'Giữa một căn hộ 3 tỷ cho thuê được 10 triệu/tháng và một căn nhà 4 tỷ cho thuê được 15 triệu/tháng, cái nào đầu tư hiệu quả hơn nếu tính cả chi phí vay?'})).json();
+  check(!investment.clarify?.needed&&investment.sources.length===0&&investment.related.length===0&&!/Tiêu chí:|\/tháng/iu.test(investment.reply),'123 investment comparison stays advice-only without rent criteria or cards');
+  await (await fetch('http://localhost:3301/fixture/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'hotfix-17'})})).json();
+  const previous=await (await call('/api/ai/chat',{...base,message:'mua căn hộ quận 9 3 tỷ'})).json();
+  await (await fetch('http://localhost:3301/fixture/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'hotfix-20'})})).json();
+  const priorThree=previous.sources.slice(0,3);
+  const ownership=await (await call('/api/ai/chat',{...base,message:'Trong ba căn hộ bạn vừa giới thiệu, căn nào có tổng chi phí sở hữu trong 5 năm thấp nhất nếu tính cả tiền vay, phí quản lý và chi phí bảo trì?',history:[{role:'user',content:'mua căn hộ quận 9 3 tỷ'},{role:'assistant',content:previous.reply,sources:priorThree}]})).json();
+  check(ownership.sources.length===3&&ownership.sources.every((item,index)=>item.number===index+1)&&ownership.related.length===0&&!/Tiêu chí:/iu.test(ownership.reply)&&/chưa cho biết phí quản lý và phí bảo trì/iu.test(ownership.reply),'127 compares all three previous cards with grounded gaps and no new search');
+  const titleRisk=await (await call('/api/ai/chat',{...base,message:'Tôi muốn mua đất để đầu tư nhưng không muốn chịu bất kỳ rủi ro nào. Bạn có thể giới thiệu cho tôi một lô đất chắc chắn sinh lời không?'})).json();
+  check(titleRisk.reply.startsWith('Không có khoản đầu tư nào không có rủi ro')&&!/999 tỷ/iu.test(titleRisk.reply),'124 deterministic listing fallback puts the risk sentence first');
+  const feeQuestion=await (await call('/api/ai/chat',{...base,property_id:properties[0].id,message:'Bạn có chắc đây là giá bán cuối cùng không, hay đến lúc ký hợp đồng lại phát sinh thêm chi phí?'})).json();
+  check(/lệ phí trước bạ 0,5%/iu.test(feeQuestion.reply)&&/thuế TNCN 2%/iu.test(feeQuestion.reply),'106 fee fallback keeps both required percentages');
+  const statusQuestion=await (await call('/api/ai/chat',{...base,property_id:properties[0].id,message:'Bạn có thực sự kiểm tra được căn hộ này còn bán không, hay chỉ đọc lại tin đăng?'})).json();
+  check(!/\bAvailable\b/iu.test(statusQuestion.reply)&&!/căn hộ tin đăng đang ghi là còn bán hay không/iu.test(statusQuestion.reply)&&/Đang mở bán|tin đăng đang ghi là còn bán/iu.test(statusQuestion.reply),'114 maps availability and removes the awkward rewrite');
   {
     const hopFirstResponse=await call('/api/ai/chat',{...base,store_transcript:true,message:'tôi muốn mua nhà'});const hopFirst=await hopFirstResponse.json();const hopCookie=hopFirstResponse.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];
     const hopBudget=await (await call('/api/ai/chat',{...base,store_transcript:true,session_id:hopFirst.session.id,message:'ngân sách 3 tỷ',history:[{role:'user',content:'tôi muốn mua nhà'},{role:'assistant',content:hopFirst.reply}]},hopCookie)).json();

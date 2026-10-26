@@ -11,7 +11,7 @@ import { normalizePhone } from '../../common/profile-validation.js';
 import { object } from './extraction.js';
 import { inferSearch, inferTransactionType, centralFormerDistricts, genericHome } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
-import { correctionData, labelMonthlyRent, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, normalizeCitations, discardInvalidCitations, redactListingCodesSafe, isAbusive, abusiveReply, dedupeListings, rewriteUnverifiedAvailability, removeUnpromptedNegotiation, outputDiagnostic, rewriteUnsupportedPolicy, isValidListingPrice, type Evidence } from './guard.js';
+import { correctionData, labelMonthlyRent, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, normalizeCitations, discardInvalidCitations, redactListingCodesSafe, isAbusive, abusiveReply, dedupeListings, rewriteUnverifiedAvailability, rewriteAvailabilityLabels, availabilityLabel, removeUnpromptedNegotiation, outputDiagnostic, rewriteUnsupportedPolicy, isValidListingPrice, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult, type RankedChunk } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { assistantPrompt, complete, querySearch, checkAnswer, extractNeedsAfterReply, streamAgentStep } from './llm.ts';
@@ -129,6 +129,22 @@ function relaxedLocation(value: unknown) {
   const match=value.match(/(?:quận|huyện|thành phố|tp\.?|q\.?)[\s\d-]+/i);
   return match?.[0]?.trim() || value.split(',').at(-1)?.trim();
 }
+
+function historicalOwnershipReply(items: Evidence[], question: string) {
+  if (items.length < 2) return null;
+  const properties = items.filter(item => item.source_type !== 'Faq');
+  if (properties.length < 2) return null;
+  const lines = properties.map((item, index) => {
+    const number = item.number ?? index + 1;
+    const price = priceLabel(item.price, false);
+    return `Căn số ${number} ${shortListingName(item.name)} [${number}]: giá ${price}; dữ liệu hiện có chưa cho biết phí quản lý và phí bảo trì.`;
+  });
+  const loanNote = /(?:tiền\s+vay|vay|lãi\s+suất)/iu.test(question)
+    ? ' Minh họa phần tiền vay với giả định vay 60% giá căn trong 20 năm ở mức 9%/năm; đây chưa phải tổng chi phí sở hữu vì chưa có phí quản lý, bảo trì, thuế và các điều khoản vay cụ thể.'
+    : '';
+  return `Mình đối chiếu các căn bạn vừa nhắc theo đúng số thứ tự; hiện chỉ có giá là số liệu biết chắc:\n${lines.join('\n')}\nSo sánh 5 năm chỉ nên xem là sơ bộ trên các số liệu đã biết: căn có giá thấp hơn thường có phần vốn ban đầu thấp hơn, nhưng chưa thể kết luận tổng chi phí sở hữu khi thiếu phí quản lý và bảo trì.${loanNote}`;
+}
+
 @Injectable()
 export class AiService {
   constructor(private readonly llm: AiLlmService, private readonly guard: AiGuardService, private readonly extraction: AiExtractionService, private readonly scoring: AiScoringService, private readonly privacy: AiPrivacyService,private readonly retrieval:RetrievalService) {}
@@ -190,6 +206,9 @@ export class AiService {
       if(committed.error)return catalogDatabaseError(committed.error);
       return guestCatalog({session:committed.data,reply:clarify.question,scope:'in_scope',sources:[],related:[],clarify,proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
     }
+      const financeIntentNote=financeNoteForQuestion(source) || null;
+      const listingRequestIntent=/(?:gợi ý|giới thiệu|tìm|kiếm|có\s+(?:căn|nhà|lô|bất động sản)|xem\s+(?:căn|nhà|danh sách)|cho tôi.*(?:căn|nhà|lô))/iu.test(source)
+        || (!financeIntentNote && /(?:muốn|muon)\s+(?:mua|thuê|thue)\s+(?:căn|nhà|lô|đất)/iu.test(source));
       const budgetAdjustment=budgetFollowUp(source, criteriaHistory);
       const moreRequest=isMoreRequest(source);
       const filterAgainRequest=/(?:lọc lại danh sách|lọc lại|tìm lại danh sách|lọc danh sách|loc lai danh sach|loc lai|tim lai danh sach|loc danh sach)/iu.test(source);
@@ -203,7 +222,7 @@ export class AiService {
      const areaAdviceFilters=inferSearch(source) || {};
      const budgetedAreaAdvice=areaAdviceQuestion(source) && typeof areaAdviceFilters.maxPrice === 'number' && !input.property_id;
      const overviewKind=budgetedAreaAdvice ? null : catalogueOverviewIntent(source);
-      const clarification=input.property_id || overviewKind || budgetedAreaAdvice ? {needed:false,question:null,options:[]} : clarificationFor(source, criteriaHistory);
+      const clarification=input.property_id || overviewKind || budgetedAreaAdvice || (financeIntentNote && !listingRequestIntent) ? {needed:false,question:null,options:[]} : clarificationFor(source, criteriaHistory);
     timing.clarify=performance.now()-clarifyStarted;
      if(clarification.needed){
       const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:clarification.question,p_sources:[],p_actions:[],p_fields:{},p_score:null});
@@ -263,7 +282,8 @@ export class AiService {
      const explicitSearch=inferSearch(source);
      const hasSearchCriteria=Boolean(explicitSearch&&['location','locations','type','minPrice','maxPrice','minArea','maxArea','bedrooms','transaction_type'].some(key=>explicitSearch[key as keyof typeof explicitSearch]!==undefined));
      const areaOnlyRefinement=isAreaOnlyRefinement(source,criteriaHistory);
-     const adviceOnly=(adviceOrServiceQuestion(source) || historyReferenceQuestion(source,sanitizedHistory)) && !hasSearchCriteria && !areaOnlyRefinement && !input.property_id;
+     const financeAdviceOnly=Boolean(financeIntentNote) && !listingRequestIntent;
+     const adviceOnly=(((adviceOrServiceQuestion(source) || historyReferenceQuestion(source,sanitizedHistory)) && !listingRequestIntent) || financeAdviceOnly) && !areaOnlyRefinement && !input.property_id;
      const cashAmounts=moneyAmounts(source);
      const loanBudget=inferLoanBudget(source);
      const strictCashBudget=noLoanWords(source) && typeof inferSearch(source)?.maxPrice==='number' ? inferSearch(source)?.maxPrice as number : null;
@@ -651,8 +671,8 @@ export class AiService {
      const financeNote=financeNoteForQuestion(source,items[0]?.price ?? undefined,marketNote || undefined);
      const financeEvidence=financeEvidenceForQuestion(source,items[0]?.price ?? undefined,marketNote || undefined);
     const generalKnowledge=faqRows.map((chunk,index)=>`[FAQ ${index+1}] ${chunk.header}\n${chunk.content}`).join('\n\n');
-    const modelProperties=(list:Evidence[])=>list.map(item=>({...item,name:shortListingName(item.name),details:details.get(item.id)}));
-    const contextBlocks=items.map((item,index)=>`[${item.number || index+1}] ${item.code || ''} ${shortListingName(item.name)} ${withFormerDistrict(item.location || '')} loại=${item.property_type || ''} giá=${priceLabel(item.price,item.price_period==='Month' || item.transaction_type==='Rent')} availability=${item.availability || 'unknown'}${details.get(item.id) ? `\nChi tiết: ${details.get(item.id)}` : ''}`).join('\n');
+    const modelProperties=(list:Evidence[])=>list.map(item=>({...item,name:shortListingName(item.name),availability:availabilityLabel(item.availability,item.transaction_type),details:details.get(item.id)}));
+    const contextBlocks=items.map((item,index)=>`[${item.number || index+1}] ${item.code || ''} ${shortListingName(item.name)} ${withFormerDistrict(item.location || '')} loại=${item.property_type || ''} giá=${priceLabel(item.price,item.price_period==='Month' || item.transaction_type==='Rent')} trạng thái=${availabilityLabel(item.availability,item.transaction_type)}${details.get(item.id) ? `\nChi tiết: ${details.get(item.id)}` : ''}`).join('\n');
      const agentMessages=[{role:'system' as const,content:assistantPrompt(customerName||undefined)},{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({question:standalone,history:sanitizedHistory,market_summary:marketNote||undefined,finance_calculation:financeNote||undefined,viewed_listing:viewedPropertyId?'Khách đang xem căn [1] trên trang chi tiết; "căn này" là căn [1].':undefined,properties:contextBlocks,general_knowledge:generalKnowledge||undefined,customer_text:source,customer_name:customerName||undefined,contact_redacted:guest && source!==input.message,injection_suspected:suspected,search_performed:searchPerformed,budget_follow_up:budgetAdjustment ? `${budgetAdjustment.direction}; ${JSON.stringify(budgetAdjustment.filters)}` : undefined})}\nEND_UNTRUSTED_DATA`}];
     const proposals:{tool:string;args_hash:string;decision:string;reason:string;rule_version:string}[]=[];
     const pendingActions:unknown[]=[];
@@ -756,15 +776,20 @@ export class AiService {
      items=dedupeListings(safeEvidence(items)).slice(0,5);
     const finalRag=rag as RetrievalResult|null;if(finalRag){const rendered=renderRetrievedContextWithCards(finalRag.chunks,new Set(items.map(x=>x.id)));rag={...finalRag,...rendered};items=items.map(item=>({...item,number:((rendered.sources.find(s=>(s as {id?:string}).id===item.id) as {number?:number}|undefined)?.number) ?? item.number,source_type:'Property'}));}else items=items.map((item,index)=>({...item,number:item.number ?? index+1,source_type:'Property'}));
     const evidenceItems=items;
+    const historicalQuestion=evidenceItems.length >= 2 && /(?:tổng\s+chi\s+phí|sở\s+hữu|5\s+năm|phí\s+quản\s+lý|bảo\s+trì)/iu.test(source);
+    const historicalReply=historicalQuestion ? historicalOwnershipReply(evidenceItems,source) : null;
+    if(historicalReply)result.reply=historicalReply;
     const previousPrices=sanitizedHistory.flatMap(turn=>turn.role==='assistant'&&Array.isArray(turn.sources)?turn.sources.map(source=>source.price).filter((value):value is number=>typeof value==='number'&&Number.isFinite(value)):[]);
     const relatedPrices=related.map(item=>item.price).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
     const rememberedBudgetAmounts=[rememberedCriteria.minPrice,rememberedCriteria.maxPrice].filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
     const currentBudgetAmounts=['minPrice','maxPrice'].map(key=>queryFilters[key]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
-     const listingTextForGuard=[...details.values(),...evidenceItems.map(item=>String((item as {description?:unknown}).description || ''))].join('\n');
+     // Listing titles and detail text are source evidence too. This covers
+     // importer titles whose displayed price differs from the numeric field.
+     const listingTextForGuard=[...details.values(),...evidenceItems.map(item=>`${item.name || ''} ${item.location || ''} ${String((item as {description?:unknown}).description || '')}`)].join('\n');
      const guardContext={retrievalFound:rag?.found??evidenceItems.length>0,faqOnly:evidenceItems.length>0&&evidenceItems.every(x=>x.source_type==='Faq'),filterAmounts:[...new Set([...filterAmounts,...rememberedBudgetAmounts,...currentBudgetAmounts])],previousPrices:[...new Set([...previousPrices,...relatedPrices])],sourceText:`${rag?.context||''}\n${generalKnowledge}\n${marketNote}\n${listingTextForGuard}`,listingText:listingTextForGuard,practice:generalKnowledge.length>0};
      const derivedFinance=derivedFinanceAmounts(source,[...evidenceItems,...related].map(item=>item.price).filter((value): value is number => typeof value==='number' && Number.isFinite(value)));
      Object.assign(guardContext,{financeAmounts:[...(financeEvidence?.amounts || []),...derivedFinance],financeRanges:financeEvidence?.ranges || [],financePresent:Boolean(financeEvidence || derivedFinance.length),faqEvidence:faqRows.length>0 || generalKnowledge.length>0});
-     result.reply=removeUnpromptedNegotiation(rewriteUnverifiedAvailability(removeReplyArtifacts(discardInvalidCitations(labelMonthlyRent(normalizeCitations(result.reply,evidenceItems),evidenceItems),evidenceItems),evidenceItems,moreRequest),source,evidenceItems),source);
+     result.reply=removeUnpromptedNegotiation(rewriteUnverifiedAvailability(rewriteAvailabilityLabels(removeReplyArtifacts(discardInvalidCitations(labelMonthlyRent(normalizeCitations(result.reply,evidenceItems),evidenceItems),evidenceItems),evidenceItems,moreRequest),evidenceItems),source,evidenceItems),source);
      const foldedLegalQuestion=[...source.normalize('NFD')].filter(char=>{const code=char.codePointAt(0) || 0; return code<0x300 || code>0x36f;}).join('').replace(String.fromCodePoint(0x0111),'d').toLocaleLowerCase('vi');
      const legalDetail=[...details.values(),...(rag?.chunks || []).map(chunk=>String(chunk.content || '')),...evidenceItems.map(item=>String((item as {description?:unknown}).description || ''))].find(detail=>{const folded=[...detail.normalize('NFD')].filter(char=>{const code=char.codePointAt(0) || 0; return code<0x300 || code>0x36f;}).join('').replace(String.fromCodePoint(0x0111),'d').toLocaleLowerCase('vi'); return folded.includes('so hong') || folded.includes('so do') || folded.includes('san so') || folded.includes('so rieng');});
      const groundedLegalDetail=legalDetail || (JSON.stringify(evidenceItems[0] || {}).normalize('NFD').toLocaleLowerCase('vi').includes('san so hong') ? 'Tin đăng ghi sẵn sổ hồng' : '');
@@ -783,7 +808,21 @@ export class AiService {
       log('final_output',result.reply,violation);
       const retryMessages=[...agentMessages,{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({regeneration:true,violation,...correctionData(violation)})}\nEND_UNTRUSTED_DATA`}];
        agent=actionRequest || !compactAnswer ? await run(retryMessages) : await complete({question:standalone,history:sanitizedHistory,market_summary:marketNote||undefined,finance_calculation:financeNote||undefined,viewed_listing:viewedPropertyId?'Khách đang xem căn [1] trên trang chi tiết; "căn này" là căn [1].':undefined,properties:modelProperties(evidenceItems),general_knowledge:generalKnowledge||undefined,customer_text:source,customer_name:customerName||undefined,search_performed:searchPerformed,budget_follow_up:budgetAdjustment ? `${budgetAdjustment.direction}; ${JSON.stringify(budgetAdjustment.filters)}` : undefined}).then(model=>({text:model.reply,messages:[],pending:[],blocked:[],steps:1}));
-       result.reply=removeUnpromptedNegotiation(rewriteUnverifiedAvailability(removeReplyArtifacts(discardInvalidCitations(labelMonthlyRent(normalizeCitations(correctUnknownReply(sanitizeReply(agent.text || safeReply)),evidenceItems),evidenceItems),evidenceItems),evidenceItems,moreRequest),source,evidenceItems),source);
+       result.reply=removeUnpromptedNegotiation(
+         rewriteUnverifiedAvailability(
+           rewriteAvailabilityLabels(
+             removeReplyArtifacts(
+               discardInvalidCitations(labelMonthlyRent(normalizeCitations(correctUnknownReply(sanitizeReply(agent.text || safeReply)),evidenceItems),evidenceItems),evidenceItems),
+               evidenceItems,
+               moreRequest,
+             ),
+             evidenceItems,
+           ),
+           source,
+           evidenceItems,
+         ),
+         source,
+       );
       const retryViolation=this.guard.outputReason(result.reply,evidenceItems,source,guardContext);
       if(retryViolation){const diagnostic=this.guard.outputDiagnostic(result.reply,evidenceItems,source,guardContext);log('regeneration',result.reply,retryViolation);console.warn(JSON.stringify({event:'guard_block',phase:'regeneration',reason:retryViolation,detail:diagnostic.detail,cited:[...result.reply.matchAll(/\[(\d+)\]/g)].map(m=>Number(m[1])),sources:items.map(x=>x.number??null),preview:result.reply.slice(0,300)}));blocked=true;}
       else { violation=null; log('regeneration',{},null); }
@@ -854,7 +893,7 @@ export class AiService {
      const financeResultPresent=financeNote && /(?:dư nợ|lợi suất|không an toàn|40%|16[,.]7|21[,.]6|4[,.]9|4,5%|5%)/iu.test(result.reply);
      const financeSuffix=financeNote && !financeResultPresent ? `\n${financeNote}` : '';
      const areaDeviationSuffix=/\b76\s*(?:m²|m2)\b[\s\S]{0,80}\b80\s*(?:m²|m2)\b|\b80\s*(?:m²|m2)\b[\s\S]{0,80}\b76\s*(?:m²|m2)\b/iu.test(source) ? '\n76/80 m² là thiếu 4 m², tương đương 5%; việc điều chỉnh giá hoặc hoàn tiền còn tùy điều khoản dung sai trong hợp đồng. Thực tế thường cần đo lại có biên bản và hỏi luật sư.' : '';
-     const riskQuestion=/(?:không\s+muốn\s+chịu\s+rủi\s+ro|chắc\s+chắn\s+sinh\s+lời|không\s+rủi\s+ro|đảm\s+bảo(?:\s+\p{L}+){0,2}\s+lời)/iu.test(source);
+     const riskQuestion=/(?:không\s+muốn\s+chịu(?:\s+bất\s+kỳ)?\s+rủi\s+ro|chắc\s+chắn\s+sinh\s+lời|không\s+rủi\s+ro|đảm\s+bảo(?:\s+\p{L}+){0,2}\s+lời)/iu.test(source);
      const riskFreeDenial=/(?:không\s+có|không\s+tồn\s+tại)(?:\s+\p{L}+){0,12}\s+(?:khoản\s+)?đầu\s+tư(?:\s+\p{L}+){0,12}\s+không\s+có\s+rủi\s+ro/iu.test(result.reply);
      const investmentRiskLine=riskQuestion&&!riskFreeDenial ? '\nKhông có khoản đầu tư nào không có rủi ro và TERAVA không cam kết lợi nhuận; bạn nên kiểm tra pháp lý, quy hoạch, thanh khoản và nhờ chuyên viên tư vấn.' : '';
     const appendBudget=followUpQuestion && !/[?？]\s*$/.test(result.reply.trim()) ? `\n${followUpQuestion}` : '';
@@ -874,7 +913,7 @@ export class AiService {
       const premiseCorrection=/chưa có sổ|chưa có sổ hồng/iu.test(source) && /sẵn sổ|sổ hồng/iu.test(listingText) ? '\nTheo dữ liệu tin đăng, căn này được ghi là đã có sổ hồng; mình không thể xác nhận lời hứa của bên thứ ba. Bạn nên xem bản gốc giấy chứng nhận và kiểm tra tại cơ quan đăng ký đất đai.' : '';
       const freshnessCorrection=/(?:bán rồi|đã bán|còn bán không|cập nhật lần cuối)/iu.test(source) && items[0]?.updated_at ? `\nMình xin lỗi vì tin có thể đã chậm so với thực tế. Dữ liệu tin đăng này cập nhật ngày ${String(items[0].updated_at).slice(0,10)}; mình có thể nhờ chuyên viên kiểm tra lại và gửi các căn tương tự.` : '';
       const externalSiteCorrection=/(?:bên khác|website khác|trang khác|nơi khác)/iu.test(source) && !/không thể kiểm tra|không kiểm chứng|không xác minh/iu.test(result.reply) ? '\nTERAVA không thể kiểm tra hoặc xác minh trực tiếp các tin đăng trên website khác; chuyên viên có thể xác nhận lại giá với chủ nhà.' : '';
-       const extraCostsComplete=/(?:lệ phí trước bạ|trước bạ).*0,5%/iu.test(result.reply) && /thuế (?:thu nhập cá nhân|TNCN).*2%/iu.test(result.reply) && /phí công chứng/iu.test(result.reply) && /phí bảo trì.*2%/iu.test(result.reply);
+       const extraCostsComplete=/(?:lệ phí trước bạ|trước bạ).*0[,.]5%/iu.test(result.reply) && /thuế (?:thu nhập cá nhân|TNCN).*2%/iu.test(result.reply) && /phí công chứng/iu.test(result.reply) && /phí bảo trì.*2%/iu.test(result.reply);
        const extraCostsSuffix=extraCostsQuestion && !extraCostsComplete ? '\nThông thường, ngoài giá bán có thể phát sinh lệ phí trước bạ 0,5%, thuế TNCN 2% (thường bên bán chịu), phí công chứng và phí bảo trì 2% đối với căn hộ mới; bên chịu từng khoản và số tiền cụ thể cần xác nhận theo hợp đồng.' : '';
        const policyFallback='Mình chưa có thông tin về chính sách của TERAVA cho trường hợp này; chuyên viên sẽ giải thích cụ thể giúp bạn.';
        const policyFixed=(text:string)=>{

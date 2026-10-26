@@ -114,7 +114,29 @@ export type Evidence={id:string;code:string;name:string;price:number|null;availa
 export function isValidListingPrice(item:{price?:number|null;transaction_type?:string}) {
   if(item.price === null || item.price === undefined) return true;
   if(!Number.isFinite(item.price)) return false;
-  return item.transaction_type === 'Rent' ? item.price >= 500_000 : item.price >= 50_000_000;
+  // A rent amount above 1 billion VND/month is not a valid catalogue rent
+  // ceiling. Keeping this invariant at the evidence boundary also prevents a
+  // malformed rent row from becoming a "tỷ/tháng" answer or criteria line.
+  return item.transaction_type === 'Rent' ? item.price >= 500_000 && item.price <= 1_000_000_000 : item.price >= 50_000_000;
+}
+
+export function availabilityLabel(value: string | null | undefined, transactionType?: string) {
+  const rent = transactionType === 'Rent';
+  if (value === 'Available') return rent ? 'Đang cho thuê' : 'Đang mở bán';
+  if (value === 'Sold') return rent ? 'Đã cho thuê, không còn trống' : 'Đã bán, không còn mở bán';
+  if (value === 'Reserved') return rent ? 'Đã có người giữ, không còn trống' : 'Đã giữ chỗ, không còn mở bán';
+  if (value === 'Unavailable') return rent ? 'Chưa khả dụng, không còn trống' : 'Chưa khả dụng, không còn mở bán';
+  return value || 'Chưa rõ khả dụng';
+}
+
+/** Replace raw catalogue enum values before a model reply can reach a customer. */
+export function rewriteAvailabilityLabels<T extends { transaction_type?: string }>(reply: string, sources: T[] = []) {
+  const rent = sources.some(source => source.transaction_type === 'Rent');
+  return reply
+    .replace(/\bAvailable\b/giu, rent ? 'Đang cho thuê' : 'Đang mở bán')
+    .replace(/\bSold\b/giu, rent ? 'Đã cho thuê, không còn trống' : 'Đã bán, không còn mở bán')
+    .replace(/\bReserved\b/giu, rent ? 'Đã có người giữ, không còn trống' : 'Đã giữ chỗ, không còn mở bán')
+    .replace(/\bUnavailable\b/giu, rent ? 'Chưa khả dụng, không còn trống' : 'Chưa khả dụng, không còn mở bán');
 }
 const clauses=(text:string)=>text.split(/\n|[;!?]|(?<!\d)[.,](?!\d)/).filter(Boolean);
 function negated(text:string,index:number){
@@ -311,8 +333,9 @@ export function dedupeListings<T extends { name?: string; price?: number|null; a
 }
 
 export function rewriteUnverifiedAvailability(reply:string, question:string, sources:{ availability?: string }[]) {
-  if(!sources.some(source=>source.availability==='Available') || !/(?:còn\s+trống|thực\s+sự|kiểm\s+tra.*còn)/iu.test(question))return reply;
+  if(!sources.some(source=>source.availability==='Available') || !/(?:còn\s+trống|còn\s+bán|thực\s+sự|kiểm\s+tra.*còn)/iu.test(question))return reply;
   let result=reply
+    .replace(/(?:căn(?:\s+hộ)?|nhà)\s+tin\s+đăng\s+(?:đang|được)\s+ghi\s+là\s+còn\s+bán(?:\s+hay\s+không)?/giu,'tin đăng đang ghi là còn bán; mình không thể xác nhận theo thời gian thực')
     .replace(/căn(?:\s+này)?\s+hiện\s+trạng(?:\s+là)?\s+còn\s+trống/giu,'căn này vẫn được tin đăng ghi là còn bán')
     .replace(/hiện\s+trạng(?:\s+là)?\s+còn\s+trống/giu,'tin đăng đang ghi là còn bán')
     .replace(/căn(?:\s+này)?(?:\s+vẫn)?\s+còn\s+trống/giu,'căn này vẫn được tin đăng ghi là còn bán');

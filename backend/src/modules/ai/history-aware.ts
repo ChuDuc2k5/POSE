@@ -110,6 +110,12 @@ export function referencedListingCodes(message: string, history: { role: string;
   const turns = history as HistoryTurn[];
   const listed = [...turns].reverse().find(turn => turn.role === 'assistant' && Array.isArray(turn.sources) && turn.sources.length)?.sources || [];
   const sourceCodes = listed.map(source => source.code).filter((code): code is string => typeof code === 'string');
+  // A multi-listing follow-up such as "ba căn bạn vừa giới thiệu" refers to
+  // the complete previous card set, in its original numbering. Do not reduce
+  // it to the last card or try to reconstruct criteria from assistant prose.
+  if (sourceCodes.length && historyReferenceQuestion(message, history)) {
+    return { codes: [...new Set(sourceCodes)], ambiguous: false };
+  }
   const numbered = [...message.matchAll(/(?:căn|can)(?:\s+hộ|\s+ho)?\s*(?:số|so)?\s*(\d+)(?![\p{L}\d])/giu)].map(match => Number(match[1]) - 1).filter(index => index >= 0 && index < sourceCodes.length);
   const wantsFirst = /(?:căn|can)\s+(?:đầu\s+tiên|dau\s+tien)/iu.test(message);
   const wantsCheapest = /(?:căn|can)\s+(?:rẻ\s+nhất|re\s+nhat)(?:\s+vừa\s+rồi|\s+vua\s+roi)?/iu.test(message);
