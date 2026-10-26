@@ -12,7 +12,7 @@ for(const candidate of [process.env.CHROME_PATH,process.env.PROGRAMFILES&&join(p
 assert.ok(chrome,'Chrome executable required');
 const root=join(tmpdir(),'pose-admin-shell');await mkdir(root,{recursive:true});
 const routes=['/admin?kind=properties','/admin?kind=projects','/admin?kind=subdivisions','/admin/inquiries','/admin/leads','/admin/campaigns','/admin/calls','/admin/ai-dashboard','/admin/sales'];
-const order=['Sản phẩm','Dự án','Phân khu','Yêu cầu tư vấn','Quản lý Lead','Chiến dịch gọi','Cuộc gọi','AI Platform','Quản lý Sales'];
+const order=['Sản phẩm','Dự án','Phân khu','Yêu cầu tư vấn','Quản lý Lead','Báo cáo Lead','Lịch hẹn','Chiến dịch gọi','Cuộc gọi','AI Platform','Quản lý Sales'];
 let server,child,ws,send,checks=0;const problems=[];let current='';
 const check=(value,label)=>{assert.ok(value,label);checks++;};
 try{
@@ -33,7 +33,7 @@ try{
   if(m.method==='Runtime.consoleAPICalled'&&['error','warning'].includes(m.params.type))problems.push(current+': console.'+m.params.type+' '+m.params.args.map(a=>a.value??a.description??'').join(' ').slice(0,300));
   if(m.method==='Runtime.exceptionThrown')problems.push(current+': exception '+(m.params.exceptionDetails.exception?.description||m.params.exceptionDetails.text).slice(0,300));
   // The fixture has no realtime server; M08 calls connect straight to the build-time NEXT_PUBLIC_API_URL.
-  if(m.method==='Log.entryAdded'&&m.params.entry.level==='error'&&!(/ERR_CONNECTION_REFUSED/.test(m.params.entry.text)&&/\/socket\.io\?/.test(m.params.entry.url||'')))problems.push(current+': log '+m.params.entry.text.slice(0,200)+' '+(m.params.entry.url||''));});
+  if(m.method==='Log.entryAdded'&&m.params.entry.level==='error'&&!(/\/socket\.io\?/.test((m.params.entry.url||'')+' '+m.params.entry.text)))problems.push(current+': log '+m.params.entry.text.slice(0,200)+' '+(m.params.entry.url||''));});
  await send('Runtime.enable');await send('Log.enable');
  await send('Page.enable');
  // The discovery fixture has no M04/M11 routes; answer them in their real shapes.

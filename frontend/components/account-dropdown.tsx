@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { BriefcaseBusiness, ChevronDown, Contact, Heart, LayoutDashboard, MessagesSquare, UserRound } from 'lucide-react';
+import { BriefcaseBusiness, ChevronDown, Heart, LayoutDashboard, MessagesSquare, UserRound } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { LogoutButton } from './logout-button';
 import { roleHome, roleLabels, type Role } from '@/lib/roles';
@@ -34,7 +34,7 @@ export function AccountDropdown({ role, name }: { role: Role; name?: string }) {
     <button ref={trigger} type="button" className="account-trigger" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen(value => !value)}><span className="account-avatar-small">{displayName.charAt(0).toUpperCase()}</span><span>{displayName}</span><ChevronDown size={15} className={open ? 'is-open' : ''}/></button>
     {open && <div className="account-menu" role="menu"><div className="account-role" role="presentation"><span className="account-avatar-large">{displayName.charAt(0).toUpperCase()}</span><span><strong>{displayName}</strong><small>{roleLabels[role]}</small></span></div>
       <Link href="/account" role="menuitem" onClick={() => close()}><UserRound size={17}/>Hồ sơ cá nhân</Link>
-      {role === 'User' ? <><Link href="/customer/favorites" role="menuitem" onClick={() => close()}><Heart size={17}/>Bất động sản đã lưu</Link><Link href="/customer/inquiries" role="menuitem" onClick={() => close()}><MessagesSquare size={17}/>Yêu cầu tư vấn</Link></> : role === 'Admin' ? <Link href="/admin" role="menuitem" onClick={() => close()}><LayoutDashboard size={17}/>Admin dashboard</Link> : <><Link href="/leads" role="menuitem" onClick={() => close()}><Contact size={17}/>Quản lý Lead</Link><Link href="/sales" role="menuitem" onClick={() => close()}><BriefcaseBusiness size={17}/>Không gian Sales</Link></>}
+      {role === 'User' ? <><Link href="/customer/favorites" role="menuitem" onClick={() => close()}><Heart size={17}/>Bất động sản đã lưu</Link><Link href="/customer/inquiries" role="menuitem" onClick={() => close()}><MessagesSquare size={17}/>Yêu cầu tư vấn</Link></> : role === 'Admin' ? <Link href="/admin" role="menuitem" onClick={() => close()}><LayoutDashboard size={17}/>Admin dashboard</Link> : <Link href="/sales" role="menuitem" onClick={() => close()}><BriefcaseBusiness size={17}/>Không gian Sales</Link>}
       <LogoutButton menuItem/>
     </div>}
   </div>;
