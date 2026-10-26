@@ -141,6 +141,12 @@ const properties=['Available','Sold','Reserved','Unavailable'].map((availability
 properties.push({...properties[0],id:randomUUID(),publication:'Draft'}, {...properties[0],id:randomUUID(),archived:true});
 for(const [price,ward,name,codePrefix] of [[6000000,'Long Bình','Phòng trọ Long Bình 6 triệu','Q9-R'],[7000000,'Long Bình','Nhà thuê Long Bình 7 triệu','Q9-R'],[8000000,'Long Bình','Nhà thuê Long Bình 8 triệu','Q9-R'],[9000000,'Long Bình','Nhà thuê Long Bình 9 triệu','Q9-R'],[10000000,'Long Bình','Nhà thuê Long Bình 10 triệu','Q9-R'],[10500000,'Long Bình','Nhà thuê Long Bình 10,5 triệu','Q9-R'],[6500000,'Bình Đông','Nhà thuê Bình Đông 6,5 triệu','Q8-R']]) properties.push({id:randomUUID(),code:`${codePrefix}-${price}`,name,price,availability:'Available',updated_at:'2026-10-14T01:00:00Z',location:`Phường ${ward}, Thành phố Hồ Chí Minh`,property_type:'House',publication:'Published',archived:false,area:55,bedrooms:2,project_name:'TERAVA',subdivision_name:null,amenities:'',cover_id:null,transaction_type:'Rent',price_period:'Month',description:'Căn cho thuê công bố để kiểm thử ngân sách và khu vực.'});
 const previewOnly=process.argv.includes('--preview-only'),live=process.argv.includes('--live');
+const hotfixProperties=[
+ {id:randomUUID(),code:'TD-B01',name:'Căn hộ ngân sách Thủ Đức',price:1800000000,availability:'Available',updated_at:'2026-10-15T01:00:00Z',location:'Phường Long Bình, Thành phố Hồ Chí Minh',property_type:'Apartment',publication:'Published',archived:false,area:65,bedrooms:2,project_name:'TERAVA',subdivision_name:null,amenities:'',cover_id:null,transaction_type:'Sale',price_period:'Total',description:'Căn hộ bán công bố để kiểm thử hotfix 10d.'},
+ {id:randomUUID(),code:'Q12-B01',name:'Nhà phố ngân sách Quận 12',price:1500000000,availability:'Available',updated_at:'2026-10-15T01:00:00Z',location:'Phường Thới An, Thành phố Hồ Chí Minh',property_type:'House',publication:'Published',archived:false,area:72,bedrooms:3,project_name:'TERAVA',subdivision_name:null,amenities:'',cover_id:null,transaction_type:'Sale',price_period:'Total',description:'Nhà phố bán công bố để kiểm thử hotfix 10d.'},
+ {id:randomUUID(),code:'BD-B01',name:'Đất nền ngân sách Bình Dương',price:900000000,availability:'Available',updated_at:'2026-10-15T01:00:00Z',location:'Bình Dương',property_type:'Land',publication:'Published',archived:false,area:90,bedrooms:null,project_name:'TERAVA',subdivision_name:null,amenities:'',cover_id:null,transaction_type:'Sale',price_period:'Total',description:'Đất nền bán công bố để kiểm thử hotfix 10d.'},
+];
+const catalogueRows=()=>mode==='hotfix-10d' ? [...properties,...hotfixProperties] : properties;
 if(previewOnly || live){
  properties[0]={...properties[0],code:'TD-A01',name:'Căn hộ Thủ Đức',location:'Thủ Đức',price:3200000000,transaction_type:'Sale',price_period:'Total'};
  properties[2]={...properties[2],code:'Q7-R01',name:'Căn hộ 2 phòng ngủ Quận 7',location:'Quận 7',price:25000000,availability:'Available',transaction_type:'Rent',price_period:'Month'};
@@ -291,7 +297,7 @@ const provider=createServer(async(req,res)=>{
  if(url.pathname==='/fixture/ai-request-logs')return reply(200,requestLogs);
  if(url.pathname.endsWith('/pose_system_admin_ai_usage')){if(role!=='Admin')return error('42501','FORBIDDEN',403);const grouped=new Map();for(const row of requestLogs){const key=`${new Date().toISOString().slice(0,10)}:${row.p_model}`;const current=grouped.get(key)||{day:new Date().toISOString().slice(0,10),model:row.p_model,requests:0,total_tokens:0,p50_latency_ms:row.p_latency_ms,p95_latency_ms:row.p_latency_ms,fallback_rate:row.p_status==='fallback'?1:0,estimated_cost:0};current.requests++;current.total_tokens+=row.p_total_tokens||0;grouped.set(key,current);}return reply(200,[...grouped.values()]);}
  // AI dashboard RPCs: shape-faithful fixture over the logged rows (exact SQL aggregates are tested in test-ai-agent-sql.mjs).
- if(url.pathname.includes('/pose_system_admin_ai_')){
+  if(url.pathname.includes('/pose_system_admin_ai_')){
   if(role!=='Admin')return reply(200,[]);
   const rows=requestLogs.map((r,i)=>({id:`log-${i}`,created_at:r.created_at||new Date().toISOString(),turn_id:r.p_turn_id,question_preview:r.p_question_preview,kind:r.p_kind,model:r.p_model,prompt_version:r.p_prompt_version,tools_called:r.p_tools_called||[],prompt_tokens:r.p_prompt_tokens||0,completion_tokens:r.p_completion_tokens||0,total_tokens:r.p_total_tokens||0,estimated_cost_usd:r.p_estimated_cost_usd||0,latency_ms:r.p_latency_ms||0,status:r.p_status,error_code:r.p_error_code||null}));
   const sum=(list,key)=>list.reduce((n,r)=>n+Number(r[key]||0),0),turnIds=[...new Set(rows.map(r=>r.turn_id).filter(Boolean))];
@@ -302,7 +308,7 @@ const provider=createServer(async(req,res)=>{
   if(url.pathname.endsWith('_turns')){const q=String(input.p_search||'').toLocaleLowerCase('vi');const list=turnIds.map(turn).filter(t=>!q||String(t.question_preview||'').toLocaleLowerCase('vi').includes(q));return reply(200,list.slice(input.p_offset||0,(input.p_offset||0)+(input.p_limit||25)).map(t=>({...t,total_count:list.length})));}
   if(url.pathname.endsWith('_turn_calls'))return reply(200,rows.filter(r=>r.turn_id===input.p_turn_id));
  }
- if(url.pathname.endsWith('/pose_ai_request_handoff')){
+  if(url.pathname.endsWith('/pose_ai_request_handoff')){
   if(role!=='User')return error('42501','CUSTOMER_REQUIRED',403);
   const s=sessions.get(input.p_session);if(!s || s.user_id!==uid)return error('P0002','NOT_FOUND',404);
   const key=`${s.id}:${input.p_idempotency_key}`;
@@ -323,24 +329,31 @@ const provider=createServer(async(req,res)=>{
  if(url.pathname.endsWith('/pose_override_lead_score')){
   if(role!=='Admin' && !(role==='Sales' && assigned(input.p_lead,directory.Sales)))return error('42501','FORBIDDEN',403);
   const lead=leads.get(input.p_lead);if(lead.version!==input.p_version)return error('40001','VERSION_CONFLICT',409);lead.temperature=input.p_classification==='Unrated' ? null:input.p_classification.toUpperCase();lead.version++;return reply(200,{classification:input.p_classification,version:lead.version});
+  }
+ if(url.pathname.endsWith('/pose_system_ai_catalogue_overview')){
+  const transaction=input.p_transaction_type||null,type=input.p_property_type||null,max=input.p_max_price==null?null:Number(input.p_max_price);
+  const rows=catalogueRows().filter(p=>p.publication==='Published'&&!p.archived&&(!transaction||p.transaction_type===transaction)&&(!type||p.property_type===type)&&(max===null||(p.price!==null&&p.price<=max)));
+  const by=(key)=>{const grouped=new Map();for(const row of rows){const value=row[key];if(value==null)continue;const item=grouped.get(value)||{label:value,count:0,min_price:null,max_price:null};item.count++;if(row.price!==null){item.min_price=item.min_price===null?row.price:Math.min(item.min_price,row.price);item.max_price=item.max_price===null?row.price:Math.max(item.max_price,row.price);}grouped.set(value,item);}return [...grouped.values()].sort((a,b)=>b.count-a.count||a.label.localeCompare(b.label,'vi'));};
+  const types=[...new Map(rows.map(row=>[`${row.transaction_type}:${row.property_type}`,{transaction_type:row.transaction_type,property_type:row.property_type,count:rows.filter(item=>item.transaction_type===row.transaction_type&&item.property_type===row.property_type).length}])).values()].sort((a,b)=>b.count-a.count);
+  return reply(200,{areas:by('location'),types,projects:[],prices:[]});
  }
   if(url.pathname.endsWith('/pose_system_search_knowledge')){
    ragCalls++;
    ragRequests.push(input.p_filters || {});
    if(mode==='rag-failure')return reply(500,{message:'fixture retrieval failure'});
   const context=Array.isArray(input.p_context)?input.p_context:[];
-  const knownContext=context.filter(id=>properties.some(p=>p.id===id));
+  const knownContext=context.filter(id=>catalogueRows().some(p=>p.id===id));
   const filters=input.p_filters||{};
   const wanted=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations.map(String):[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases.map(String):[])].map(value=>value.toLocaleLowerCase('vi'));
-  const rows=properties.filter(p=>p.publication==='Published'&&!p.archived&&(!context.length||knownContext.includes(p.id))&&(!filters.transaction_type||p.transaction_type===filters.transaction_type)&&(!filters.type||p.property_type===filters.type)&&(!wanted.length||wanted.some(value=>p.location.toLocaleLowerCase('vi').includes(value)))&&(typeof filters.minPrice!=='number'||p.price===null||p.price>=filters.minPrice)&&(typeof filters.maxPrice!=='number'||p.price===null||(filters.maxPriceExclusive?p.price<filters.maxPrice:p.price<=filters.maxPrice))).map((p,i)=>({chunk_id:`chunk-${i}`,document_id:`doc-${i}`,source_id:p.id,source_type:'Property',header:`${p.code} ${p.name}`,content:`${p.name} ${p.location} published listing.`,vector_rank:context.includes(p.id)?Math.max(1,i):i+1,text_rank:context.includes(p.id)?1:i+1,similarity:context.includes(p.id)?.95:.9,embed_model:'fixture',code:p.code,name:p.name,location:p.location,property_type:p.property_type,transaction_type:p.transaction_type,price:p.price,price_period:p.price_period,availability:p.availability,updated_at:p.updated_at})).sort((a,b)=>(b.similarity-a.similarity)||(a.vector_rank-b.vector_rank));
+  const rows=catalogueRows().filter(p=>p.publication==='Published'&&!p.archived&&(!context.length||knownContext.includes(p.id))&&(!filters.transaction_type||p.transaction_type===filters.transaction_type)&&(!filters.type||p.property_type===filters.type)&&(!wanted.length||wanted.some(value=>p.location.toLocaleLowerCase('vi').includes(value)))&&(typeof filters.minPrice!=='number'||p.price===null||p.price>=filters.minPrice)&&(typeof filters.maxPrice!=='number'||p.price===null||(filters.maxPriceExclusive?p.price<filters.maxPrice:p.price<=filters.maxPrice))).map((p,i)=>({chunk_id:`chunk-${i}`,document_id:`doc-${i}`,source_id:p.id,source_type:'Property',header:`${p.code} ${p.name}`,content:`${p.name} ${p.location} published listing.`,vector_rank:context.includes(p.id)?Math.max(1,i):i+1,text_rank:context.includes(p.id)?1:i+1,similarity:context.includes(p.id)?.95:.9,embed_model:'fixture',code:p.code,name:p.name,location:p.location,property_type:p.property_type,transaction_type:p.transaction_type,price:p.price,price_period:p.price_period,availability:p.availability,updated_at:p.updated_at})).sort((a,b)=>(b.similarity-a.similarity)||(a.vector_rank-b.vector_rank));
   return reply(200,rows);
  }
  if(url.pathname.endsWith('/property_public_catalog')){
   searchReads++;
   if(![...url.searchParams.values()].some(value=>value.startsWith('in.')))catalogSearchReads++;
   check(token==='fixture-public','Retrieval uses anon publishable key');
-  let rows=properties.filter(p=>p.publication==='Published' && !p.archived);if(mode==='search')rows=rows.filter(p=>p.price!==null&&p.price<=3e9);
-  for(const [k,v] of url.searchParams){if(v.startsWith('ilike.'))rows=rows.filter(p=>String(p[k]).toLocaleLowerCase('vi').includes(v.slice(7,-1).toLocaleLowerCase('vi')));if(v.startsWith('eq.'))rows=rows.filter(p=>String(p[k])===v.slice(3));if(v.startsWith('in.'))rows=rows.filter(p=>v.slice(4,-1).split(',').includes(String(p[k])));if(v.startsWith('gte.'))rows=rows.filter(p=>p[k]!==null && p[k]>=Number(v.slice(4)));if(v.startsWith('lte.'))rows=rows.filter(p=>p[k]!==null && p[k]<=Number(v.slice(4)));}
+  let rows=catalogueRows().filter(p=>p.publication==='Published' && !p.archived);if(mode==='search')rows=rows.filter(p=>p.price!==null&&p.price<=3e9);
+  for(const [k,v] of url.searchParams){if(k==='or'){const locations=[...v.matchAll(/location\.ilike\.%([^,%]*)%/g)].map(match=>match[1].toLocaleLowerCase('vi'));if(locations.length)rows=rows.filter(p=>locations.some(location=>String(p.location).toLocaleLowerCase('vi').includes(location)));}if(v.startsWith('ilike.'))rows=rows.filter(p=>String(p[k]).toLocaleLowerCase('vi').includes(v.slice(7,-1).toLocaleLowerCase('vi')));if(v.startsWith('eq.'))rows=rows.filter(p=>String(p[k])===v.slice(3));if(v.startsWith('in.'))rows=rows.filter(p=>v.slice(4,-1).split(',').includes(String(p[k])));if(v.startsWith('gte.'))rows=rows.filter(p=>p[k]!==null && p[k]>=Number(v.slice(4)));if(v.startsWith('lte.'))rows=rows.filter(p=>p[k]!==null && p[k]<=Number(v.slice(4)));}
    if(rows.some(p=>/AI_API_KEY|SUPABASE_/i.test(p.name))){unsafeSessionId=lastRequestSessionId;unsafePending=true;logs.push({session_id:lastRequestSessionId,reason:'UNSAFE_RETRIEVED_DATA',decision:'flagged'});}
    return reply(200,req.headers.accept?.includes('application/vnd.pgrst.object+json') ? rows[0] || null:rows.slice(0,5));
  }
@@ -401,7 +414,7 @@ try{
  for(const [path,cookie,expected] of [['/properties','','AiChatPage'],[`/properties/${properties[0].id}`,'','AiChatPage'],['/','pose-access=fixture-User','AiChatPage'],['/sales','pose-access=fixture-Sales','Bàn giao từ trợ lý AI'],['/admin','pose-access=fixture-Admin','AI Agent']]){
   const page=await call(path,null,cookie);check(page.ok && (await page.text()).includes(expected),`UI mounted on ${path}`);
  }
-  const ragBeforeNormal=ragCalls,catalogBeforeNormal=catalogSearchReads;
+  let ragBeforeNormal=ragCalls,catalogBeforeNormal=catalogSearchReads;
   const clarificationBefore=ragCalls;const clarificationResponse=await call('/api/ai/chat',{...base,message:'Tôi muốn thuê chung cư'});const clarificationChat=await clarificationResponse.json();check(clarificationResponse.status===200&&clarificationChat.clarify?.needed&&clarificationChat.sources.length===0&&ragCalls===clarificationBefore,'Broad first search asks for area and budget before retrieval');check(clarificationChat.clarify.options.includes('Chưa rõ, gợi ý giúp tôi'),'Clarification offers a no-preference option');
   {
    const start=await call('/api/ai/chat',base);
@@ -473,6 +486,17 @@ try{
    const genericVague=await call('/api/ai/chat',{...base,session_id:genericData.session.id,message:'Chưa rõ, gợi ý giúp tôi',history:genericHistory},genericCookie);const genericVagueData=await genericVague.json();check(!genericVagueData.clarify?.needed&&genericVagueData.sources.length>0&&genericVagueData.sources.every(p=>p.transaction_type==='Sale'),'Vague generic answer searches with known Sale criteria');
    const genericArea=await call('/api/ai/chat',{...base,message:'Gợi ý mua nhà'});const genericAreaData=await genericArea.json();const genericAreaCookie=genericArea.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];const genericAreaHistory=[{role:'user',content:'Gợi ý mua nhà'},{role:'assistant',content:genericAreaData.reply}];const q7=await call('/api/ai/chat',{...base,session_id:genericAreaData.session.id,message:'Quận 7',history:genericAreaHistory},genericAreaCookie);const q7Data=await q7.json();check(q7Data.clarify?.needed&&q7Data.clarify.options.includes('Dưới 3 tỷ')&&q7Data.sources.length===0,'Generic area answer asks for the budget field');
   }
+  await (await fetch('http://localhost:3301/fixture/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'hotfix-10d'})})).json();
+  const budgetAdvice=await call('/api/ai/chat',{...base,message:'Tôi có 2 tỷ, nên mua BĐS ở đâu?'});const budgetAdviceData=await budgetAdvice.json();
+  check(!budgetAdviceData.clarify?.needed&&/Thủ Đức \(1 tin/iu.test(budgetAdviceData.reply)&&/Quận 12 \(1 tin/iu.test(budgetAdviceData.reply)&&budgetAdviceData.sources.length===3&&budgetAdviceData.sources.every(p=>p.transaction_type==='Sale'&&p.price<=2e9)&&budgetAdviceData.clarify?.options.includes('Thủ Đức'),'Budgeted area advice answers with grouped counts, in-budget cards, and area chips');
+  const apartmentAdvice=await call('/api/ai/chat',{...base,message:'Tôi chỉ có 800 triệu, mua căn hộ ở đâu được?'});const apartmentAdviceData=await apartmentAdvice.json();
+  check(!apartmentAdviceData.clarify?.needed&&/chưa có tin bán/iu.test(apartmentAdviceData.reply)&&apartmentAdviceData.sources.length>0&&apartmentAdviceData.sources.every(p=>p.property_type==='Apartment'&&p.price>800e6&&/Ngoài ngân sách đã nêu/iu.test(String(p.reason))),'Apartment budget advice keeps the type and labels nearest above-budget cards honestly');
+  const chipHistory=[{role:'user',content:'có 2 tỷ'},{role:'assistant',content:'Bạn muốn xem kỹ khu nào?'}];const chipSearch=await call('/api/ai/chat',{...base,message:'Thủ Đức',history:chipHistory});const chipSearchData=await chipSearch.json();const chipFilters=ragRequests.slice().reverse().find(filters=>filters.location==='Thủ Đức'&&filters.transaction_type==='Sale');
+  check(!chipSearchData.clarify?.needed&&chipFilters&&chipFilters.maxPrice===2e9&&chipFilters.transaction_type==='Sale'&&chipSearchData.sources.length>0&&chipSearchData.sources.every(p=>p.price<=2e9),'Thủ Đức area chip searches Sale listings within the remembered 2 tỷ ceiling');
+  const budgetPhrases=await call('/api/ai/chat',{...base,message:'Tôi có 2 tỷ, nên mua BĐS ở đâu?'});const budgetPhrasesData=await budgetPhrases.json();
+  check(!budgetPhrasesData.reply.includes('ngân sách khoảng bao nhiêu')&&!budgetPhrasesData.reply.includes('dự kiến ngân sách')&&budgetPhrasesData.clarify?.options?.includes('Chưa rõ, gợi ý giúp tôi'),'A stated budget never triggers a repeated budget clarification');
+  await (await fetch('http://localhost:3301/fixture/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'ok'})})).json();
+  catalogBeforeNormal=catalogSearchReads;
  const first=await call('/api/ai/chat',base);check(first.status===200,'Guest chat succeeds');const chat=await first.json();const firstModelReply=modelOutputs.at(-1).reply;
   await delay(50);const turnLogs=requestLogs.filter(row=>row.p_session_id===chat.session.id&&row.p_kind!=='embed');check(turnLogs.length>=2 && turnLogs.every(row=>row.p_prompt_version && row.p_total_tokens>0),'Every model call is logged with prompt versions and fake usage');
  check(chat.reply.startsWith('Tôi là trợ lý AI của TERAVA.'),'First message disclosure');

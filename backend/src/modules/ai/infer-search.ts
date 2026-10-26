@@ -26,7 +26,7 @@ const types: [RegExp, string][] = [
   [word('mặt bằng|shophouse|kiot|cửa hàng'), 'Shop'], [word('đất nền|lô đất|đất'), 'Land'], [word('nhà phố|nhà riêng|nhà nguyên căn|nhà mặt tiền|nhà mặt phố|nhà hẻm|nhà cấp 4|nhà \d+ tầng|nhà \d+ lầu'), 'House'], [word('nhà'), 'House'],
 ];
 const places = ['Thủ Đức', 'Bình Thạnh', 'Gò Vấp', 'Tân Bình', 'Tân Phú', 'Phú Nhuận', 'Bình Tân', 'Nhà Bè', 'Củ Chi', 'Hóc Môn', 'Bình Chánh', 'Cần Giờ', 'Thảo Điền', 'Phú Mỹ Hưng', 'Thủ Thiêm'];
-const propertyWords = /căn(?: hộ)?|chung cư|nhà|đất|biệt thự|văn phòng|mặt bằng|bất động sản|thuê|mua|bán|giá|ngân sách|tỷ|triệu|phòng ngủ|quận|khu vực|diện tích|nhận nhà ngay|dọn vào ở ngay|khu dân cư|vợ chồng|trường học|bệnh viện|chợ|siêu thị|trung tâm thương mại|hẻm|yên tĩnh|máy lạnh|máy giặt|nội thất|đậu ô tô|gara|tầng thấp|tầng cao|ban công|view|hồ bơi|gym|thang máy|giảm giá|ngộp|cắt lỗ|hạ giá|chiết khấu|giá tốt|chỉ còn|\bm\s*[²2]\b|apartment|house/i;
+const propertyWords = /căn(?: hộ)?|chung cư|nhà|đất|biệt thự|văn phòng|mặt bằng|bất động sản|bđs|bds|thuê|mua|bán|giá|ngân sách|tỷ|triệu|phòng ngủ|quận|khu vực|diện tích|nhận nhà ngay|dọn vào ở ngay|khu dân cư|vợ chồng|trường học|bệnh viện|chợ|siêu thị|trung tâm thương mại|hẻm|yên tĩnh|máy lạnh|máy giặt|nội thất|đậu ô tô|gara|tầng thấp|tầng cao|ban công|view|hồ bơi|gym|thang máy|giảm giá|ngộp|cắt lỗ|hạ giá|chiết khấu|giá tốt|chỉ còn|\bm\s*[²2]\b|apartment|house/i;
 
 const keywordRules: [RegExp, string][] = [
   [/nhan nha ngay|don vao o ngay/iu, 'nhận nhà ngay'],
@@ -49,7 +49,8 @@ const searchKeywords = (text: string) => {
 export function genericHome(text: string) { return word('thuê').test(text) && word('nhà').test(text) && !types.slice(0, -1).some(([pattern]) => pattern.test(text)); }
 
 export function inferSearch(text: string): InferredSearch | null {
-  if (!propertyWords.test(text)) return null;
+  const standalonePlace = places.some(name => text.trim().toLocaleLowerCase('vi') === name.toLocaleLowerCase('vi'));
+  if (!propertyWords.test(text) && !standalonePlace) return null;
   const filters: InferredSearch = {};
   const landmark = landmarkLocations.find(([pattern]) => pattern.test(text));
   if (landmark) { if (Array.isArray(landmark[1])) filters.locations = landmark[1]; else filters.location = landmark[1]; }
@@ -83,6 +84,14 @@ export function inferSearch(text: string): InferredSearch | null {
   if (!range && !below && !above) {
     const bareAmount = text.match(/(?<![\p{L}\d])([\d.,]+\s*(?:tỷ|tỉ|ty|triệu|tr))(?![\p{L}])/iu);
     if (bareAmount) { const value = amount(bareAmount[1]); if (value) { filters.minPrice = value; filters.maxPrice = value; } }
+  }
+  // "có X", "chỉ có X", "trong tay X", "vốn X" and "tài chính X"
+  // state the customer's ceiling, not an exact-price range. Rent keeps the
+  // same value as a monthly ceiling when the message says "thuê" or "/tháng".
+  const statedBudget = text.match(/(?:chỉ\s+có|có|trong\s+tay|vốn|tài\s+chính)[^\d]{0,40}([\d.,]+\s*(?:tỷ|tỉ|ty|triệu|tr))(?![\p{L}])/iu);
+  if (statedBudget) {
+    const value = amount(statedBudget[1]);
+    if (value) { filters.maxPrice = value; delete filters.minPrice; filters.maxPriceExclusive = false; }
   }
   // Corrections are parsed in source order so the last amount wins. In
   // particular, “chỉ có X” is always a budget ceiling.

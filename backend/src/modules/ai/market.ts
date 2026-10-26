@@ -1,11 +1,12 @@
 import { authClient } from '../auth/session.js';
 import { priceLabel } from './money.js';
 import { withFormerDistrict } from './ward-label.js';
+import { catalogueOverview } from './catalogue-overview.js';
 
 type Row = { location: string | null; price: number | string | null; area: number | string | null; property_type: string; transaction_type: 'Sale' | 'Rent'; name: string };
 
 // "Tài chính 5 tỷ nên tìm ở khu vực nào?", "giá thuê trung bình khu này", "giá đất bao nhiêu một m²".
-export const areaAdviceQuestion = (text: string) => /(?:khu vực|quận|chỗ|nơi) nào|nên (?:tìm|mua|thuê|chọn) ở đâu|ở đâu (?:thì )?(?:hợp|phù hợp)/iu.test(text);
+export const areaAdviceQuestion = (text: string) => /(?:khu vực|quận|chỗ|nơi) nào|nên\s+(?:tìm|mua|thuê|chọn)(?:[^?\n]{0,80})?(?:ở đâu|khu nào|đâu phù hợp)|(?:mua|thuê)(?:[^?\n]{0,80})?(?:mua được ở đâu|thuê được ở đâu|ở đâu|khu nào|đâu phù hợp)|với[^?\n]{0,80}(?:mua được gì|thuê được gì)/iu.test(text);
 export const rentLevelQuestion = (text: string) => /giá thuê (?:trung bình|bình quân|khoảng bao nhiêu|bao nhiêu)|cho thuê (?:được|lại được)? ?(?:khoảng )?bao nhiêu|để cho thuê/iu.test(text);
 export const landPriceQuestion = (text: string) => /giá (?:đất|nhà|căn hộ)?\s*(?:khu vực|ở đây|khu này|quanh đây)|bao nhiêu (?:tiền )?(?:một|1|mỗi) (?:mét vuông|m2|m²)/iu.test(text);
 export const priceComparisonQuestion = (text: string) => /so với|cao không|đắt không|rẻ không|cao hơn|rẻ hơn/iu.test(text);
@@ -23,14 +24,10 @@ async function rows(filters: { transaction_type: 'Sale' | 'Rent'; type?: string;
   return result.error ? [] : (result.data || []) as Row[];
 }
 
-/** Districts that actually have listings within the budget, busiest first. */
+/** Reuse the catalogue overview aggregate for budgeted area advice. */
 export async function areaSummary(filters: { transaction_type: 'Sale' | 'Rent'; type?: string; maxPrice: number }): Promise<string> {
-  const groups = new Map<string, number[]>();
-  for (const row of await rows(filters)) { const name = district(row.location || ''); if (!name) continue; groups.set(name, [...(groups.get(name) || []), Number(row.price)]); }
-  const monthly = filters.transaction_type === 'Rent';
-  const top = [...groups.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 4);
-  if (!top.length) return '';
-  return `Theo tin đăng trên TERAVA trong mức ${priceLabel(filters.maxPrice, monthly)}: ` + top.map(([name, prices]) => `${name} có ${prices.length} tin, giá từ ${priceLabel(Math.min(...prices), monthly)}`).join('; ') + '.';
+  const overview = await catalogueOverview('areas', filters.transaction_type, filters.maxPrice, filters.type);
+  return overview.reply;
 }
 
 /** Observed price level around one listing: rent range for "cho thuê được bao nhiêu", price per m² for land. */

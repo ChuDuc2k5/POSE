@@ -92,7 +92,8 @@ export function locationFilter(value: unknown) { return typeof value==='string' 
 function formerDistrictAliases(value: unknown) {
   if (typeof value !== 'string') return [] as string[];
   const normalized=value.trim().normalize('NFC').toLocaleLowerCase('vi');
-  return [...new Set(hcmWards.filter(row=>row.formerDistricts.some(district=>district.normalize('NFC').toLocaleLowerCase('vi')===normalized)).flatMap(row=>[row.ward,...row.formerWards.map(ward=>`Phường ${ward}`)]))];
+  const districts=normalized==='thủ đức' ? new Set(['thủ đức','quận 2','quận 9']) : new Set([normalized]);
+  return [...new Set(hcmWards.filter(row=>row.formerDistricts.some(district=>districts.has(district.normalize('NFC').toLocaleLowerCase('vi')))).flatMap(row=>[row.ward,...row.formerWards.map(ward=>`Phường ${ward}`)]))];
 }
 function relaxedLocation(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return undefined;
@@ -167,13 +168,39 @@ export class AiService {
      const shownCodes=[...new Set([...shownSources.map(item=>item.code),...sanitizedHistory.filter(turn=>turn.role==='assistant').flatMap(turn=>listingCodes(turn.content))].filter((value):value is string=>typeof value==='string'))];
      if(excludePrevious&&shownCodes.length){for(const item of await retrieveCodes(shownCodes))shownIds.add(item.id);}
      const clarifyStarted=performance.now();
-     const overviewKind=catalogueOverviewIntent(source);
-     const clarification=input.property_id || overviewKind ? {needed:false,question:null,options:[]} : clarificationFor(source, sanitizedHistory);
+     const areaAdviceFilters=inferSearch(source) || {};
+     const budgetedAreaAdvice=areaAdviceQuestion(source) && typeof areaAdviceFilters.maxPrice === 'number' && !input.property_id;
+     const overviewKind=budgetedAreaAdvice ? null : catalogueOverviewIntent(source);
+     const clarification=input.property_id || overviewKind || budgetedAreaAdvice ? {needed:false,question:null,options:[]} : clarificationFor(source, sanitizedHistory);
     timing.clarify=performance.now()-clarifyStarted;
      if(clarification.needed){
       const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:clarification.question,p_sources:[],p_actions:[],p_fields:{},p_score:null});
       if(committed.error)return catalogDatabaseError(committed.error);
        return guestCatalog({session:committed.data,reply:clarification.question,scope:'in_scope',sources:[],related:[],clarify:clarification,proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
+     }
+     if(budgetedAreaAdvice && !referencedListingCodes(source,sanitizedHistory).codes.length){
+       const transactionType=areaAdviceFilters.transaction_type || inferTransactionType(source) || 'Sale';
+       const maxPrice=areaAdviceFilters.maxPrice as number;
+       const propertyType=typeof areaAdviceFilters.type === 'string' ? areaAdviceFilters.type : undefined;
+       const overview=await catalogueOverview('areas',transactionType,maxPrice,propertyType);
+       const areas=overview.areas || [];
+       const cards:(Evidence & {relaxed_reason?:string})[]=[];
+       for(const area of areas.slice(0,3)){
+         const aliases=formerDistrictAliases(area.label);
+         const matches=await retrieve({transaction_type:transactionType,type:propertyType,maxPrice,location:area.label,location_aliases:aliases},null);
+         const best=matches.filter(item=>typeof item.price==='number' && item.price<=maxPrice).sort((a,b)=>(a.price??Infinity)-(b.price??Infinity))[0];
+         if(best && !cards.some(item=>item.id===best.id))cards.push(best);
+       }
+       let reply=overview.reply;
+       if(!areas.length){
+         const nearest=await retrieve({transaction_type:transactionType,type:propertyType,minPrice:maxPrice+1},null);
+         cards.push(...nearest.filter(item=>typeof item.price==='number' && item.price>maxPrice).sort((a,b)=>(a.price??Infinity)-(b.price??Infinity)).slice(0,3).map(item=>({...item,relaxed_reason:'Ngoài ngân sách đã nêu',reason:'Ngoài ngân sách đã nêu'})));
+         reply+=cards.length ? '\nMình gửi một vài lựa chọn gần nhất ở trên ngân sách đã nêu, có nhãn để bạn dễ cân nhắc. Chuyên viên cũng có thể tìm thêm giúp bạn.' : '\nMình có thể nhờ chuyên viên tìm thêm lựa chọn phù hợp hoặc tư vấn điều chỉnh ngân sách.';
+       }
+       const sources=cards.map((item,index)=>({...item,number:index+1,source_type:'Property' as const}));
+       const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:reply,p_sources:sources,p_actions:[],p_fields:{},p_score:null});
+       if(committed.error)return catalogDatabaseError(committed.error);
+       return guestCatalog({session:committed.data,reply,scope:'in_scope',sources,related:[],clarify:{needed:false,question:null,options:overview.options},proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
      }
      if(overviewKind && !input.property_id && !referencedListingCodes(source,sanitizedHistory).codes.length){
        const overviewTransaction=/(?:cho\s+thuê|cho\s+thuê|thuê)/iu.test(source) ? 'Rent' : /(?:đang\s+bán|bên\s+mình\s+có\s+bán|bán)/iu.test(source) ? 'Sale' : undefined;
