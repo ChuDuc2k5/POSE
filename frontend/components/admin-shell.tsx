@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
-import { Activity, ArrowRight, Building2, Contact, FolderKanban, Layers3, Menu, Phone, Radio, Users, UserRound, X } from 'lucide-react';
+import { Activity, ArrowRight, Building2, CalendarDays, ChartColumn, Contact, FolderKanban, Layers3, Menu, Phone, Radio, Users, UserRound, X } from 'lucide-react';
 import { Brand } from './brand';
 import { InquiryInboxLink } from './inquiry-inbox-link';
 import { LogoutButton } from './logout-button';
@@ -28,6 +28,8 @@ export function AdminShell({ name, children }: { name: string; children: React.R
         {catalogLinks.map(({ label, href, kind: linkKind, Icon }) => <Link key={linkKind} href={href} className={active === linkKind ? 'active' : undefined} aria-current={active === linkKind ? 'page' : undefined} onClick={close}><Icon size={19} />{label}<ArrowRight size={15} /></Link>)}
         <InquiryInboxLink active={active === 'inquiries'} onNavigate={close} />
         <Link href="/admin/leads" className={active === 'leads' ? 'active' : undefined} aria-current={active === 'leads' ? 'page' : undefined} onClick={close}><Contact size={19} />Quản lý Lead<ArrowRight size={15} /></Link>
+        <Link href="/reports" onClick={close}><ChartColumn size={19} />Báo cáo Lead<ArrowRight size={15} /></Link>
+        <Link href="/appointments" onClick={close}><CalendarDays size={19} />Lịch hẹn<ArrowRight size={15} /></Link>
         <Link href="/admin/campaigns" className={active === 'campaigns' ? 'active' : undefined} aria-current={active === 'campaigns' ? 'page' : undefined} onClick={close}><Radio size={19} />Chiến dịch gọi<ArrowRight size={15} /></Link>
         <Link href="/admin/calls" className={active === 'calls' ? 'active' : undefined} aria-current={active === 'calls' ? 'page' : undefined} onClick={close}><Phone size={19} />Cuộc gọi<ArrowRight size={15} /></Link>
         <Link href="/admin/ai-dashboard" className={active === 'ai' ? 'active' : undefined} aria-current={active === 'ai' ? 'page' : undefined} onClick={close}><Activity size={19} />AI Platform<ArrowRight size={15} /></Link>
