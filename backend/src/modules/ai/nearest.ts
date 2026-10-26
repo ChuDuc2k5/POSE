@@ -11,6 +11,7 @@ export function nearestRelaxationStages(filters: Record<string, unknown>) {
   if(filters.minPrice!==undefined || filters.maxPrice!==undefined)stages.push({filters:omit(['minPrice','maxPrice','maxPriceExclusive']),reason:'Ngoài ngân sách đã nêu'});
   if(filters.minArea!==undefined || filters.maxArea!==undefined)stages.push({filters:omit(['minArea','maxArea']),reason:'Nới diện tích đã nêu'});
   if(filters.location!==undefined || filters.locations!==undefined)stages.push({filters:omit(['location','locations','location_aliases']),reason:'Khác khu vực đã nêu'});
-  stages.push({filters:omit(['minPrice','maxPrice','maxPriceExclusive','minArea','maxArea','location','locations','location_aliases','bedrooms']),reason:'Nới ngân sách, diện tích, phòng ngủ và khu vực'});
+  const finalFilters=Object.fromEntries(Object.entries(filters).filter(([key])=>key==='transaction_type'||key==='type'));
+  stages.push({filters:finalFilters,reason:'Nới ngân sách, diện tích, phòng ngủ và khu vực'});
   return stages;
 }

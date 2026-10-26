@@ -79,7 +79,9 @@ export function catalogueOverviewIntent(message: string): CatalogueOverviewKind 
   return null;
 }
 export function isMoreRequest(message: string) {
-  return /(?:co\s+can\s+nao\s+khac|con\s+can\s+nao\s+nua|xem\s+them|can\s+khac|them\s+(?:vai\s+)?can\s+nua)/iu.test(fold(message));
+  const folded=fold(message);
+  if(/(?:so\s+sanh|dua\s+vao\s+dau|khang\s+dinh|cung\s+khu\s+vuc|gia\s+tot)/iu.test(folded))return false;
+  return /(?:co\s+can\s+nao\s+khac|con\s+can\s+nao\s+nua|xem\s+them|can\s+khac|them\s+(?:vai\s+)?can\s+nua)/iu.test(folded);
 }
 // "căn hộ này", "nhà đó", "dự án này"… point back at the listing discussed in the previous turn.
 // "quan tâm căn …", "chọn căn …" pick one of the listings just shown.

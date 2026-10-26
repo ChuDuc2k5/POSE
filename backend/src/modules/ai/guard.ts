@@ -116,6 +116,7 @@ function negated(text:string,index:number){
   if(/không\s+có(?:\s+\p{L}+|\s*[,]){0,32}\s+nào(?:\s+\p{L}+|\s*[,]){0,32}\s*$/iu.test(prefix))return true;
   if(/không\s+phải\s+lúc\s+nào\s+cũng\s*$/iu.test(prefix))return true;
   if(/không\s+(?:cam\s+kết|bảo\s+đảm|chắc\s+chắn)\s*$/iu.test(prefix))return true;
+  if(/không(?:\s+\p{L}+){0,6}\s+(?:hay|hoặc)\s*$/iu.test(prefix))return true;
   if(/không\s+nên\s+xem(?:\s+\p{L}+){0,8}\s+là\s*$/iu.test(prefix))return true;
   return /có\s+thể\s+chỉ(?:\s+được)?\s*$/iu.test(prefix);
 }
@@ -235,7 +236,7 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
 
 export function removeReplyArtifacts<T extends { number?: number; name?: string; availability?: string }>(reply:string, sources:T[], allowMore=false) {
   let result=reply.replace(/\[market_summary\]/giu,'');
-  if(!allowMore) result=result.replace(/(?:^|\n)\s*Mình (?:chỉ còn \d+ căn khác đúng tiêu chí trong dữ liệu hiện có|gửi \d+ căn khác đúng tiêu chí trong dữ liệu hiện có|gửi 5 căn khác đúng tiêu chí; dữ liệu còn \d+ căn phù hợp)\.\s*/giu,'');
+  if(!allowMore) result=result.replace(/(?:^|\n)\s*Mình (?:chỉ còn \d+ căn khác đúng tiêu chí trong dữ liệu hiện có|gửi \d+ căn khác đúng tiêu chí trong dữ liệu hiện có|gửi 5 căn khác đúng tiêu chí; dữ liệu còn \d+ căn phù hợp|gửi \d+ căn khác đúng tiêu chí trong dữ liệu hiện có)\.\s*/giu,'');
   const sourceNumbers=new Set(sources.map(source=>source.number).filter((number):number is number=>typeof number==='number'));
   return result.split(/\n/u).map(line=>{
     // Only a bare "[n] title – price" line (a raw citation title) is replaced; descriptive lines stay.
@@ -259,7 +260,14 @@ export function dedupeListings<T extends { name?: string; price?: number|null; a
 
 export function rewriteUnverifiedAvailability(reply:string, question:string, sources:{ availability?: string }[]) {
   if(!sources.some(source=>source.availability==='Available') || !/(?:còn\s+trống|thực\s+sự|kiểm\s+tra.*còn)/iu.test(question))return reply;
-  return reply.replace(/hiện\s+trạng\s+còn\s+trống|còn\s+trống/giu,'tin đăng đang ghi là còn bán');
+  let result=reply
+    .replace(/căn(?:\s+này)?\s+hiện\s+trạng(?:\s+là)?\s+còn\s+trống/giu,'căn này vẫn được tin đăng ghi là còn bán')
+    .replace(/hiện\s+trạng(?:\s+là)?\s+còn\s+trống/giu,'tin đăng đang ghi là còn bán')
+    .replace(/căn(?:\s+này)?(?:\s+vẫn)?\s+còn\s+trống/giu,'căn này vẫn được tin đăng ghi là còn bán');
+  return result.replace(/còn\s+trống/giu,(match,index,whole:string)=>{
+    const prefix=whole.slice(0,index);
+    return /tin\s+đăng(?:\s+\p{L}+){0,4}\s*$/iu.test(prefix) ? match : 'tin đăng đang ghi là còn bán';
+  });
 }
 
 export function removeUnpromptedNegotiation(reply:string, question:string) {

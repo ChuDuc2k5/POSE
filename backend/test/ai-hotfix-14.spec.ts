@@ -7,6 +7,7 @@ import { hcmWards } from '../src/modules/ai/hcm-wards.js';
 import { nearestRelaxationStages } from '../src/modules/ai/nearest.js';
 import { withFormerDistrict } from '../src/modules/ai/ward-label.js';
 import { hasNoMatchReply, noMatchReply } from '../src/modules/ai/unsupported.js';
+import { isMoreRequest } from '../src/modules/ai/history-aware.js';
 
 describe('Hotfix 14 HARD30 polish', () => {
   it('allows the exact sentence-level negation while retaining commitment blocks', () => {
@@ -15,6 +16,8 @@ describe('Hotfix 14 HARD30 polish', () => {
     expect(outputReason('Lô này chắc chắn sinh lời', [], '', { retrievalFound: true, faqEvidence: true, practice: true })).toBe('UNSUPPORTED_COMMITMENT');
     expect(outputReason('cam kết lợi nhuận 10%', [], '', { retrievalFound: true, faqEvidence: true, practice: true })).toBe('UNSUPPORTED_COMMITMENT');
     expect(outputReason('đảm bảo sinh lời', [], '', { retrievalFound: true, faqEvidence: true, practice: true })).toBe('UNSUPPORTED_COMMITMENT');
+    expect(outputReason('Mình không tự ý đoán hay cam kết pháp lý cụ thể.', [], '', { retrievalFound: true, faqEvidence: true, practice: true })).toBeNull();
+    expect(outputReason('Mình không đưa ra ý kiến hoặc cam kết pháp lý cụ thể.', [], '', { retrievalFound: true, faqEvidence: true, practice: true })).toBeNull();
   });
 
   it('deduplicates listings by title, price and area', () => {
@@ -35,6 +38,7 @@ describe('Hotfix 14 HARD30 polish', () => {
 
   it('removes the singular more sentence from non-more replies', () => {
     expect(removeReplyArtifacts('Phần so sánh.\nMình gửi 1 căn khác đúng tiêu chí trong dữ liệu hiện có.', [])).toBe('Phần so sánh.');
+    expect(isMoreRequest('Dựa vào đâu để khẳng định căn này rẻ hơn những căn khác trong cùng khu vực?')).toBe(false);
   });
 
   it('removes unprompted fast-payment discount advice', () => {
@@ -61,7 +65,8 @@ describe('Hotfix 14 HARD30 polish', () => {
   });
 
   it('rewrites available listings as unverified listing status', () => {
-    expect(rewriteUnverifiedAvailability('Căn này hiện trạng còn trống [1].', 'Bạn có thực sự kiểm tra được căn này còn trống không?', [{ availability: 'Available' }])).toContain('tin đăng đang ghi là còn bán');
+    expect(rewriteUnverifiedAvailability('Căn này hiện trạng còn trống [1].', 'Bạn có thực sự kiểm tra được căn này còn trống không?', [{ availability: 'Available' }])).toContain('căn này vẫn được tin đăng ghi là còn bán');
+    expect(rewriteUnverifiedAvailability('Tin đăng còn trống [1].', 'Bạn có thực sự kiểm tra được căn này còn trống không?', [{ availability: 'Available' }])).toContain('Tin đăng còn trống');
   });
 
   it('compares yield with the existing typical loan-rate assumption when loan cost is asked', () => {
