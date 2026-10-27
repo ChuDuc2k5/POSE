@@ -95,6 +95,13 @@ export function isMoreRequest(message: string) {
   if(/(?:so\s+sanh|dua\s+vao\s+dau|khang\s+dinh|cung\s+khu\s+vuc|gia\s+tot)/iu.test(folded))return false;
   return /(?:co\s+can\s+nao\s+khac|con\s+can\s+nao\s+(?:khac|nua)|con\s+nua|xem\s+them|can\s+khac|them\s+(?:vai\s+)?can\s+nua)/iu.test(folded);
 }
+export function explicitRefilterRequest(message: string) {
+  const text = fold(message);
+  return /(?:loc lai|tim lai danh sach|loc danh sach|danh sach|cac can vua roi|nhung can tren|gioi thieu lai|cac can vua gioi thieu)/iu.test(text);
+}
+function historyHasListOrSuggestion(history: { role: string; content: string; sources?: unknown[] }[]) {
+  return history.some(turn => turn.role === 'assistant' && (Array.isArray(turn.sources) && turn.sources.length > 0 || /(?:goi y|gioi thieu|danh sach|can ho|can)/iu.test(fold(turn.content))));
+}
 // "căn hộ này", "nhà đó", "dự án này"… point back at the listing discussed in the previous turn.
 // "quan tâm căn …", "chọn căn …" pick one of the listings just shown.
 const backReference = /(?<![\p{L}])(?:(?:căn(?:\s+hộ)?|can(?:\s+ho)?|nhà|nha|đất|dat|lô\s+đất|dự\s+án|du\s+an)\s+(?:này|nay|đó|vừa\s+rồi|trên|kia)|quan\s+tâm|quan\s+tam|(?:chọn|lấy|thích)\s+căn)(?![\p{L}])/iu;
@@ -332,6 +339,7 @@ export function clarificationFor(message: string, history: { role: string; conte
   if (adviceOrServiceQuestion(message)) return { needed: false, question: null, options: [] };
   if (historyReferenceQuestion(message, history)) return { needed: false, question: null, options: [] };
   if (isMoreRequest(message)) return { needed: false, question: null, options: [] };
+  if (explicitRefilterRequest(message) && historyHasListOrSuggestion(history)) return { needed: false, question: null, options: [] };
   // A named listing ("Đặt lịch xem căn RVL-…") or a booking/saving request is never a new search.
   // A question about the listing just discussed ("Tiền cọc mấy tháng?") is answered from that listing.
   if (referencedListingCodes(message, history).codes.length) return { needed: false, question: null, options: [] };

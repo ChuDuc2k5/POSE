@@ -87,6 +87,24 @@ export function noMatchReply(text: string): string {
   return `Hiện chưa có căn phù hợp ${criteriaText || 'với các tiêu chí bạn nêu'} trong dữ liệu đã công bố. Bạn có thể nới ngân sách/khu vực, hoặc để chuyên viên tư vấn tìm thêm giúp bạn.`;
 }
 
+export type DeterministicNoMatchCard = { number?: number; name?: string; location?: string; price?: number | null; reason?: string; relaxed_reason?: string };
+export function deterministicNoMatchReply(input: { criteria?: string; area?: string; blocker?: string; related?: DeterministicNoMatchCard[]; nearby?: string; consultant?: string }) {
+  const cards = (input.related || []).slice(0, 3).map((item, index) => {
+    const number = item.number ?? index + 1;
+    const price = item.price == null ? '' : `, giá ${priceLabel(item.price, false)}`;
+    const reason = item.reason || item.relaxed_reason || 'Lệch tiêu chí';
+    return `[${number}] ${item.name || 'Bất động sản gần tiêu chí'}${item.location ? ` ở ${item.location}` : ''}${price} — ${reason}.`;
+  });
+  return [
+    input.criteria?.trim(),
+    `Hiện chưa có căn nào đáp ứng đủ tất cả tiêu chí của bạn${input.area ? ` ở ${input.area}` : ''}.`,
+    input.blocker?.trim(),
+    cards.length ? `Các lựa chọn gần tiêu chí nhất:\n${cards.join('\n')}` : '',
+    input.nearby?.trim(),
+    input.consultant || 'Mình có thể nhờ chuyên viên tư vấn tìm thêm giúp bạn.',
+  ].filter(Boolean).join('\n');
+}
+
 export function hasNoMatchReply(text: string): boolean {
   return /(?:chưa\s+(?:tìm\s+(?:thấy|được)|có)|không\s+có\s+(?:căn|bất động sản)|không\s+tìm\s+(?:thấy|được)|no\s+match)/iu.test(text);
 }
