@@ -21,7 +21,7 @@ import { adviceOrServiceQuestion, budgetFollowUp, catalogueOverviewIntent, clari
 import { catalogueOverview, typeLabels } from './catalogue-overview.js';
 import { sanitizeReply, normalizeListedPrices } from './guard.js';
 import { withFormerDistrict } from './ward-label.js';
-import { areaAliases } from './location-aliases.js';
+import { areaAliases, withAreaAliases } from './location-aliases.js';
 import { moneyAmounts, priceLabel } from './money.js';
 import { contactRequest, loanAssumption, loanBudget as inferLoanBudget, loanWords, noLoanWords, noMatchReply, hasNoMatchReply, dedupeNoMatchReply, cheaperFallbackReply, listingFollowUpFallback, ownerRequest, ownerValuationQuestion, unsupportedCriteria, unsupportedLine } from './unsupported.js';
 import { inquiryEvents } from '../../common/inquiry-events.js';
@@ -56,12 +56,13 @@ async function readSession(id:string, who:Awaited<ReturnType<typeof identity>>) 
   return who.client ? who.client.rpc('pose_ai_read_session',{p_session:id}):systemClient().rpc('pose_system_ai_read_guest',{p_session:id,p_hash:who.guestHash});
 }
 async function retrieve(filters:Record<string,unknown>,context:string|null):Promise<Evidence[]> {
+  filters=withAreaAliases(filters);
   const scalar=(value:unknown)=>typeof value==='string'||typeof value==='number' ? value:'';
   const params=new URLSearchParams();if(typeof filters.location==='string')params.set('location',`ilike.%${filters.location}%`);if(filters.transaction_type)params.set('transaction_type',`eq.${scalar(filters.transaction_type)}`);if(filters.type)params.set('property_type',`eq.${scalar(filters.type)}`);if(filters.minPrice!==undefined)params.set('price',`gte.${scalar(filters.minPrice)}`);if(filters.maxPrice!==undefined)params.set('price',filters.maxPriceExclusive ? `lt.${scalar(filters.maxPrice)}` : `lte.${scalar(filters.maxPrice)}`);
   const allowed=new Set(['location','locations','location_aliases','transaction_type','type','types','minPrice','maxPrice','maxPriceExclusive','minArea','maxArea','bedrooms','exclude_ids','keywords']);if(Object.keys(filters).some(k=>!allowed.has(k)))throw new Error('INVALID_FILTER');
   let query=authClient().from('property_public_catalog').select('id,code,name,description,cover_id,area,bedrooms,price,availability,updated_at,location,property_type,transaction_type,price_period');
   if(context)query=query.eq('id',context);
-  const locations=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations:[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases:[])].map(value=>String(value).replace(/[%_\\]/g,'\\$&'));
+  const locations=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations:[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases.filter(value=>!String(value).includes(',')):[])].map(value=>String(value).replace(/[%_\\]/g,'\\$&')).slice(0,100);
   if(locations.length)query=query.or(locations.map(value=>`location.ilike.%${value}%`).join(','));
   if(filters.transaction_type)query=query.eq('transaction_type',filters.transaction_type);
   if(filters.transaction_type==='Rent')query=query.gte('price',500_000);
@@ -75,16 +76,17 @@ async function retrieve(filters:Record<string,unknown>,context:string|null):Prom
   if(filters.maxArea!==undefined)query=query.lte('area',filters.maxArea);
   if(filters.bedrooms!==undefined)query=query.or(`bedrooms.is.null,bedrooms.eq.${Number(filters.bedrooms)}`);
   if(Array.isArray(filters.exclude_ids)&&filters.exclude_ids.length)query=query.not('id','in',`(${filters.exclude_ids.map(value=>String(value).replace(/[(),]/g,'')).join(',')})`);
-  const result=await query.order('updated_at',{ascending:false}).order('id').limit(5);
+  const result=await query.order('updated_at',{ascending:false}).order('id').limit(15);
   if(result.error)throw new Error('RETRIEVAL_UNAVAILABLE');
   return (result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})).filter(isValidListingPrice).filter(item=>typeof filters.bedrooms!=='number'||bedroomMatchesFilter(item,Number(filters.bedrooms))) as Evidence[];
 }
 type StructuredCatalogueResult = { items: Evidence[]; count: number };
 async function retrieveStructured(filters:Record<string,unknown>,context:string|null):Promise<StructuredCatalogueResult> {
+  filters=withAreaAliases(filters);
   const select='id,code,name,description,cover_id,area,bedrooms,price,availability,updated_at,location,property_type,transaction_type,price_period';
   let query=authClient().from('property_public_catalog').select(select,{count:'exact'});
   if(context)query=query.eq('id',context);
-  const locations=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations:[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases:[])].map(value=>String(value).replace(/[%_\\]/g,'\\$&'));
+  const locations=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations:[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases.filter(value=>!String(value).includes(',')):[])].map(value=>String(value).replace(/[%_\\]/g,'\\$&')).slice(0,100);
   if(locations.length)query=query.or(locations.map(value=>`location.ilike.%${value}%`).join(','));
   if(filters.transaction_type)query=query.eq('transaction_type',filters.transaction_type);
   if(filters.transaction_type==='Rent')query=query.gte('price',500_000);
@@ -170,6 +172,8 @@ export class AiService {
     const history=input.history ?? [];
     if(!Array.isArray(history) || history.length>10 || history.some(turn=>!object(turn) || Object.keys(turn).some(k=>!['role','content','sources'].includes(k)) || !['user','assistant'].includes(turn.role as string) || typeof turn.content!=='string' || turn.content.length>8000 || turn.sources!==undefined && (!Array.isArray(turn.sources) || turn.sources.some(source=>!object(source) || (source.price!==null && source.price!==undefined && (typeof source.price!=='number' || !Number.isFinite(source.price)))))))return catalogError('INVALID_HISTORY','Chỉ gửi tối đa 10 lượt hội thoại.',400);
     const filters=input.filters ?? {};
+    const inputFilters=filters as Record<string,unknown>;
+    const hasStructuredInputFilters=input.filters!==undefined && inputFilters.transaction_type!==undefined && ['location','locations','type','types','minPrice','maxPrice','minArea','maxArea','bedrooms'].some(key=>inputFilters[key]!==undefined);
     if(!object(filters) || !this.guard.toolAllowed({name:'search_properties',arguments:filters}))return catalogError('INVALID_FILTER','Bộ lọc không hợp lệ.',400);
     const who=await identity();if(who.error)return who.error;
     let id=typeof input.session_id==='string' ? input.session_id:randomUUID();
@@ -252,7 +256,7 @@ export class AiService {
        if(committed.error)return catalogDatabaseError(committed.error);
        return guestCatalog({session:committed.data,reply,scope:'in_scope',sources:[],related:[],clarify:{needed:false,question:null,options:areas.slice(0,3).map(area=>String(area.label))},proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
      }
-       const clarification=input.property_id || overviewKind || budgetedAreaAdvice || (financeIntentNote && !listingRequestIntent) ? {needed:false,question:null,options:[]} : clarificationFor(source, criteriaHistory);
+       const clarification=input.property_id || overviewKind || budgetedAreaAdvice || hasStructuredInputFilters || (financeIntentNote && !listingRequestIntent) ? {needed:false,question:null,options:[]} : clarificationFor(source, criteriaHistory);
     timing.clarify=performance.now()-clarifyStarted;
      if(clarification.needed){
       const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:clarification.question,p_sources:[],p_actions:[],p_fields:{},p_score:null});
@@ -344,17 +348,15 @@ export class AiService {
     };
     const criteriaOnlyFollowUp=sanitizedHistory.length>0&&!moreRequest&&!!inferSearch(source)&&!moneyAmounts(source).length&&!/(?:tìm|kiếm|muốn|cần|gợi ý|có\s+căn|căn\s+hộ|nhà|đất|phòng|thuê|mua|bán|bất động sản)/iu.test(source);
     const extremePriceRequest=/(?:đắt|cao|rẻ|thấp)\s+nhất/iu.test(source);
-     let structuredCatalogueSearch=moreRequest||!!budgetAdjustment||criteriaOnlyFollowUp||filterAgainRequest||(sanitizedHistory.length>0&&!!inferSearch(source)&&!/(?:tìm|mua|bán|thuê|căn|nhà|đất)/iu.test(source));
+     let structuredCatalogueSearch=hasStructuredInputFilters||moreRequest||!!budgetAdjustment||criteriaOnlyFollowUp||filterAgainRequest||(sanitizedHistory.length>0&&!!inferSearch(source)&&!/(?:tìm|mua|bán|thuê|căn|nhà|đất)/iu.test(source));
     const areaAlreadyTolerant=/(?:diện\s*tích\s*)?(?:khoảng|tầm)\s*[\d.,]+\s*(?:m\s*[²2]|mét\s*vuông)/iu.test(source);
       const search=async(searchFilters:Record<string,unknown>,propertyId:string|null=null,referenceIds:string[]=[],searchQuery=source)=>{
        const aliases:Record<string,string>={min_price_vnd:'minPrice',max_price_vnd:'maxPrice',min_area_m2:'minArea',max_area_m2:'maxArea',property_type:'type',property_types:'types'};searchFilters=Object.fromEntries(Object.entries(searchFilters).map(([key,value])=>[aliases[key]||key,value]));
       if(structuredCatalogueSearch){
          const remembered=searchCriteriaFromHistory(source,criteriaHistory);
         for(const key of ['location','locations','location_aliases','type','types','transaction_type','minPrice','maxPrice','maxPriceExclusive','minArea','maxArea','bedrooms'] as const)if(searchFilters[key]===undefined&&remembered[key]!==undefined)searchFilters[key]=remembered[key];
-        const searchLocations=[...(typeof searchFilters.location==='string'?[searchFilters.location]:[]),...(Array.isArray(searchFilters.locations)?searchFilters.locations:[])];
-        const aliases=[...(Array.isArray(searchFilters.location_aliases)?searchFilters.location_aliases:[]),...searchLocations.flatMap(value=>areaAliases(value))];
-        if(aliases.length)searchFilters.location_aliases=[...new Set(aliases)];
-      }
+       }
+       searchFilters=withAreaAliases(searchFilters);
       const stated={...searchFilters};
       const effective={...searchFilters};
       if(!areaAlreadyTolerant){
@@ -371,7 +373,22 @@ export class AiService {
           const found=structured.items.filter(item=>matchesFilters(item,effective));
           const inStated=found.filter(item=>(typeof stated.minArea!=='number'||typeof item.area!=='number'||item.area>=stated.minArea)&&(typeof stated.maxArea!=='number'||typeof item.area!=='number'||item.area<=stated.maxArea));
           const near=found.filter(item=>!inStated.includes(item)&&typeof item.area==='number').map(item=>({...item,areaNearCriteria:true}));
-          const ordered=[...inStated,...near];
+           const ordered=[...inStated,...near];
+           const requestedLocations=[...(typeof stated.location==='string'?[stated.location]:[]),...(Array.isArray(stated.locations)?stated.locations.map(String):[])];
+           const locationOrder=(item:Evidence) => {
+             const text=String(item.location || '').normalize('NFC').toLocaleLowerCase('vi');
+             const exactWard=requestedLocations.some(location => areaAliases(location).some(alias => {
+               const ward=alias.match(/^(?:phường|xã|đặc khu)\s+(.+)$/iu)?.[1];
+               if (!ward) return false;
+               const escaped=ward.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+               return new RegExp(`(?:phường|xã|đặc khu)\\s+${escaped}(?=\\s*(?:,|$))`,'iu').test(text);
+             }));
+             if(exactWard)return 0;
+             const legacyDistrict=requestedLocations.some(location => areaAliases(location).some(alias => /^(?:quận|q\.?|huyện|thị xã|thành phố|tp\.?)\s/iu.test(alias) && text.includes(alias.normalize('NFC').toLocaleLowerCase('vi'))));
+             return legacyDistrict ? 1 : 2;
+           };
+           const budgetOrdering=Boolean(budgetAdjustment || extremePriceRequest || (typeof stated.maxPrice==='number' && stated.minPrice===undefined));
+           if(!budgetOrdering)ordered.sort((left,right)=>locationOrder(left)-locationOrder(right));
            if (budgetAdjustment?.direction === 'cheaper') {
              ordered.sort((left, right) => {
                const leftPrice = typeof left.price === 'number' ? left.price : Number.POSITIVE_INFINITY;
@@ -393,7 +410,7 @@ export class AiService {
                return leftDistance - rightDistance;
              });
           }
-          return ordered.slice(0, extremePriceRequest ? 1 : 5);
+           return ordered.slice(0, extremePriceRequest ? 1 : 15);
         }catch(error){
           console.warn(JSON.stringify({event:'structured_retrieval_fallback',error:error instanceof Error ? error.message:'RETRIEVAL_UNAVAILABLE'}));
         }
@@ -405,7 +422,7 @@ export class AiService {
         return retrieve(searchFilters,propertyId);
       }
     };
-    if(searchPerformed && !viewedPropertyId)items=await search(filters,input.property_id as string|null || null);
+    if(searchPerformed && !viewedPropertyId)items=await search({...inferSearch(source),...filters},input.property_id as string|null || null);
     const initialRag=rag as RetrievalResult|null;
      if(searchPerformed && (!items.length || (initialRag && !initialRag.found)) && Object.keys(filters).length && !input.property_id && strictCashBudget===null){
       const relaxed={transaction_type:filters.transaction_type,location:relaxedLocation(filters.location)};
@@ -481,8 +498,6 @@ export class AiService {
          if (/gần\s+(?:Quận\s*1|trung tâm)|đi\s+làm\s+(?:Quận\s*1|trung tâm)/iu.test(source)) { queryFilters.locations=centralFormerDistricts; delete queryFilters.location; }
          if(!moneyAmounts(source).length && inferredFilters?.minPrice===undefined && rememberedCriteria.minPrice===undefined && rememberedCriteria.maxPrice!==undefined)delete queryFilters.minPrice;
          if(!moneyAmounts(source).length && rememberedCriteria.minPrice===undefined && rememberedCriteria.maxPrice===undefined){delete queryFilters.minPrice;delete queryFilters.maxPrice;delete queryFilters.maxPriceExclusive;}
-         const aliases=[...(Array.isArray(queryFilters.location_aliases)?queryFilters.location_aliases:[]),...([queryFilters.location,...(Array.isArray(queryFilters.locations)?queryFilters.locations:[])].filter(value=>typeof value==='string').flatMap(value=>areaAliases(value)))];
-         if(aliases.length)queryFilters.location_aliases=[...new Set(aliases)];
         referenceIds=query.refers_to_previous.map(index=>interestIds[index-1]).filter((value):value is string=>typeof value==='string');
       } catch(error) { if(!(error instanceof Error && error.message==='NOT_A_PROPERTY_QUERY'))log('query_step',source,'invalid_query','flagged'); }
     }
@@ -496,8 +511,6 @@ export class AiService {
       if(budgetAdjustment.filters.maxPrice!==undefined && budgetAdjustment.filters.minPrice===undefined) delete queryFilters.minPrice;
       if(budgetAdjustment.filters.minPrice!==undefined && budgetAdjustment.filters.maxPrice===undefined) delete queryFilters.maxPrice;
       standalone=source;
-       const aliases=[...(Array.isArray(queryFilters.location_aliases)?queryFilters.location_aliases:[]),...([queryFilters.location,...(Array.isArray(queryFilters.locations)?queryFilters.locations:[])].filter(value=>typeof value==='string').flatMap(value=>areaAliases(value)))];
-       if(aliases.length)queryFilters.location_aliases=[...new Set(aliases)];
     }
     const directBudget=inferSearch(source);
     if(directBudget?.minPrice!==undefined || directBudget?.maxPrice!==undefined){

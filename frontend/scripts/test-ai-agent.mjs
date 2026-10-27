@@ -191,6 +191,14 @@ const hotfixProperties=[
     ...hotfix25Rows('HF27-Q9-R','Căn hộ Quận 9 generic rent','Phường Long Bình, Quận 9, Thành phố Hồ Chí Minh','Apartment','Rent',[6000000,6500000,7000000,7500000,8000000,8500000,9000000,9500000]),
   ];
   const catalogueRows=()=>mode==='hotfix-10d' ? [...properties,...hotfixProperties] : mode==='hotfix-15' || hotfix15Enabled ? [...properties,...hotfix15Properties] : mode==='hotfix-16' ? [...properties,...hotfix15Properties,...hotfix16Properties] : mode==='hotfix-17' ? [...properties,...hotfix15Properties,...hotfix16Properties,...hotfix17Properties] : mode==='hotfix-19-page10' ? hotfix17Rent.slice(0,10) : mode==='hotfix-19' ? [...properties,...hotfix15Properties,...hotfix19Properties] : mode==='hotfix-20' ? [...properties,...hotfix15Properties,...hotfix20Properties] : mode==='hotfix-21' ? hotfix21Properties : mode==='hotfix-22' ? hotfix22Properties : mode==='hotfix-25' ? [...properties,...hotfix17Sale,...hotfix25Properties] : mode==='hotfix-27' ? hotfix27Properties : properties;
+const hcm='Th\u00e0nh ph\u1ed1 H\u1ed3 Ch\u00ed Minh';
+const hotfix29Thuduc=hotfix25Rows('HF29-TD','Th\u1ee7 \u0110\u1ee9c apartment',`Ph\u01b0\u1eddng Long B\u00ecnh, ${hcm}`,'Apartment','Sale',[1100000000,1200000000,1300000000,1400000000,1500000000]);
+const hotfix29TanPhuLand={...hotfix29Thuduc[0],id:randomUUID(),code:'HF29-TD-LAND',name:'T\u00e2n Ph\u00fa land',location:`Ph\u01b0\u1eddng T\u00e2n Ph\u00fa, ${hcm}`,property_type:'Land',price:900000000};
+const hotfix29GoVap=[...hotfix25Rows('HF29-GV-A','An H\u1ed9i T\u00e2y house',`Ph\u01b0\u1eddng An H\u1ed9i T\u00e2y, ${hcm}`,'House','Sale',[4500000000,5000000000,5500000000]),...hotfix25Rows('HF29-GV-H','H\u1ea1nh Th\u00f4ng house',`Ph\u01b0\u1eddng H\u1ea1nh Th\u00f4ng, ${hcm}`,'House','Sale',[6000000000,6500000000,7000000000])];
+const hotfix29Pmh=hotfix25Rows('HF29-PMH','Ph\u00fa M\u1ef9 H\u01b0ng legacy rent',`Qu\u1eadn 7, TP. H\u1ed3 Ch\u00ed Minh`,'Apartment','Rent',[15000000,18000000,21000000,24000000,27000000]);
+const hotfix29Duplicate=hotfix25Rows('HF29-BT','B\u00ecnh T\u00e2n duplicate sale',`Ph\u01b0\u1eddng B\u00ecnh H\u01b0ng H\u00f2a, B\u00ecnh T\u00e2n, ${hcm}`,'House','Sale',[4000000000,4500000000,5000000000,5500000000,6000000000,6500000000]);
+hotfix29Duplicate[1]={...hotfix29Duplicate[1],id:hotfix29Duplicate[0].id};
+hotfix25Properties.push(...hotfix29Thuduc,hotfix29TanPhuLand,...hotfix29GoVap,...hotfix29Pmh,...hotfix29Duplicate);
 if(previewOnly || live){
  properties[0]={...properties[0],code:'TD-A01',name:'Căn hộ Thủ Đức',location:'Thủ Đức',price:3200000000,transaction_type:'Sale',price_period:'Total'};
  properties[2]={...properties[2],code:'Q7-R01',name:'Căn hộ 2 phòng ngủ Quận 7',location:'Quận 7',price:25000000,availability:'Available',transaction_type:'Rent',price_period:'Month'};
@@ -830,7 +838,7 @@ try{
 for(const failure of ['down','invalid','timeout']){mode=failure;const before=[sessions.size,messages.length,logs.length],calls=modelCalls;const result=await call('/api/ai/chat',base);const data=await result.json();check(result.status===503 && data.code==='AI_UNAVAILABLE' && data.retry && data.inquiry_url==='/customer/inquiries/new',`${failure} clear retry error`);check(JSON.stringify(before)===JSON.stringify([sessions.size,messages.length,logs.length]),`${failure} no partial writes`);check(modelCalls-calls===1,`${failure} bounded retry count`);}
  mode='retry';const retried=await (await call('/api/ai/chat',{...base,message:'xin chào'})).json();check(typeof retried.reply==='string','Native agent completes structured fallback path');
  mode='regenerate';const beforeRegeneration=modelData.length;const regenerated=await (await call('/api/ai/chat',{...base,filters:{}})).json();check(!regenerated.blocked && regenerated.reply===`Tôi là trợ lý AI của TERAVA.\n${modelOutputs.at(-1).reply}` && modelData.slice(beforeRegeneration).filter(d=>d.regeneration).length===1 && modelData.at(-1).violations.includes('UNSUPPORTED_PRICE'),'One grounded regeneration after unsupported price');
- mode='h1-order';const h1Order=await (await call('/api/ai/chat',{...base,message:'Căn hộ có hồ bơi không?',filters:{}})).json();check(!h1Order.blocked&&h1Order.sources.length===1&&h1Order.sources[0].number===1,'Uncited first reply regenerates against full evidence and selects final citation');
+ mode='h1-order';const h1Order=await (await call('/api/ai/chat',{...base,message:'Căn hộ có hồ bơi không?',filters:{}})).json();check(!h1Order.blocked&&h1Order.sources.length===1&&h1Order.sources[0].number===1,'Hotfix 29 RAG amenity citations keep exactly one card');
  mode='rooms';const correctedRooms=await (await call('/api/ai/chat',{...base,filters:{},message:'Tôi cần căn hộ 2 phòng ngủ ở HCM'})).json();check(!correctedRooms.blocked && !correctedRooms.reply.includes('2 phòng ngủ') && modelData.at(-1).violations.includes('UNSUPPORTED_ROOM_COUNT') && modelData.at(-1).correction.includes('Số phòng ngủ'),'Unsupported room claim corrected once using concrete guard DATA');
   mode='ok';const beforeCalls=modelCalls;
  mode='invalid-needs';const nativeReply=await (await call('/api/ai/chat',{...base,message:'hello'})).json();check(!nativeReply.blocked && nativeReply.reply.includes('Xin'),'Native text response has no legacy needs envelope');
@@ -920,7 +928,7 @@ mode='search';const search=await (await call('/api/ai/chat',base)).json();check(
  const hotfix25Cases=[
   {message:'mua căn hộ quận 9 3 tỷ',transaction:'Sale',max:3000000000,area:/Quận 9|Long Bình/iu},
   {message:'mua căn hộ tầm 3 tỷ quận 9',transaction:'Sale',max:3300000000,area:/Quận 9|Long Bình/iu},
-  {message:'mua nhà Gò Vấp tầm 8 tỷ',transaction:'Sale',max:8800000000,area:/Gò Vấp/iu},
+  {message:'mua nhà Gò Vấp tầm 8 tỷ',transaction:'Sale',max:8800000000,area:/(?:Gò Vấp|An Hội Tây|Hạnh Thông)/iu},
   {message:'nhà Bình Tân dưới 7 tỷ',transaction:'Sale',max:7000000000,area:/Bình Tân/iu},
   {message:'mua nhà ở Vũng Tàu dưới 5 tỷ',transaction:'Sale',max:5000000000,area:/Vũng Tàu|Bà Rịa/iu},
   {message:'thuê căn hộ Thủ Đức dưới 10 triệu',transaction:'Rent',max:10000000,area:/Quận 9|Long Bình/iu},
@@ -930,6 +938,33 @@ mode='search';const search=await (await call('/api/ai/chat',base)).json();check(
    const result=await (await call('/api/ai/chat',{...base,message:testCase.message})).json();
    check(result.sources.length===5,`Hotfix 25 returns five structured cards for ${testCase.message}`);
    check(result.sources.every(item=>item.transaction_type===testCase.transaction&&typeof item.price==='number'&&item.price<=testCase.max&&testCase.area.test(String(item.location||''))),`Hotfix 25 cards stay in budget and area for ${testCase.message}`);
+  }
+  const hotfix29Cheapest=await (await call('/api/ai/chat',{...base,message:'c\u0103n h\u1ed9 r\u1ebb nh\u1ea5t \u1edf Th\u1ee7 \u0110\u1ee9c'})).json();
+  check(hotfix29Cheapest.sources.length>0&&hotfix29Cheapest.sources.every(item=>item.property_type==='Apartment'&&/(?:Long B\u00ecnh|Qu\u1eadn 9|Th\u1ee7 \u0110\u1ee9c)/iu.test(String(item.location||''))),'Hotfix 29 cheapest Th\u1ee7 \u0110\u1ee9c excludes the colliding T\u00e2n Ph\u00fa Land row');
+  const hotfix29GoVap=await (await call('/api/ai/chat',{...base,message:'mua nh\u00e0 G\u00f2 V\u1ea5p t\u1ea7m 8 t\u1ef7'})).json();
+  check(hotfix29GoVap.sources.length===5&&hotfix29GoVap.sources.every(item=>item.property_type==='House'&&/(?:G\u00f2 V\u1ea5p|An H\u1ed9i T\u00e2y|H\u1ea1nh Th\u00f4ng)/iu.test(String(item.location||''))),'Hotfix 29 G\u00f2 V\u1ea5p returns five houses across former wards');
+  const hotfix29Pmh=await (await call('/api/ai/chat',{...base,message:'thu\u00ea c\u0103n h\u1ed9 Ph\u00fa M\u1ef9 H\u01b0ng d\u01b0\u1edbi 30 tri\u1ec7u'})).json();
+  check(hotfix29Pmh.sources.length===5&&hotfix29Pmh.sources.every(item=>item.transaction_type==='Rent'&&item.property_type==='Apartment'&&item.price<30000000&&/Qu\u1eadn 7/iu.test(String(item.location||''))),'Hotfix 29 Ph\u00fa M\u1ef9 H\u01b0ng keeps legacy Qu\u1eadn 7 rental rows');
+  const hotfix29Duplicate=await (await call('/api/ai/chat',{...base,message:'nh\u00e0 B\u00ecnh T\u00e2n d\u01b0\u1edbi 7 t\u1ef7'})).json();
+  check(hotfix29Duplicate.sources.length===5&&new Set(hotfix29Duplicate.sources.map(item=>item.id)).size===5,'Hotfix 29 duplicate catalogue rows refill to five distinct cards');
+  mode='hotfix-25';
+  const hotfix29SpyCases=[
+    {path:'first structured',location:'G\u00f2 V\u1ea5p',alias:'An H\u1ed9i T\u00e2y',type:'House'},
+    {path:'follow-up',location:'H\u00f3c M\u00f4n',alias:'T\u00e2n Xu\u00e2n',type:'House'},
+    {path:'more paging',location:'V\u0169ng T\u00e0u',alias:'V\u0169ng T\u00e0u',type:'House'},
+    {path:'cheapest',location:'Th\u1ee7 \u0110\u1ee9c',alias:'Long B\u00ecnh',type:'Apartment'},
+    {path:'most expensive',location:'G\u00f2 V\u1ea5p',alias:'An H\u1ed9i T\u00e2y',type:'House'},
+    {path:'overview counts',location:'Qu\u1eadn 12',alias:'Th\u1edbi An',type:'Apartment'},
+    {path:'nearby/RAG',location:'Ph\u00fa M\u1ef9 H\u01b0ng',alias:'Qu\u1eadn 7',type:'Apartment'},
+  ];
+  for(const testCase of hotfix29SpyCases){
+    const start=catalogueRequests.length;
+    const spyResponse=await call('/api/ai/chat',{...base,message:'t\u00ecm b\u1ea5t \u0111\u1ed9ng s\u1ea3n',filters:{location:testCase.location,type:testCase.type,transaction_type:'Sale'}});
+    await spyResponse.arrayBuffer();
+    const requests=catalogueRequests.slice(start);
+    const locationRequest=requests.find(entries=>entries.some(([key,value])=>key==='or'&&String(value).includes(testCase.alias)));
+    const typeRequest=requests.find(entries=>entries.some(([key,value])=>key==='property_type'&&String(value).includes(`eq.${testCase.type}`)));
+    check(!!locationRequest&&!!typeRequest,`Hotfix 29 ${testCase.path} catalogue request carries aliases and type`);
   }
   mode='hotfix-27';
   const hotfix27Base={...base,store_transcript:false,history:[]};
