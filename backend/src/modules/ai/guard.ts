@@ -87,6 +87,7 @@ export function sourcesFromCitations<T extends { number?: number; code?: string;
 export { stripPhones } from './privacy.ts';
 import { withFormerDistrict } from './ward-label.js';
 import { displayListingName } from './display.js';
+import { bedroomText, isStudioListing, statedBedroomCount } from './bedroom-filter.js';
 export const GUARD_VERSION='guard.v3';
 export const safeReply='Mình chưa đủ dữ liệu để trả lời chắc chắn câu này. Bạn muốn mình nhờ chuyên viên tư vấn kiểm tra và báo lại cho bạn không?';
 export const disclosure='Tôi là trợ lý AI của TERAVA.';
@@ -218,8 +219,24 @@ export function toolAllowed(tool:unknown): tool is {name:string;arguments:Record
 function references(text:string,evidence:Evidence[]){return evidence.filter(e=>[e.code,e.id,e.name].some(v=>new RegExp(`(?<![a-z0-9_-])${v.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?![a-z0-9_-])`,'i').test(text)));}
 function bedroomClaimMatches(item:Evidence,count:number) {
   if(item.bedrooms===count)return true;
-  const text=`${item.name || ''} ${item.details || ''} ${item.description || ''}`;
+  if(item.bedrooms==null && isStudioListing({name:item.name}))return false;
+  const text=bedroomText(item);
   return new RegExp(`(?<![\\p{L}\\d])${count}\\s*(?:PN|phòng\\s*ngủ|phòng)(?![\\p{L}])`,'iu').test(text);
+}
+function unsupportedBedroomClaim(item:Evidence) {
+  return item.bedrooms == null && (isStudioListing({name:item.name}) || statedBedroomCount(item) === undefined);
+}
+/** Remove an unsupported room claim tied to a cited listing and state the missing catalogue fact. */
+export function repairUnsupportedRoomClaims(reply:string, sources:Evidence[]) {
+  let changed=false;
+  const repaired=reply.split(/(?<=[.!?])\s+|\n/gu).map(sentence=>{
+    const cited=[...sentence.matchAll(/\[(\d+)\]/gu)].map(match=>sources.find((item,index)=>(item.number ?? index+1)===Number(match[1]))).filter((item):item is Evidence=>Boolean(item));
+    if(!/\d+\s*(?:PN|phòng\s*ngủ|phòng)(?![\p{L}])/iu.test(sentence) || !cited.some(unsupportedBedroomClaim))return sentence;
+    changed=true;
+    const repaired=sentence.replace(/\s*\d+\s*(?:PN|phòng\s*ngủ|phòng)(?![\p{L}])/giu,'').replace(/[ \t]{2,}/gu,' ').replace(/\s+([,.!?])/gu,'$1').trim();
+    return repaired+(repaired.endsWith('.') ? '' : '.')+' Tin đăng chưa ghi số phòng ngủ.';
+  });
+  return changed ? repaired.join('\n') : reply;
 }
 function moneyText(text:string,evidence:Evidence[]){
   let result=text.replace(/[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}/gi,'').replace(/(?<![a-z\d_-])\d{4}-\d{2}-\d{2}(?:T[\d:.+Z-]+)?/gi,'');
@@ -431,7 +448,7 @@ export type NormalizeFinalReplyOptions={specificListing?:boolean;includeAvailabi
 export function normalizeFinalReply<T extends { availability?: string }>(reply:string, question:string, sources:T[], options:NormalizeFinalReplyOptions={}) {
   const specificListing=options.specificListing ?? sources.some(source=>Boolean((source as T & { property_id?: string|null }).property_id));
   const includeAvailabilityNotice=options.includeAvailabilityNotice ?? true;
-  let prepared=sanitizeReply(reply);
+  let prepared=repairUnsupportedRoomClaims(sanitizeReply(reply), sources as unknown as Evidence[]);
   const originalMissing=prepared.match(/Tin đăng chưa có thông tin về ([^.!?\n]+)[.!?]\s*Mình (?:không tự ý đoán hay )?(?:nói(?: là)? )?không biết[^.!?\n]*[.!?]?/iu);
   if(originalMissing)prepared=prepared.replace(originalMissing[0],`Mình chưa có thông tin về ${originalMissing[1]} trong dữ liệu tin đăng. Mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn.`);
   let result=removeUnpromptedNegotiation(

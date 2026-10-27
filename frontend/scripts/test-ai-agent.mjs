@@ -15,7 +15,7 @@ await mkdir(join(temp,'node_modules'));
 for(const dep of ['openai','zod'])await symlink(join(repoRoot,'backend','node_modules',dep),join(temp,'node_modules',dep),'junction');
 await mkdir(join(temp,'prompts'));
 await cp(join(repoRoot,'backend','src','modules','ai','prompts'),join(temp,'prompts'),{recursive:true});
-for(const name of ['privacy','money','extraction','lead-scoring','hcm-wards','ward-label','display','guard','schemas','request-log','llm']){
+for(const name of ['privacy','money','extraction','lead-scoring','hcm-wards','ward-label','display','bedroom-filter','guard','schemas','request-log','llm']){
  const source=await readFile(new URL(`../../backend/src/modules/ai/${name}.ts`,import.meta.url),'utf8');
  await writeFile(join(temp,`${name}.mjs`),ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText.replace(/from '\.\/([\w-]+)(?:\.(?:js|ts))?'/g,"from './$1.mjs'"));
 }
@@ -30,7 +30,7 @@ const {stripPhones}=await import(pathToFileURL(join(temp,'privacy.mjs')));
 const {moneyAmounts}=await import(pathToFileURL(join(temp,'money.mjs')));
 const fakeEmbedding=(value)=>{const text=String(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[đĐ]/g,'d').toLowerCase();const tokens=text.match(/[a-z0-9]+/g)||[];const features=[...tokens,...tokens.slice(0,-1).map((x,i)=>`${x}_${tokens[i+1]}`)];const vector=Array(1024).fill(0);for(const feature of features){let h=2166136261;for(const c of feature){h^=c.charCodeAt(0);h=Math.imul(h,16777619);}vector[(h>>>0)%1024]+=1;}const norm=Math.hypot(...vector)||1;return vector.map(x=>x/norm);};
 const {validateModel,providerConfig,TURN_SCHEMA,SYSTEM_PROMPT}=await import(pathToFileURL(join(temp,'llm.mjs')));
-const bedroomMatches=(property,requested)=>{if(typeof property.bedrooms==='number')return property.bedrooms===requested;const text=String(property.name||'')+' '+String(property.description||'');if(/(?<![\p{L}\d])(?:studio|0\s*(?:PN|phòng\s*ngủ|phòng))(?![\p{L}])/iu.test(text))return requested===0;const count=text.match(/(?<![\p{L}\d])(\d+)\s*(?:PN|phòng\s*ngủ|phòng)(?![\p{L}])/iu);return count ? Number(count[1])===requested : true;};
+const bedroomMatches=(property,requested)=>{if(typeof property.bedrooms==='number')return property.bedrooms===requested;const text=String(property.name||'')+' '+String(property.header||'')+' '+String(property.description||'');const folded=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[đĐ]/g,'d');if(/(?<![\p{L}\d])(?:studio|0\s*(?:PN|phong\s*ngu|phong)|1\s*(?:PN|phong\s*ngu|phong))(?![\p{L}\d])/iu.test(folded))return requested<=1;const count=folded.match(/(?<![\p{L}\d])(\d+)\s*(?:PN|phong\s*ngu|phong)(?![\p{L}\d])/iu);return count ? Number(count[1])===requested : true;};
 let checks=0;const check=(value,label)=>{assert.ok(value,label);checks++;};
 const field=(value,evidence)=>({value,confidence:.9,evidence});
 const all={intent:true,budget:{value:'match',evidence:'3 tỷ'},area_type:{value:'both',evidence:'Hồ Chí Minh, căn hộ'},timeline:{value:'lt3m',evidence:'tháng tới'},contact:{value:'ready',evidence:'đã xác minh, sẵn sàng'},next_step:{value:'appointment',evidence:'đề nghị hẹn'}};
