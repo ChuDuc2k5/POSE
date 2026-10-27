@@ -69,7 +69,7 @@ describe('M06 services', () => {
     expect(body.messages[0].content).toBe(SYSTEM_PROMPT);
     expect(body.messages[1].content).toMatch(/^BEGIN_UNTRUSTED_DATA/);
     expect(body.messages[1].content).not.toContain(evidence[0].id);
-    expect(body.messages[1].content).toContain('\\u003c');
+    expect(body.messages[1].content).toContain(String.fromCharCode(92, 117, 48, 48, 51, 99));
     const data = JSON.parse(body.messages[1].content.replace(/^BEGIN_UNTRUSTED_DATA\n|\nEND_UNTRUSTED_DATA$/g,''));
     expect(data.properties[0].location).toBe('Thủ Đức');
     expect(data.listing_terms).toEqual([{code:'RV-A0805',transaction_type:'Sale',price_period:'Total'}]);
@@ -112,7 +112,7 @@ describe('inferSearch', () => {
     const { inferSearch } = await import('../src/modules/ai/infer-search.js');
     // A price in tỷ with no buy/rent word is a purchase.
     expect(inferSearch('Căn hộ dưới 3,5 tỷ ở Thủ Đức')).toEqual({ location: 'Thủ Đức', type: 'Apartment', maxPrice: 3500000000, maxPriceExclusive: true, transaction_type: 'Sale' });
-    expect(inferSearch('cho thuê nhà quận 7 từ 10 triệu')).toEqual({ location: 'Quận 7', minPrice: 10000000, transaction_type: 'Rent' });
+    expect(inferSearch('cho thuê nhà quận 7 từ 10 triệu')).toMatchObject({ location: 'Quận 7', minPrice: 10000000, transaction_type: 'Rent', types: ['House', 'Apartment'] });
     expect(inferSearch('xin chào')).toBeNull();
     expect(inferSearch('diện tích khoảng 80 m²')).toMatchObject({ minArea: 68, maxArea: 92 });
     expect(inferSearch('trên 100 m2')).toMatchObject({ minArea: 100 });

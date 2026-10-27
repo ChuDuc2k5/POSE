@@ -5,11 +5,11 @@ import { clarificationFor } from '../src/modules/ai/history-aware.js';
 
 describe('post-2025 HCMC ward mapping', () => {
   it('contains the required ward facts and reports valid multi-district rows', () => {
-    expect(hcmWards.length).toBe(102);
+    expect(hcmWards.length).toBe(168);
     for (const [ward, district] of [['Tân Mỹ', 'Quận 7'], ['Tân Hưng', 'Quận 7'], ['Phú Thuận', 'Quận 7'], ['Tân Thuận', 'Quận 7'], ['Sài Gòn', 'Quận 1'], ['Bến Thành', 'Quận 1'], ['Tân Định', 'Quận 1'], ['Bàn Cờ', 'Quận 3'], ['Xuân Hòa', 'Quận 3'], ['Nhiêu Lộc', 'Quận 3'], ['An Khánh', 'Quận 2'], ['Bình Trưng', 'Quận 2'], ['Cát Lái', 'Quận 2'], ['Long Phước', 'Quận 9'], ['Long Trường', 'Quận 9'], ['Phước Long', 'Quận 9'], ['Linh Xuân', 'Thủ Đức'], ['Tân Thới Hiệp', 'Quận 12'], ['Trung Mỹ Tây', 'Quận 12'], ['Gia Định', 'Quận Bình Thạnh'], ['Bình Thạnh', 'Quận Bình Thạnh'], ['Bảy Hiền', 'Quận Tân Bình'], ['Hòa Bình', 'Quận 11'], ['Phú Thọ', 'Quận 11']]) {
       expect(hcmWards.find(row => row.ward.normalize('NFC') === ward)?.formerDistricts).toContain(district);
     }
-    expect(hcmWards.filter(row => row.formerDistricts.length > 1).map(row => row.ward)).toEqual(expect.arrayContaining(['Tân Nhựt', 'Bình Hưng', 'Bắc Tân Uyên']));
+    expect(hcmWards.filter(row => row.formerDistricts.length > 1).map(row => row.ward)).toEqual(expect.arrayContaining(['Tân Nhựt', 'Bình Hưng', 'Bình Đông']));
   });
   it('adds aliases in both directions for indexed listing headers', () => {
     expect(districtAliases({ code: 'x', name: 'Căn hộ', location: 'Phường Tân Mỹ, TP.HCM', property_type: 'Apartment', transaction_type: 'Sale', description: '', project_name: null, amenities: null })).toContain('Quận 7');

@@ -29,7 +29,7 @@ describe('Hotfix 14 HARD30 polish', () => {
   });
 
   it('does not label Hòa Lợi or another external row as Quận 1', () => {
-    expect(withFormerDistrict('Phường Hòa Lợi, Thành phố Hồ Chí Minh')).toContain('Thị xã Bến Cát');
+    expect(withFormerDistrict('Phường Hòa Lợi, Thành phố Hồ Chí Minh')).toContain('Thành phố Bến Cát');
     expect(withFormerDistrict('Phường Hòa Lợi, Thành phố Hồ Chí Minh')).not.toContain('Quận 1');
     const districtOneRows = hcmWards.filter(row => row.formerDistricts.includes('Quận 1')).map(row => row.ward);
     expect(districtOneRows).not.toContain('Hòa Lợi');

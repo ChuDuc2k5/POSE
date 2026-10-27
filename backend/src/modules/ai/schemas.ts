@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const SearchFiltersSchema = z.object({
   transaction_type: z.enum(['Sale', 'Rent']).nullable().default(null),
   property_type: z.enum(['Apartment', 'House', 'Land', 'Villa', 'Office', 'Shop']).nullable().default(null),
+  property_types: z.array(z.enum(['Apartment', 'House', 'Land', 'Villa', 'Office', 'Shop'])).max(6).nullable().default(null),
   location: z.string().trim().min(1).max(120).nullable().default(null),
   min_price_vnd: z.number().finite().nonnegative().max(1e15).nullable().default(null),
   max_price_vnd: z.number().finite().nonnegative().max(1e15).nullable().default(null),

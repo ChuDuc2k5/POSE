@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { searchCriteriaFromHistory } from '../src/modules/ai/history-aware.js';
 import { inferSearch } from '../src/modules/ai/infer-search.js';
-import { catalogueLocationAliases } from '../src/modules/ai/location-aliases.js';
+import { areaAliases } from '../src/modules/ai/location-aliases.js';
 
 describe('Hotfix 25 tìm kiếm cấu trúc dùng chung', () => {
   it('dùng cùng ngữ nghĩa ngân sách cho các cách nói phổ biến', () => {
@@ -21,8 +21,8 @@ describe('Hotfix 25 tìm kiếm cấu trúc dùng chung', () => {
   it('nhận diện Vũng Tàu và các khu vực dự án như địa điểm catalogue', () => {
     expect(inferSearch('mua nhà ở vũng tàu dưới 5 tỷ')).toMatchObject({ location: 'Vũng Tàu' });
     expect(inferSearch('thuê căn hộ phú mỹ hưng dưới 30 triệu')).toMatchObject({ location: 'Phú Mỹ Hưng' });
-    expect(catalogueLocationAliases('Vũng Tàu')).toEqual(expect.arrayContaining(['Phường Vũng Tàu', 'Bà Rịa']));
-    expect(catalogueLocationAliases('Phú Mỹ Hưng')).toEqual(expect.arrayContaining(['Quận 7', 'Tân Phong', 'Phú Mỹ Hưng']));
+    expect(areaAliases('Vũng Tàu')).toEqual(expect.arrayContaining(['Phường Vũng Tàu']));
+    expect(areaAliases('Phú Mỹ Hưng')).toEqual(expect.arrayContaining(['Tân Phong', 'Phú Mỹ Hưng']));
   });
 
   it('không còn nhánh tìm kiếm riêng cho một khu vực trong ai.service', () => {

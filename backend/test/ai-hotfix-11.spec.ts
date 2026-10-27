@@ -52,6 +52,7 @@ describe('Hotfix 11 deterministic routing and parsing', () => {
     for (const phrase of ['thuê nhà', 'mua nhà', 'tìm nhà', 'nhà ở', 'chỗ ở', 'nhà để ở', 'gợi ý mua nhà']) {
       expect(genericHome(phrase), phrase).toBe(true);
       expect(inferSearch(phrase) || {}, phrase).not.toHaveProperty('type');
+      expect(inferSearch(phrase) || {}, phrase).toMatchObject({ types: ['House', 'Apartment'] });
     }
   });
 
@@ -71,8 +72,10 @@ describe('Hotfix 11 deterministic routing and parsing', () => {
     ];
     expect(searchCriteriaFromHistory('Ở Quận 9', history)).toMatchObject({ transaction_type: 'Rent', location: 'Quận 9', maxPrice: 10_000_000, maxPriceExclusive: true });
     expect(searchCriteriaFromHistory('Ở Quận 9', history)).not.toHaveProperty('type');
+    expect(searchCriteriaFromHistory('Ở Quận 9', history)).toMatchObject({ types: ['House', 'Apartment'] });
     expect(searchCriteriaFromHistory('Có căn nào khác không', history)).toMatchObject({ transaction_type: 'Rent', location: 'Quận 9', maxPrice: 10_000_000, maxPriceExclusive: true });
     expect(searchCriteriaFromHistory('Có căn nào khác không', history)).not.toHaveProperty('type');
+    expect(searchCriteriaFromHistory('Có căn nào khác không', history)).toMatchObject({ types: ['House', 'Apartment'] });
   });
 
   it('treats negated borrowing as no loan', () => {

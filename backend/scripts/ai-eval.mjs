@@ -2,7 +2,7 @@ import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
-import { hcmWards, districtAliases } from '../dist/modules/ai/hcm-wards.js';
+import { hcmWards } from '../dist/modules/ai/hcm-wards.js';
 
 const args = new Set(process.argv.slice(2));
 const fake = args.has('--fake');
@@ -49,8 +49,8 @@ const shard = optionValue('--shard')?.match(/^(\d+)\/(\d+)$/);
 const faq100 = args.has('--set') && process.argv[process.argv.indexOf('--set') + 1] === 'faq100';
 const cases = (real ? realCases : faq100 ? faq100Cases : standardCases).filter((item, index) => (!only || only.includes(item.id)) && (!shard || index % Number(shard[2]) === Number(shard[1]) - 1));
 const catalogueSnapshot = real ? readJson(snapshotPath) : [];
-const normalizeLocation = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('vi');
-const canonicalDistrict = value => districtAliases[String(value)] || value;
+const normalizeLocation = value => String(value ?? '').normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase('vi');
+const canonicalDistrict = value => String(value).replace(/^q\.?\s*(\d+)$/iu, 'Quận $1').replace(/^district\s+(\d+)$/iu, 'Quận $1');
 const districtMatches = (location, district) => {
   if (!district || (Array.isArray(district) && !district.length)) return true;
   if (Array.isArray(district)) return district.some(value => districtMatches(location, value));
@@ -115,7 +115,7 @@ const modeFor = item => item.id === 'n05' ? 'favorite' : item.id === 'n06' ? 'ap
 const textOf = body => JSON.stringify(body.reply || body.message || body).toLocaleLowerCase('vi');
 const noDataPhrases = ['chưa có dữ liệu', 'không có dữ liệu', 'chưa được cung cấp', 'không thấy trong dữ liệu', 'chưa có thông tin'];
 const handoffPhrases = ['chuyên viên', 'nhân viên tư vấn', 'liên hệ', 'hỗ trợ thêm', 'tư vấn trực tiếp', 'đặt lịch'];
-noDataPhrases.push('kh\u00f4ng c\u00f3 c\u0103n', 'ch\u01b0a c\u00f3 c\u0103n', 'kh\u00f4ng t\u00ecm th\u1ea5y', 'kh\u00f4ng c\u00f3 th\u00f4ng tin', 'kh\u00f4ng c\u00f3 b\u1ea5t \u0111\u1ed9ng s\u1ea3n');
+noDataPhrases.push('không có căn', 'chưa có căn', 'không tìm thấy', 'không có thông tin', 'không có bất động sản');
 function failure(expected, response, rows, item) {
   const body = response.body || {}, called = rows.flatMap(row => row.tools_called || []), answer = textOf(body);
   if (expected.fallback && response.status !== 503) return `status=${response.status}, expected provider failure`;
