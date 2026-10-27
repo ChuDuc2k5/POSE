@@ -6,5 +6,9 @@ import { AppointmentWorkspace } from '@/components/appointments/appointment-work
 export const metadata: Metadata = { title: 'Lịch hẹn | TERAVA', robots: { index: false, follow: false } };
 export default async function SalesAppointmentsPage() {
   const identity = await requireCrmSession('/sales/appointments');
-  return <CrmPage {...identity}><AppointmentWorkspace today={appointmentLocal(new Date().toISOString()).slice(0, 10)}/></CrmPage>;
+  return (
+    <CrmPage {...identity}>
+      <AppointmentWorkspace today={appointmentLocal(new Date().toISOString()).slice(0, 10)} />
+    </CrmPage>
+  );
 }

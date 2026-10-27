@@ -1,6 +1,12 @@
 import { normalizeEmail, validateCredentials } from '../src/common/auth-validation.js';
 
-const valid = { email: 'client@example.com', password: 'safe-password-123', confirmPassword: 'safe-password-123', name: 'Khách hàng', acceptTerms: true };
+const valid = {
+  email: 'client@example.com',
+  password: 'safe-password-123',
+  confirmPassword: 'safe-password-123',
+  name: 'Khách hàng',
+  acceptTerms: true,
+};
 describe('SRS FR-M01-01 registration input', () => {
   it('accepts valid customer signup and normalizes email', () => {
     expect(validateCredentials(valid, true)).toBeNull();

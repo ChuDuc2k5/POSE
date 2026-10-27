@@ -8,5 +8,11 @@ export default async function AdminLeadsPage() {
   const session = await requirePageSession('/admin/leads', ['Admin']);
   const { name } = await readProfile();
   const identity = { userId: session.user.id, role: 'Admin' as const, name };
-  return <CrmWorkspace identity={identity} embedded><CrmPage userId={identity.userId} role="Admin"><LeadWorkspace/></CrmPage></CrmWorkspace>;
+  return (
+    <CrmWorkspace identity={identity} embedded>
+      <CrmPage userId={identity.userId} role="Admin">
+        <LeadWorkspace />
+      </CrmPage>
+    </CrmWorkspace>
+  );
 }

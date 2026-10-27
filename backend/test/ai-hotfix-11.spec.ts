@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { annuityPayment, financeNoteForQuestion, grossRentalYield, rateChangePayment, remainingBalance, safeMonthlyPayment } from '../src/modules/ai/finance.js';
+import {
+  annuityPayment,
+  financeNoteForQuestion,
+  grossRentalYield,
+  rateChangePayment,
+  remainingBalance,
+  safeMonthlyPayment,
+} from '../src/modules/ai/finance.js';
 import { answerCriteriaLine, showCriteriaLine } from '../src/modules/ai/answer-rules.js';
-import { adviceOrServiceQuestion, clarificationFor, historyReferenceQuestion, searchCriteriaFromHistory } from '../src/modules/ai/history-aware.js';
+import {
+  adviceOrServiceQuestion,
+  clarificationFor,
+  historyReferenceQuestion,
+  searchCriteriaFromHistory,
+} from '../src/modules/ai/history-aware.js';
 import { genericHome, inferSearch } from '../src/modules/ai/infer-search.js';
 import { loanBudget, loanWords, noLoanWords, dedupeNoMatchReply } from '../src/modules/ai/unsupported.js';
 import { RetrievalService } from '../src/modules/ai/retrieval.js';
@@ -9,7 +21,9 @@ import { RetrievalService } from '../src/modules/ai/retrieval.js';
 describe('Hotfix 11 deterministic routing and parsing', () => {
   it('routes a conditional hypothetical to advice without clarification', () => {
     expect(adviceOrServiceQuestion('Nếu giá đất tăng liên tục thì bạn sẽ trả lời thế nào?')).toBe(true);
-    expect(clarificationFor('Nếu giá đất tăng liên tục thì bạn sẽ trả lời thế nào?', [])).toMatchObject({ needed: false });
+    expect(clarificationFor('Nếu giá đất tăng liên tục thì bạn sẽ trả lời thế nào?', [])).toMatchObject({
+      needed: false,
+    });
   });
 
   it('routes a certainty question to advice without clarification', () => {
@@ -35,7 +49,9 @@ describe('Hotfix 11 deterministic routing and parsing', () => {
   it('routes a listing history reference to advice without clarification', () => {
     const history = [{ role: 'assistant', content: 'Mình vừa giới thiệu ba căn hộ: [1], [2], [3].' }];
     expect(historyReferenceQuestion('Trong ba căn hộ bạn vừa giới thiệu, căn nào rẻ nhất?', history)).toBe(true);
-    expect(clarificationFor('Trong ba căn hộ bạn vừa giới thiệu, căn nào rẻ nhất?', history)).toMatchObject({ needed: false });
+    expect(clarificationFor('Trong ba căn hộ bạn vừa giới thiệu, căn nào rẻ nhất?', history)).toMatchObject({
+      needed: false,
+    });
   });
 
   it('keeps a genuine buy search eligible for clarification', () => {
@@ -58,7 +74,11 @@ describe('Hotfix 11 deterministic routing and parsing', () => {
 
   it('keeps explicit house wording typed as House', () => {
     expect(genericHome('thuê nhà phố Quận 9')).toBe(false);
-    expect(inferSearch('thuê nhà phố Quận 9')).toMatchObject({ type: 'House', transaction_type: 'Rent', location: 'Quận 9' });
+    expect(inferSearch('thuê nhà phố Quận 9')).toMatchObject({
+      type: 'House',
+      transaction_type: 'Rent',
+      location: 'Quận 9',
+    });
   });
 
   it('remembers generic home criteria without adding House', () => {
@@ -70,12 +90,24 @@ describe('Hotfix 11 deterministic routing and parsing', () => {
       { role: 'user', content: 'Ở Quận 9' },
       { role: 'assistant', content: 'Tiêu chí: Thuê, ở Quận 9, dưới 10 triệu đồng/tháng.' },
     ];
-    expect(searchCriteriaFromHistory('Ở Quận 9', history)).toMatchObject({ transaction_type: 'Rent', location: 'Quận 9', maxPrice: 10_000_000, maxPriceExclusive: true });
+    expect(searchCriteriaFromHistory('Ở Quận 9', history)).toMatchObject({
+      transaction_type: 'Rent',
+      location: 'Quận 9',
+      maxPrice: 10_000_000,
+      maxPriceExclusive: true,
+    });
     expect(searchCriteriaFromHistory('Ở Quận 9', history)).not.toHaveProperty('type');
     expect(searchCriteriaFromHistory('Ở Quận 9', history)).toMatchObject({ types: ['House', 'Apartment'] });
-    expect(searchCriteriaFromHistory('Có căn nào khác không', history)).toMatchObject({ transaction_type: 'Rent', location: 'Quận 9', maxPrice: 10_000_000, maxPriceExclusive: true });
+    expect(searchCriteriaFromHistory('Có căn nào khác không', history)).toMatchObject({
+      transaction_type: 'Rent',
+      location: 'Quận 9',
+      maxPrice: 10_000_000,
+      maxPriceExclusive: true,
+    });
     expect(searchCriteriaFromHistory('Có căn nào khác không', history)).not.toHaveProperty('type');
-    expect(searchCriteriaFromHistory('Có căn nào khác không', history)).toMatchObject({ types: ['House', 'Apartment'] });
+    expect(searchCriteriaFromHistory('Có căn nào khác không', history)).toMatchObject({
+      types: ['House', 'Apartment'],
+    });
   });
 
   it('treats negated borrowing as no loan', () => {
@@ -95,7 +127,11 @@ describe('Hotfix 11 deterministic routing and parsing', () => {
   });
 
   it('uses cash as a strict ceiling when borrowing is rejected', () => {
-    expect(inferSearch('Tôi có 2 tỷ và không muốn vay ngân hàng nữa')).toMatchObject({ maxPrice: 2_000_000_000, maxPriceExclusive: true, transaction_type: 'Sale' });
+    expect(inferSearch('Tôi có 2 tỷ và không muốn vay ngân hàng nữa')).toMatchObject({
+      maxPrice: 2_000_000_000,
+      maxPriceExclusive: true,
+      transaction_type: 'Sale',
+    });
   });
 
   it('does not treat a stated loan amount as cash', () => {
@@ -104,7 +140,10 @@ describe('Hotfix 11 deterministic routing and parsing', () => {
   });
 
   it('keeps cash and purchase price in their separate roles', () => {
-    expect(inferSearch('Tôi có 800 triệu, thu nhập 20 triệu mỗi tháng, mua căn hộ 3 tỷ')).toMatchObject({ maxPrice: 3_000_000_000, transaction_type: 'Sale' });
+    expect(inferSearch('Tôi có 800 triệu, thu nhập 20 triệu mỗi tháng, mua căn hộ 3 tỷ')).toMatchObject({
+      maxPrice: 3_000_000_000,
+      transaction_type: 'Sale',
+    });
     expect(loanBudget('Tôi có 800 triệu, thu nhập 20 triệu mỗi tháng, mua căn hộ 3 tỷ và vay ngân hàng')).toBeNull();
   });
 
@@ -114,20 +153,56 @@ describe('Hotfix 11 deterministic routing and parsing', () => {
   });
 
   it('shows criteria only for a listing search with cards and non-transaction criteria', () => {
-    expect(showCriteriaLine({ searchPerformed: true, propertyId: null, adviceOnly: false, cards: 2, criteria: ['ở Quận 7'], transactionOnly: false })).toBe(true);
+    expect(
+      showCriteriaLine({
+        searchPerformed: true,
+        propertyId: null,
+        adviceOnly: false,
+        cards: 2,
+        criteria: ['ở Quận 7'],
+        transactionOnly: false,
+      }),
+    ).toBe(true);
     expect(answerCriteriaLine(['mua', 'ở Quận 7'])).toContain('Tiêu chí: mua, ở Quận 7.');
   });
 
   it('hides criteria on a detail-page answer', () => {
-    expect(showCriteriaLine({ searchPerformed: true, propertyId: 'property-1', adviceOnly: false, cards: 1, criteria: ['ở Quận 7'], transactionOnly: false })).toBe(false);
+    expect(
+      showCriteriaLine({
+        searchPerformed: true,
+        propertyId: 'property-1',
+        adviceOnly: false,
+        cards: 1,
+        criteria: ['ở Quận 7'],
+        transactionOnly: false,
+      }),
+    ).toBe(false);
   });
 
   it('hides criteria on advice and legal answers', () => {
-    expect(showCriteriaLine({ searchPerformed: false, propertyId: null, adviceOnly: true, cards: 0, criteria: ['ở Quận 7'], transactionOnly: false })).toBe(false);
+    expect(
+      showCriteriaLine({
+        searchPerformed: false,
+        propertyId: null,
+        adviceOnly: true,
+        cards: 0,
+        criteria: ['ở Quận 7'],
+        transactionOnly: false,
+      }),
+    ).toBe(false);
   });
 
   it('hides criteria when only transaction type is known', () => {
-    expect(showCriteriaLine({ searchPerformed: true, propertyId: null, adviceOnly: false, cards: 1, criteria: [], transactionOnly: true })).toBe(false);
+    expect(
+      showCriteriaLine({
+        searchPerformed: true,
+        propertyId: null,
+        adviceOnly: false,
+        cards: 1,
+        criteria: [],
+        transactionOnly: true,
+      }),
+    ).toBe(false);
   });
 
   it('calculates an annuity payment and total interest', () => {
@@ -160,7 +235,9 @@ describe('Hotfix 11 deterministic routing and parsing', () => {
   });
 
   it('builds the rate-change answer from the customer numbers', () => {
-    const note = financeNoteForQuestion('Nếu tôi vay 2 tỷ trong 20 năm, lãi suất tăng từ 8% lên 12% sau hai năm thì mỗi tháng trả thêm bao nhiêu?');
+    const note = financeNoteForQuestion(
+      'Nếu tôi vay 2 tỷ trong 20 năm, lãi suất tăng từ 8% lên 12% sau hai năm thì mỗi tháng trả thêm bao nhiêu?',
+    );
     expect(note).toContain('16,7 triệu');
     expect(note).toContain('21,6 triệu');
     expect(note).toContain('4,9 triệu');
@@ -175,24 +252,54 @@ describe('Hotfix 11 deterministic routing and parsing', () => {
   });
 
   it('compares gross yields with the two explicit alternatives', () => {
-    const note = financeNoteForQuestion('Một căn hộ 3 tỷ cho thuê được 10 triệu/tháng và một căn nhà 4 tỷ cho thuê được 15 triệu/tháng.');
+    const note = financeNoteForQuestion(
+      'Một căn hộ 3 tỷ cho thuê được 10 triệu/tháng và một căn nhà 4 tỷ cho thuê được 15 triệu/tháng.',
+    );
     expect(note).toContain('4%');
     expect(note).toContain('4,5%');
   });
 
   it('calculates yield from the listing price and area rent median', () => {
-    const note = financeNoteForQuestion('Căn hộ này cho thuê có lợi nhuận tốt không?', 2_950_000_000, 'Theo 5 tin: giá thuê từ 6 triệu đồng/tháng đến 9 triệu đồng/tháng, phổ biến khoảng 7,5 triệu đồng/tháng.');
+    const note = financeNoteForQuestion(
+      'Căn hộ này cho thuê có lợi nhuận tốt không?',
+      2_950_000_000,
+      'Theo 5 tin: giá thuê từ 6 triệu đồng/tháng đến 9 triệu đồng/tháng, phổ biến khoảng 7,5 triệu đồng/tháng.',
+    );
     expect(note).toContain('3,1%');
   });
 
   it('deduplicates no-match paragraphs', () => {
-    const reply = 'Hiện chưa có căn phù hợp trong dữ liệu.\n\nHiện chưa tìm thấy căn nào phù hợp.\n\nBạn có thể nới khu vực.';
+    const reply =
+      'Hiện chưa có căn phù hợp trong dữ liệu.\n\nHiện chưa tìm thấy căn nào phù hợp.\n\nBạn có thể nới khu vực.';
     expect(dedupeNoMatchReply(reply).match(/chưa (?:có|tìm thấy)/giu)).toHaveLength(1);
   });
 
   it('keeps FAQ fixture rows in the knowledge result', async () => {
-    const service = new RetrievalService({ embed: async () => ({ model: 'fixture', vectors: [[1]] }) } as never, async () => ({ data: [{ chunk_id: 'faq-1', document_id: 'doc-1', source_id: null, source_type: 'Faq', header: 'Đất nằm trong quy hoạch thì được xây gì?', content: 'Tùy kế hoạch sử dụng đất hằng năm; hãy kiểm tra tại cơ quan địa phương.', vector_rank: null, text_rank: 1, similarity: 0.9 }], error: undefined }));
-    const rows = await service.searchRowsWithEmbedding('đất trong quy hoạch', {}, {}, { model: 'fixture', vector: '[1]' });
+    const service = new RetrievalService(
+      { embed: async () => ({ model: 'fixture', vectors: [[1]] }) } as never,
+      async () => ({
+        data: [
+          {
+            chunk_id: 'faq-1',
+            document_id: 'doc-1',
+            source_id: null,
+            source_type: 'Faq',
+            header: 'Đất nằm trong quy hoạch thì được xây gì?',
+            content: 'Tùy kế hoạch sử dụng đất hằng năm; hãy kiểm tra tại cơ quan địa phương.',
+            vector_rank: null,
+            text_rank: 1,
+            similarity: 0.9,
+          },
+        ],
+        error: undefined,
+      }),
+    );
+    const rows = await service.searchRowsWithEmbedding(
+      'đất trong quy hoạch',
+      {},
+      {},
+      { model: 'fixture', vector: '[1]' },
+    );
     expect(rows[0]).toMatchObject({ source_type: 'Faq', header: 'Đất nằm trong quy hoạch thì được xây gì?' });
   });
 });

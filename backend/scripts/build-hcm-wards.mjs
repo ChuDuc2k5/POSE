@@ -12,7 +12,7 @@ const province = {
 
 function titleDistrict(value) {
   const text = value.normalize('NFC').replace(/\s+/gu, ' ').trim();
-  return text.replace(/^(quận|huyện|thị xã|thành phố)\s+/iu, match => {
+  return text.replace(/^(quận|huyện|thị xã|thành phố)\s+/iu, (match) => {
     const prefix = match.trim().toLocaleLowerCase('vi');
     return `${prefix === 'quận' ? 'Quận' : prefix === 'huyện' ? 'Huyện' : prefix === 'thị xã' ? 'Thị xã' : 'Thành phố'} `;
   });
@@ -37,18 +37,29 @@ function formerWards(statement) {
   const targetIndex = statement.search(/(?:thành\s+)?(?:phường|xã|đặc khu)\s+(?:mới\s+)?có tên gọi là\s+/iu);
   const beforeTarget = statement.slice(0, targetIndex < 0 ? statement.length : targetIndex);
   const wards = [];
-  const addWard = value => {
+  const addWard = (value) => {
     for (const part of value.split(/\s+và\s+/giu)) {
-      let ward = part.trim().normalize('NFC').replace(/\s*\([^)]*\)/gu, '').replace(/^(?:một phần|phần còn lại).*?\b(?:phường|xã|thị trấn)\s+/iu, '').replace(/^(?:phường|xã|thị trấn|huyện)\s+/iu, '').replace(/\s+sau khi\b[\s\S]*$/iu, '').replace(/^Phường\s+(\d+)$/iu, '$1').replace(/^Xã\s+(\d+)$/iu, '$1');
+      let ward = part
+        .trim()
+        .normalize('NFC')
+        .replace(/\s*\([^)]*\)/gu, '')
+        .replace(/^(?:một phần|phần còn lại).*?\b(?:phường|xã|thị trấn)\s+/iu, '')
+        .replace(/^(?:phường|xã|thị trấn|huyện)\s+/iu, '')
+        .replace(/\s+sau khi\b[\s\S]*$/iu, '')
+        .replace(/^Phường\s+(\d+)$/iu, '$1')
+        .replace(/^Xã\s+(\d+)$/iu, '$1');
       if (!/(?:diện tích|quy mô|của|mới|theo quy định)/iu.test(ward) && ward && !wards.includes(ward)) wards.push(ward);
     }
   };
   for (const match of beforeTarget.matchAll(/các\s+(?:phường|xã)\s+([\s\S]*?)(?=\s+(?:thành|sau khi)\b|\s*$)/giu)) {
     for (const part of match[1].split(/,|\s+và\s+/giu)) {
-      if (!/(?:một phần|phần còn lại|diện tích|quy mô| của )/iu.test(part)) addWard(part.replace(/^(?:phường|xã)\s+/iu, ''));
+      if (!/(?:một phần|phần còn lại|diện tích|quy mô| của )/iu.test(part))
+        addWard(part.replace(/^(?:phường|xã)\s+/iu, ''));
     }
   }
-  for (const match of beforeTarget.matchAll(/(?:phường|xã|thị trấn|huyện)\s+([^,.;()]+?)(?=\s*(?:\([^)]*\))?(?:,| và | sau khi|$))/giu)) {
+  for (const match of beforeTarget.matchAll(
+    /(?:phường|xã|thị trấn|huyện)\s+([^,.;()]+?)(?=\s*(?:\([^)]*\))?(?:,| và | sau khi|$))/giu,
+  )) {
     addWard(match[1]);
   }
   const final = beforeTarget.match(/(?:phường|xã|thị trấn|huyện)\s+([^,.;()]+?)(?:\s*\([^)]*\))?\s*$/iu);
@@ -130,14 +141,50 @@ function resolutionRows(text) {
   for (const number of [...entries.keys()].sort((a, b) => a - b)) {
     const statement = entries.get(number);
     const { ward, kind } = target(statement);
-    rows.push({ ward, kind, formerWards: formerWards(statement), formerDistricts: districts(number), formerProvince: sourceProvince(number) });
+    rows.push({
+      ward,
+      kind,
+      formerWards: formerWards(statement),
+      formerDistricts: districts(number),
+      formerProvince: sourceProvince(number),
+    });
   }
   rows.push(
-    { ward: 'Thới Hòa', kind: 'phường', formerWards: ['Thới Hòa'], formerDistricts: ['Thành phố Bến Cát'], formerProvince: province.binhDuong },
-    { ward: 'Long Sơn', kind: 'xã', formerWards: ['Long Sơn'], formerDistricts: ['Thành phố Vũng Tàu'], formerProvince: province.baRia },
-    { ward: 'Hòa Hiệp', kind: 'xã', formerWards: ['Hòa Hiệp'], formerDistricts: ['Huyện Xuyên Mộc'], formerProvince: province.baRia },
-    { ward: 'Bình Châu', kind: 'xã', formerWards: ['Bình Châu'], formerDistricts: ['Huyện Xuyên Mộc'], formerProvince: province.baRia },
-    { ward: 'Thạnh An', kind: 'xã', formerWards: ['Thạnh An'], formerDistricts: ['Huyện Cần Giờ'], formerProvince: province.hcm },
+    {
+      ward: 'Thới Hòa',
+      kind: 'phường',
+      formerWards: ['Thới Hòa'],
+      formerDistricts: ['Thành phố Bến Cát'],
+      formerProvince: province.binhDuong,
+    },
+    {
+      ward: 'Long Sơn',
+      kind: 'xã',
+      formerWards: ['Long Sơn'],
+      formerDistricts: ['Thành phố Vũng Tàu'],
+      formerProvince: province.baRia,
+    },
+    {
+      ward: 'Hòa Hiệp',
+      kind: 'xã',
+      formerWards: ['Hòa Hiệp'],
+      formerDistricts: ['Huyện Xuyên Mộc'],
+      formerProvince: province.baRia,
+    },
+    {
+      ward: 'Bình Châu',
+      kind: 'xã',
+      formerWards: ['Bình Châu'],
+      formerDistricts: ['Huyện Xuyên Mộc'],
+      formerProvince: province.baRia,
+    },
+    {
+      ward: 'Thạnh An',
+      kind: 'xã',
+      formerWards: ['Thạnh An'],
+      formerDistricts: ['Huyện Cần Giờ'],
+      formerProvince: province.hcm,
+    },
   );
   return rows;
 }
@@ -145,10 +192,13 @@ function resolutionRows(text) {
 if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error(`Official source not found: ${sourcePath}`);
 const rows = resolutionRows(fs.readFileSync(sourcePath, 'utf8').normalize('NFC'));
 if (rows.length !== 168) throw new Error(`Expected 168 HCMC units, parsed ${rows.length}`);
-if (new Set(rows.map(row => row.ward)).size !== rows.length) throw new Error('Duplicate new ward name in official mapping');
+if (new Set(rows.map((row) => row.ward)).size !== rows.length)
+  throw new Error('Duplicate new ward name in official mapping');
 
 const source = `// Generated by backend/scripts/build-hcm-wards.mjs. Do not edit by hand.\nexport type HcmWard = { ward: string; kind: 'phường'|'xã'|'đặc khu'; formerDistricts: string[]; formerWards: string[]; formerProvince: 'TP.HCM'|'Bình Dương'|'Bà Rịa - Vũng Tàu' };\nexport const hcmWards: HcmWard[] = ${JSON.stringify(rows, null, 2)};\nexport const hcmWardCount = hcmWards.length;\n`;
 fs.writeFileSync(output, source, 'utf8');
-const counts = Object.fromEntries(Object.entries(province).map(([, value]) => [value, rows.filter(row => row.formerProvince === value).length]));
+const counts = Object.fromEntries(
+  Object.entries(province).map(([, value]) => [value, rows.filter((row) => row.formerProvince === value).length]),
+);
 console.log(`generated ${rows.length} wards`);
 console.log(JSON.stringify(counts));

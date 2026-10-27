@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { preserveAreaSwitchCriteria, referencedListingCodes, renumberReferencedListings, searchCriteriaFromHistory } from '../src/modules/ai/history-aware.js';
+import {
+  preserveAreaSwitchCriteria,
+  referencedListingCodes,
+  renumberReferencedListings,
+  searchCriteriaFromHistory,
+} from '../src/modules/ai/history-aware.js';
 import { normalizeFinalReply, sourcesFromCitations } from '../src/modules/ai/guard.js';
 
 const vietnamese = {
@@ -33,33 +38,39 @@ describe('Hotfix 32 regressions', () => {
   });
 
   it('resolves both numbered cards from the previous list for comparison', () => {
-    const history = [{
-      role: 'assistant',
-      content: 'Căn hộ A [1], căn hộ B [5], căn hộ C [4].',
-      sources: [
-        { code: 'A' },
-        { code: 'B' },
-        { code: 'C' },
-        { code: 'D' },
-        { code: 'E' },
-      ],
-    }];
+    const history = [
+      {
+        role: 'assistant',
+        content: 'Căn hộ A [1], căn hộ B [5], căn hộ C [4].',
+        sources: [{ code: 'A' }, { code: 'B' }, { code: 'C' }, { code: 'D' }, { code: 'E' }],
+      },
+    ];
 
     expect(referencedListingCodes(vietnamese.compare, history)).toEqual({
       codes: ['A', 'B'],
       ambiguous: false,
     });
-    expect(renumberReferencedListings([{ code: 'A', number: 1 }, { code: 'B', number: 5 }], ['A', 'B']).map(item => item.number)).toEqual([1, 5]);
+    expect(
+      renumberReferencedListings(
+        [
+          { code: 'A', number: 1 },
+          { code: 'B', number: 5 },
+        ],
+        ['A', 'B'],
+      ).map((item) => item.number),
+    ).toEqual([1, 5]);
   });
 
   it('keeps original numbers for single, comparison, and ordinal follow-ups', () => {
     const sources = ['A', 'B', 'C', 'D', 'E'].map((code, index) => ({ code, number: index + 1 }));
-    const history = [{
-      role: 'assistant',
-      content: sources.map(source => `[${source.number}] Căn ${source.code}; giá ${source.number} tỷ.`).join('\n'),
-      sources,
-    }];
-    const originalNumbers = new Map(sources.map(source => [source.code.toLowerCase(), source.number]));
+    const history = [
+      {
+        role: 'assistant',
+        content: sources.map((source) => `[${source.number}] Căn ${source.code}; giá ${source.number} tỷ.`).join('\n'),
+        sources,
+      },
+    ];
+    const originalNumbers = new Map(sources.map((source) => [source.code.toLowerCase(), source.number]));
 
     const second = referencedListingCodes('căn số 2 có sổ hồng chưa', history);
     const comparison = referencedListingCodes('so sánh căn 1 và căn 2 giúp tôi', history);
@@ -69,9 +80,15 @@ describe('Hotfix 32 regressions', () => {
     expect(comparison.codes).toEqual(['A', 'B']);
     expect(third.codes).toEqual(['C']);
     expect(renumberReferencedListings([{ code: 'B' }], second.codes, originalNumbers)[0].number).toBe(2);
-    expect(renumberReferencedListings([{ code: 'A' }, { code: 'B' }], comparison.codes, originalNumbers).map(item => item.number)).toEqual([1, 2]);
+    expect(
+      renumberReferencedListings([{ code: 'A' }, { code: 'B' }], comparison.codes, originalNumbers).map(
+        (item) => item.number,
+      ),
+    ).toEqual([1, 2]);
     expect(renumberReferencedListings([{ code: 'C' }], third.codes, originalNumbers)[0].number).toBe(3);
-    expect(sourcesFromCitations('Căn B [2].', [{ code: 'B', number: 2, price: 2_000_000_000 }])).toEqual([{ code: 'B', number: 2, price: 2_000_000_000 }]);
+    expect(sourcesFromCitations('Căn B [2].', [{ code: 'B', number: 2, price: 2_000_000_000 }])).toEqual([
+      { code: 'B', number: 2, price: 2_000_000_000 },
+    ]);
   });
 
   it('normalizes decimal areas and prices without changing citations', () => {

@@ -4,5 +4,9 @@ import { QueueModule } from '../queue/queue.module.js';
 import { CallingController } from './calling.controller.js';
 import { CallingScheduler } from './calling.scheduler.js';
 import { VoiceGateway } from './voice.gateway.js';
-@Module({ imports: [GatewayModule, QueueModule], controllers: [CallingController], providers: [CallingScheduler, VoiceGateway] })
+@Module({
+  imports: [GatewayModule, QueueModule],
+  controllers: [CallingController],
+  providers: [CallingScheduler, VoiceGateway],
+})
 export class CallingModule {}

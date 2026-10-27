@@ -8,8 +8,19 @@ const oauthErrors: Record<string, string> = {
   unavailable: 'Tài khoản chưa có quyền truy cập hoặc đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên.',
   failed: 'Đăng nhập Google chưa thành công. Vui lòng thử lại hoặc dùng email và mật khẩu.',
 };
-export default async function SignIn({ searchParams }: { searchParams: Promise<{ verification?: string; oauth?: string; next?: string }> }) {
+export default async function SignIn({
+  searchParams,
+}: {
+  searchParams: Promise<{ verification?: string; oauth?: string; next?: string }>;
+}) {
   await redirectSignedInUser('/sign-in');
   const params = await searchParams;
-  return <AuthForm mode="signin" verificationFailed={params.verification === 'failed'} oauthError={oauthErrors[params.oauth || ''] || ''} next={params.next}/>;
+  return (
+    <AuthForm
+      mode="signin"
+      verificationFailed={params.verification === 'failed'}
+      oauthError={oauthErrors[params.oauth || ''] || ''}
+      next={params.next}
+    />
+  );
 }

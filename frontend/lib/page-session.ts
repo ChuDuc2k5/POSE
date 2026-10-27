@@ -10,7 +10,7 @@ export const REFRESH_COOKIE = 'pose-refresh';
 const sessionLookup = cache(async (writable: boolean) => {
   const response = await backendFetch(`/api/auth/session?writable=${writable}`);
   if (!response.ok) throw new Error('AUTH_UNAVAILABLE');
-  return await response.json() as { user: { id: string; email?: string }; role: Role } | null;
+  return (await response.json()) as { user: { id: string; email?: string }; role: Role } | null;
 });
 export async function authenticatedSession({ writable = false }: { writable?: boolean } = {}) {
   return sessionLookup(writable);

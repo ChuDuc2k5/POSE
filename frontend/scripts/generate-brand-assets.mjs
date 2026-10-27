@@ -40,10 +40,30 @@ const taglineLetters = {
 };
 
 function wordmark() {
-  const name = [['T', 0], ['E', 114], ['R', 220], ['A', 327], ['V', 430], ['A', 534]]
-    .map(([letter, x]) => `<path d="${letters[letter]}" transform="translate(${x})"/>`).join('');
-  const tagline = [['R', 0], ['E', 43], ['A', 86], ['L', 129], ['E', 215], ['S', 258], ['T', 301], ['A', 344], ['T', 387], ['E', 430]]
-    .map(([letter, x]) => `<path d="${taglineLetters[letter]}" transform="translate(${x})"/>`).join('');
+  const name = [
+    ['T', 0],
+    ['E', 114],
+    ['R', 220],
+    ['A', 327],
+    ['V', 430],
+    ['A', 534],
+  ]
+    .map(([letter, x]) => `<path d="${letters[letter]}" transform="translate(${x})"/>`)
+    .join('');
+  const tagline = [
+    ['R', 0],
+    ['E', 43],
+    ['A', 86],
+    ['L', 129],
+    ['E', 215],
+    ['S', 258],
+    ['T', 301],
+    ['A', 344],
+    ['T', 387],
+    ['E', 430],
+  ]
+    .map(([letter, x]) => `<path d="${taglineLetters[letter]}" transform="translate(${x})"/>`)
+    .join('');
   return `<g fill="#121e2e" fill-rule="evenodd">${name}</g><g transform="translate(103 116) scale(.92)" fill="none" stroke="#7c8498" stroke-width="2.3" stroke-linejoin="round">${tagline}</g>`;
 }
 
@@ -54,12 +74,20 @@ function svg(width, height, content) {
 const assets = {
   'terava-mark.svg': svg(410, 360, mark()),
   'terava-wordmark.svg': svg(624, 145, wordmark()),
-  'terava-horizontal.svg': svg(420, 110, `<g transform="translate(0 6) scale(.27)">${mark()}</g><g transform="translate(136 25) scale(.45)">${wordmark()}</g>`),
+  'terava-horizontal.svg': svg(
+    420,
+    110,
+    `<g transform="translate(0 6) scale(.27)">${mark()}</g><g transform="translate(136 25) scale(.45)">${wordmark()}</g>`,
+  ),
 };
 for (const variant of ['navy', 'white', 'lavender']) {
   const fill = variant === 'navy' ? 'url(#tile)' : variant === 'lavender' ? 'url(#lavender)' : '#ffffff';
   const border = variant === 'navy' ? '#3b475b' : '#e4e6f0';
-  assets[`terava-icon-${variant}.svg`] = svg(128, 128, `<rect x=".5" y=".5" width="127" height="127" rx="27.5" fill="${fill}" stroke="${border}"/><g transform="translate(24 29) scale(.195)">${mark(variant === 'navy')}</g>`);
+  assets[`terava-icon-${variant}.svg`] = svg(
+    128,
+    128,
+    `<rect x=".5" y=".5" width="127" height="127" rx="27.5" fill="${fill}" stroke="${border}"/><g transform="translate(24 29) scale(.195)">${mark(variant === 'navy')}</g>`,
+  );
 }
 for (const [name, source] of Object.entries(assets)) {
   await writeFile(new URL(name, directory), source);

@@ -10,5 +10,7 @@ export async function GET(_request: WebRequest, context: { params: Promise<{ id:
     const result = await authClient().rpc('pose_similar_properties', { p_property: id, p_limit: 4 });
     if (result.error) return catalogDatabaseError(result.error);
     return catalogJson({ items: result.data || [] });
-  } catch { return catalogError('CATALOG_UNAVAILABLE', 'Chưa thể tải sản phẩm tương tự.', 503); }
+  } catch {
+    return catalogError('CATALOG_UNAVAILABLE', 'Chưa thể tải sản phẩm tương tự.', 503);
+  }
 }

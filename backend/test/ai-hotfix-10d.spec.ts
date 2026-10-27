@@ -7,15 +7,28 @@ describe('hotfix 10d budgeted area advice', () => {
   it('recognizes a budgeted where-to-buy question as a Sale ceiling', () => {
     const message = 'Tôi có 2 tỷ, nên mua BĐS ở đâu?';
     expect(areaAdviceQuestion(message)).toBe(true);
-    expect(inferSearch(message)).toMatchObject({ transaction_type: 'Sale', maxPrice: 2_000_000_000, maxPriceExclusive: false });
+    expect(inferSearch(message)).toMatchObject({
+      transaction_type: 'Sale',
+      maxPrice: 2_000_000_000,
+      maxPriceExclusive: false,
+    });
   });
 
   it('keeps an apartment type filter with an 800-million ceiling', () => {
-    expect(inferSearch('Tôi chỉ có 800 triệu, mua căn hộ ở đâu được?')).toMatchObject({ type: 'Apartment', transaction_type: 'Sale', maxPrice: 800_000_000, maxPriceExclusive: false });
+    expect(inferSearch('Tôi chỉ có 800 triệu, mua căn hộ ở đâu được?')).toMatchObject({
+      type: 'Apartment',
+      transaction_type: 'Sale',
+      maxPrice: 800_000_000,
+      maxPriceExclusive: false,
+    });
   });
 
   it('parses a bare budget for a later area-chip search', () => {
-    expect(inferSearch('có 2 tỷ')).toMatchObject({ transaction_type: 'Sale', maxPrice: 2_000_000_000, maxPriceExclusive: false });
+    expect(inferSearch('có 2 tỷ')).toMatchObject({
+      transaction_type: 'Sale',
+      maxPrice: 2_000_000_000,
+      maxPriceExclusive: false,
+    });
     expect(inferSearch('Thủ Đức')).toMatchObject({ location: 'Thủ Đức' });
   });
 
@@ -26,11 +39,18 @@ describe('hotfix 10d budgeted area advice', () => {
   });
 
   it('groups the live ward sample into former-district labels', () => {
-    expect(groupAreaRows([
-      { label: 'Phường Long Bình, Thành phố Hồ Chí Minh', count: 62, min_price: 1_200_000_000, max_price: 2_000_000_000 },
-      { label: 'Thủ Đức', count: 53, min_price: 900_000_000, max_price: 1_800_000_000 },
-      { label: 'Phường Thới An, Thành phố Hồ Chí Minh', count: 29, min_price: 700_000_000, max_price: 1_400_000_000 },
-    ])).toEqual([
+    expect(
+      groupAreaRows([
+        {
+          label: 'Phường Long Bình, Thành phố Hồ Chí Minh',
+          count: 62,
+          min_price: 1_200_000_000,
+          max_price: 2_000_000_000,
+        },
+        { label: 'Thủ Đức', count: 53, min_price: 900_000_000, max_price: 1_800_000_000 },
+        { label: 'Phường Thới An, Thành phố Hồ Chí Minh', count: 29, min_price: 700_000_000, max_price: 1_400_000_000 },
+      ]),
+    ).toEqual([
       { label: 'Thủ Đức', count: 115, min_price: 900_000_000, max_price: 2_000_000_000 },
       { label: 'Quận 12', count: 29, min_price: 700_000_000, max_price: 1_400_000_000 },
     ]);

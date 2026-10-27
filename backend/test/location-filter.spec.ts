@@ -3,7 +3,16 @@ import { locationFilter } from '../src/modules/ai/ai.service.js';
 
 describe('query location filter', () => {
   it('drops city-level Ho Chi Minh City names (the whole catalogue)', () => {
-    for (const city of ['TP.HCM', 'TP HCM', 'tp. Hồ Chí Minh', 'Thành phố Hồ Chí Minh', 'Hồ Chí Minh', 'Sài Gòn', 'HCM']) expect(locationFilter(city)).toBeUndefined();
+    for (const city of [
+      'TP.HCM',
+      'TP HCM',
+      'tp. Hồ Chí Minh',
+      'Thành phố Hồ Chí Minh',
+      'Hồ Chí Minh',
+      'Sài Gòn',
+      'HCM',
+    ])
+      expect(locationFilter(city)).toBeUndefined();
   });
   it('keeps district and area filters', () => {
     expect(locationFilter('Quận 7')).toBe('Quận 7');

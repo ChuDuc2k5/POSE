@@ -13,6 +13,4 @@ if ((!process.env.SUPABASE_URL || !process.env.SUPABASE_PUBLISHABLE_KEY) && exis
 }
 
 export const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-export const observeEnabled = Boolean(
-  process.env.OBSERVE_APP_KEY && process.env.OBSERVE_APP_SECRET,
-);
+export const observeEnabled = Boolean(process.env.OBSERVE_APP_KEY && process.env.OBSERVE_APP_SECRET);

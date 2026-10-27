@@ -1,0 +1,13 @@
+# Generated, vendored or data files
+node_modules/
+dist/
+.next/
+coverage/
+package-lock.json
+**/*.json
+# Prompt text and SQL are behaviour: never reformat them
+**/*.md
+**/*.sql
+supabase/
+backend/src/modules/ai/prompts/
+frontend/public/

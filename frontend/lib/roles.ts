@@ -1,7 +1,9 @@
 export type Role = 'User' | 'Sales' | 'Admin';
 
 export const roleLabels: Record<Role, string> = {
-  User: 'Khách hàng', Sales: 'Nhân viên tư vấn', Admin: 'Quản trị viên',
+  User: 'Khách hàng',
+  Sales: 'Nhân viên tư vấn',
+  Admin: 'Quản trị viên',
 };
 
 export function roleHome(role: Role) {

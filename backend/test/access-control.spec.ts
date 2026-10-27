@@ -1,4 +1,9 @@
-import { ForbiddenException, UnauthorizedException, ServiceUnavailableException, type ExecutionContext } from '@nestjs/common';
+import {
+  ForbiddenException,
+  UnauthorizedException,
+  ServiceUnavailableException,
+  type ExecutionContext,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard, assertResourceOwner } from '../src/auth/auth.guard.js';
 import { AccessController } from '../src/auth/access.controller.js';
@@ -9,24 +14,44 @@ describe('API authorization', () => {
   let active = true;
   let validSession = true;
   let request: { headers: Record<string, string>; principal?: unknown };
-  const context = (handler: 'me' | 'admin' | 'sales') => ({
-    getHandler: () => AccessController.prototype[handler],
-    getClass: () => AccessController,
-    switchToHttp: () => ({ getRequest: () => request }),
-  }) as unknown as ExecutionContext;
+  const context = (handler: 'me' | 'admin' | 'sales') =>
+    ({
+      getHandler: () => AccessController.prototype[handler],
+      getClass: () => AccessController,
+      switchToHttp: () => ({ getRequest: () => request }),
+    }) as unknown as ExecutionContext;
 
   beforeEach(() => {
     vi.stubEnv('SUPABASE_URL', 'https://provider.example');
     vi.stubEnv('SUPABASE_PUBLISHABLE_KEY', 'fixture-public');
-    role = 'User'; active = true; validSession = true;
+    role = 'User';
+    active = true;
+    validSession = true;
     request = { headers: { authorization: 'Bearer fixture-token' } };
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(
-      url.endsWith('/user')
-        ? { id: 'customer-id', email: 'fixture@example.test', email_confirmed_at: '2026-10-05', user_metadata: { role: 'Admin' } }
-        : { user_id: 'customer-id', role, active, session_valid: validSession },
-    ), { status: 200 })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async (url: string) =>
+          new Response(
+            JSON.stringify(
+              url.endsWith('/user')
+                ? {
+                    id: 'customer-id',
+                    email: 'fixture@example.test',
+                    email_confirmed_at: '2026-10-05',
+                    user_metadata: { role: 'Admin' },
+                  }
+                : { user_id: 'customer-id', role, active, session_valid: validSession },
+            ),
+            { status: 200 },
+          ),
+      ),
+    );
   });
-  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
 
   it('rejects anonymous requests without contacting the provider', async () => {
     request.headers = {};
@@ -52,7 +77,8 @@ describe('API authorization', () => {
   it('rejects suspended users and revoked sessions', async () => {
     active = false;
     await expect(guard.canActivate(context('me'))).rejects.toBeInstanceOf(UnauthorizedException);
-    active = true; validSession = false;
+    active = true;
+    validSession = false;
     await expect(guard.canActivate(context('me'))).rejects.toBeInstanceOf(UnauthorizedException);
   });
   it('fails closed during provider outages', async () => {
@@ -62,7 +88,9 @@ describe('API authorization', () => {
   it('rejects forged tokens and mismatched resource owners', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response('{}', { status: 401 }));
     await expect(guard.canActivate(context('me'))).rejects.toBeInstanceOf(UnauthorizedException);
-    expect(() => assertResourceOwner({ id: 'sales-a', email: '', role: 'Sales' }, 'sales-b')).toThrow(ForbiddenException);
+    expect(() => assertResourceOwner({ id: 'sales-a', email: '', role: 'Sales' }, 'sales-b')).toThrow(
+      ForbiddenException,
+    );
     expect(() => assertResourceOwner({ id: 'sales-a', email: '', role: 'Sales' }, 'sales-a')).not.toThrow();
   });
 });

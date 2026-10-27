@@ -8,7 +8,13 @@ export type CriteriaLineInput = {
 };
 
 export function showCriteriaLine(input: CriteriaLineInput): boolean {
-  return input.searchPerformed && !input.propertyId && !input.adviceOnly && input.criteria.length > 0 && !input.transactionOnly;
+  return (
+    input.searchPerformed &&
+    !input.propertyId &&
+    !input.adviceOnly &&
+    input.criteria.length > 0 &&
+    !input.transactionOnly
+  );
 }
 
 export function answerCriteriaLine(criteria: string[]): string {

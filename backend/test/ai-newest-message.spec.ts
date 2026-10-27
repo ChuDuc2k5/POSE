@@ -17,28 +17,45 @@ describe('newest message filters', () => {
 import { sourcesFromCitations } from '../src/modules/ai/guard.js';
 describe('cards without [n] citations', () => {
   const card = (number: number, code: string, price: number) => ({ number, code, price });
-  const sources = [card(1, 'CFR-72DBFF0977244296', 11000000), card(2, 'CFR-AAA1', 23500000), card(3, 'CFR-BBB2', 99000000)];
+  const sources = [
+    card(1, 'CFR-72DBFF0977244296', 11000000),
+    card(2, 'CFR-AAA1', 23500000),
+    card(3, 'CFR-BBB2', 99000000),
+  ];
   it('keeps listings named by catalogue price or code', () => {
-    const reply = 'Căn hộ cao cấp Q7 Sài Gòn Riverside, giá 11 triệu đồng/tháng.\nCăn hộ Midtown Q7-PMH, giá 23,5 triệu đồng/tháng.';
-    expect(sourcesFromCitations(reply, sources).map(s => s.code)).toEqual(['CFR-72DBFF0977244296', 'CFR-AAA1']);
-    expect(sourcesFromCitations('Xem căn CFR-BBB2 nhé.', sources).map(s => s.code)).toEqual(['CFR-BBB2']);
+    const reply =
+      'Căn hộ cao cấp Q7 Sài Gòn Riverside, giá 11 triệu đồng/tháng.\nCăn hộ Midtown Q7-PMH, giá 23,5 triệu đồng/tháng.';
+    expect(sourcesFromCitations(reply, sources).map((s) => s.code)).toEqual(['CFR-72DBFF0977244296', 'CFR-AAA1']);
+    expect(sourcesFromCitations('Xem căn CFR-BBB2 nhé.', sources).map((s) => s.code)).toEqual(['CFR-BBB2']);
   });
   it('still shows no card for a reply that names none', () => {
     expect(sourcesFromCitations('Hiện chưa có căn phù hợp.', sources)).toEqual([]);
   });
 });
 
-import { clarificationFor, customerNameFromHistory, missingBudgetQuestion, referencedListingCodes, searchCriteriaFromHistory } from '../src/modules/ai/history-aware.js';
+import {
+  clarificationFor,
+  customerNameFromHistory,
+  missingBudgetQuestion,
+  referencedListingCodes,
+  searchCriteriaFromHistory,
+} from '../src/modules/ai/history-aware.js';
 import { ownerRequest, ownerValuationQuestion, listingFollowUpFallback } from '../src/modules/ai/unsupported.js';
 import { explicitWriteIntent } from '../src/modules/ai/guard.js';
 describe('picking a listing that was just shown', () => {
-  const history = [{ role: 'user', content: 'Cho thuê căn hộ 2 phòng ngủ Quận 7' }, { role: 'assistant', content: 'Có 5 căn ở Quận 7.\nMã: CFR-AAA11111, CFR-BBB22222' }];
+  const history = [
+    { role: 'user', content: 'Cho thuê căn hộ 2 phòng ngủ Quận 7' },
+    { role: 'assistant', content: 'Có 5 căn ở Quận 7.\nMã: CFR-AAA11111, CFR-BBB22222' },
+  ];
   const message = 'tôi quan tâm căn này\nCăn hộ 2 phòng ngủ tại CC Midtown Phú Mỹ Hưng, giá 26 triệu đồng/tháng.';
   it('does not ask for the area again', () => {
     expect(clarificationFor(message, history).needed).toBe(false);
   });
   it('treats "quan tâm" as a reference to the listings just shown', () => {
-    expect(referencedListingCodes(message, history)).toEqual({ codes: ['CFR-AAA11111', 'CFR-BBB22222'], ambiguous: true });
+    expect(referencedListingCodes(message, history)).toEqual({
+      codes: ['CFR-AAA11111', 'CFR-BBB22222'],
+      ambiguous: true,
+    });
   });
 });
 
@@ -77,19 +94,32 @@ describe('search clarification', () => {
       { role: 'user', content: 'Tôi muốn thuê nhà' },
       { role: 'assistant', content: 'Bạn đang tìm nhà thuê ở khu vực nào và ngân sách khoảng bao nhiêu mỗi tháng ạ?' },
       { role: 'user', content: 'Dưới 10 triệu' },
-      { role: 'assistant', content: 'Bạn muốn thuê ở khu vực nào (quận/phường)? Nếu chưa chắc, mình gợi ý vài khu nhé.' },
+      {
+        role: 'assistant',
+        content: 'Bạn muốn thuê ở khu vực nào (quận/phường)? Nếu chưa chắc, mình gợi ý vài khu nhé.',
+      },
     ];
     expect(clarificationFor('Ở Quận 9', history).needed).toBe(false);
-    expect(searchCriteriaFromHistory('Ở Quận 9', history)).toMatchObject({ transaction_type: 'Rent', maxPrice: 10000000, location: 'Quận 9' });
+    expect(searchCriteriaFromHistory('Ở Quận 9', history)).toMatchObject({
+      transaction_type: 'Rent',
+      maxPrice: 10000000,
+      location: 'Quận 9',
+    });
   });
   it('searches without an area when the area answer is vague', () => {
     const history = [
       { role: 'user', content: 'Tôi muốn thuê nhà' },
-      { role: 'assistant', content: 'Bạn muốn thuê ở khu vực nào (quận/phường)? Nếu chưa chắc, mình gợi ý vài khu nhé.' },
+      {
+        role: 'assistant',
+        content: 'Bạn muốn thuê ở khu vực nào (quận/phường)? Nếu chưa chắc, mình gợi ý vài khu nhé.',
+      },
       { role: 'user', content: 'Dưới 10 triệu' },
     ];
     expect(clarificationFor('Chưa rõ, gợi ý giúp tôi', history).needed).toBe(false);
-    expect(searchCriteriaFromHistory('Chưa rõ, gợi ý giúp tôi', history)).toMatchObject({ transaction_type: 'Rent', maxPrice: 10000000 });
+    expect(searchCriteriaFromHistory('Chưa rõ, gợi ý giúp tôi', history)).toMatchObject({
+      transaction_type: 'Rent',
+      maxPrice: 10000000,
+    });
     expect(searchCriteriaFromHistory('Chưa rõ, gợi ý giúp tôi', history).location).toBeUndefined();
   });
   it('asks for budget after an area-only answer in the first clarification flow', () => {
@@ -107,13 +137,20 @@ describe('search clarification', () => {
       { role: 'user', content: 'Tôi muốn thuê nhà dưới 10 triệu ở Quận 9' },
       { role: 'assistant', content: 'Mình đã tìm thấy các căn phù hợp.' },
     ];
-    expect(searchCriteriaFromHistory('Tìm nhà mua ở Quận 7', history)).toMatchObject({ transaction_type: 'Sale', location: 'Quận 7' });
+    expect(searchCriteriaFromHistory('Tìm nhà mua ở Quận 7', history)).toMatchObject({
+      transaction_type: 'Sale',
+      location: 'Quận 7',
+    });
     expect(searchCriteriaFromHistory('Tìm nhà mua ở Quận 7', history)).not.toHaveProperty('type');
     expect(searchCriteriaFromHistory('Tìm nhà mua ở Quận 7', history).maxPrice).toBeUndefined();
   });
   it('searches immediately when all criteria are in one message', () => {
     expect(clarificationFor('Thuê nhà Quận 7 dưới 15 triệu', []).needed).toBe(false);
-    expect(searchCriteriaFromHistory('Thuê nhà Quận 7 dưới 15 triệu', [])).toMatchObject({ transaction_type: 'Rent', location: 'Quận 7', maxPrice: 15000000 });
+    expect(searchCriteriaFromHistory('Thuê nhà Quận 7 dưới 15 triệu', [])).toMatchObject({
+      transaction_type: 'Rent',
+      location: 'Quận 7',
+      maxPrice: 15000000,
+    });
     expect(searchCriteriaFromHistory('Thuê nhà Quận 7 dưới 15 triệu', [])).not.toHaveProperty('type');
   });
   it('merges an explicit budget range and cheaper refinement without changing the active area', () => {
@@ -125,23 +162,51 @@ describe('search clarification', () => {
       { role: 'user', content: 'Ở Quận 9' },
       { role: 'assistant', content: 'Nhà thuê ở Quận 9.' },
     ];
-    expect(searchCriteriaFromHistory('Giá 5-8 triệu', history)).toMatchObject({ transaction_type: 'Rent', location: 'Quận 9', minPrice: 5000000, maxPrice: 8000000 });
-    expect(searchCriteriaFromHistory('Rẻ hơn', history)).toMatchObject({ transaction_type: 'Rent', location: 'Quận 9' });
+    expect(searchCriteriaFromHistory('Giá 5-8 triệu', history)).toMatchObject({
+      transaction_type: 'Rent',
+      location: 'Quận 9',
+      minPrice: 5000000,
+      maxPrice: 8000000,
+    });
+    expect(searchCriteriaFromHistory('Rẻ hơn', history)).toMatchObject({
+      transaction_type: 'Rent',
+      location: 'Quận 9',
+    });
   });
   it('extracts a stated Vietnamese name but rejects role words', () => {
-    expect(customerNameFromHistory('Mình muốn mua nhà', [{ role: 'user', content: 'Tôi là tên là minh quân, bạn dùng tên tôi nhé' }])).toBe('Minh Quân');
+    expect(
+      customerNameFromHistory('Mình muốn mua nhà', [
+        { role: 'user', content: 'Tôi là tên là minh quân, bạn dùng tên tôi nhé' },
+      ]),
+    ).toBe('Minh Quân');
     expect(customerNameFromHistory('Muốn thuê nhà', [{ role: 'user', content: 'Tôi là sinh viên' }])).toBeNull();
-    expect(clarificationFor('Mua căn nhà 10 tỷ', [{ role: 'user', content: 'Tôi là tên là minh quân' }]).question).toMatch(/^Minh Quân/);
+    expect(
+      clarificationFor('Mua căn nhà 10 tỷ', [{ role: 'user', content: 'Tôi là tên là minh quân' }]).question,
+    ).toMatch(/^Minh Quân/);
   });
   it('stages a generic request before recommending sale listings', () => {
     const first = clarificationFor('Gợi ý mua nhà', []);
     expect(first.needed).toBe(true);
     expect(first.options).toContain('Dưới 3 tỷ');
-    expect(clarificationFor('Quận 7', [{ role: 'user', content: 'Gợi ý mua nhà' }, { role: 'assistant', content: first.question! }])).toMatchObject({ needed: true });
-    expect(clarificationFor('Chưa rõ, gợi ý giúp tôi', [{ role: 'user', content: 'Gợi ý mua nhà' }, { role: 'assistant', content: first.question! }]).needed).toBe(false);
+    expect(
+      clarificationFor('Quận 7', [
+        { role: 'user', content: 'Gợi ý mua nhà' },
+        { role: 'assistant', content: first.question! },
+      ]),
+    ).toMatchObject({ needed: true });
+    expect(
+      clarificationFor('Chưa rõ, gợi ý giúp tôi', [
+        { role: 'user', content: 'Gợi ý mua nhà' },
+        { role: 'assistant', content: first.question! },
+      ]).needed,
+    ).toBe(false);
   });
   it('answers a follow-up about the listing in history instead of clarifying', () => {
-    expect(clarificationFor('Tiền cọc mấy tháng và hợp đồng thuê tối thiểu bao lâu?', [{ role: 'user', content: 'Chi tiết căn CFR-0FC7C10BB520419B' }]).needed).toBe(false);
+    expect(
+      clarificationFor('Tiền cọc mấy tháng và hợp đồng thuê tối thiểu bao lâu?', [
+        { role: 'user', content: 'Chi tiết căn CFR-0FC7C10BB520419B' },
+      ]).needed,
+    ).toBe(false);
   });
   it('keeps the property type the customer named', () => {
     expect(clarificationFor('Tôi muốn thuê nhà', []).question).toContain('nhà thuê');
@@ -151,13 +216,19 @@ describe('search clarification', () => {
     expect(missingBudgetQuestion('Thuê căn hộ ở Quận 7', [])).toMatch(/ngân sách thuê/i);
   });
   it('does not loop after a vague clarification reply', () => {
-    expect(clarificationFor('Chưa rõ, gợi ý giúp tôi', [{ role: 'assistant', content: 'Bạn muốn khu vực nào?' }]).needed).toBe(false);
+    expect(
+      clarificationFor('Chưa rõ, gợi ý giúp tôi', [{ role: 'assistant', content: 'Bạn muốn khu vực nào?' }]).needed,
+    ).toBe(false);
   });
   it('moves a cheaper follow-up below the previous result range', async () => {
     const { budgetFollowUp } = await import('../src/modules/ai/history-aware.js');
     const result = budgetFollowUp('Có căn nào rẻ hơn không?', [
       { role: 'user', content: 'Tôi muốn thuê chung cư Quận 7 khoảng 15 triệu' },
-      { role: 'assistant', content: 'Mình tìm thấy mức khoảng 15 triệu.', sources: [{ price: 14000000 }, { price: 16000000 }] },
+      {
+        role: 'assistant',
+        content: 'Mình tìm thấy mức khoảng 15 triệu.',
+        sources: [{ price: 14000000 }, { price: 16000000 }],
+      },
     ]);
     expect(result?.direction).toBe('cheaper');
     expect(result?.filters.maxPrice).toBeLessThan(14000000);
@@ -166,7 +237,11 @@ describe('search clarification', () => {
     const { budgetFollowUp } = await import('../src/modules/ai/history-aware.js');
     const result = budgetFollowUp('Cao cấp hơn chút', [
       { role: 'user', content: 'Tôi muốn thuê chung cư Quận 7 khoảng 15 triệu' },
-      { role: 'assistant', content: 'Mình tìm thấy mức khoảng 15 triệu.', sources: [{ price: 14000000 }, { price: 16000000 }] },
+      {
+        role: 'assistant',
+        content: 'Mình tìm thấy mức khoảng 15 triệu.',
+        sources: [{ price: 14000000 }, { price: 16000000 }],
+      },
     ]);
     expect(result?.direction).toBe('higher');
     expect(result?.filters.minPrice).toBeGreaterThan(16000000);
@@ -186,7 +261,10 @@ describe('seller and viewing intents', () => {
     expect(ownerValuationQuestion('Giá cho thuê 15 triệu có hợp lý không?')).toBe(true);
   });
   it('keeps a listing follow-up grounded when the answer needs a fallback', () => {
-    const reply = listingFollowUpFallback([{ number: 1, name: 'Căn Midtown', price: 11000000, transaction_type: 'Rent', price_period: 'Month' }], 'phí quản lý, gửi xe, điện nước');
+    const reply = listingFollowUpFallback(
+      [{ number: 1, name: 'Căn Midtown', price: 11000000, transaction_type: 'Rent', price_period: 'Month' }],
+      'phí quản lý, gửi xe, điện nước',
+    );
     expect(reply).toContain('[1]');
     expect(reply).toContain('11');
     expect(reply).toContain('chưa có thông tin');
@@ -203,21 +281,33 @@ describe('abusive messages and refusals', () => {
   });
   it('drops cards from a refusal even for a referenced listing', () => {
     const card = [{ number: 1, code: 'RVL-69B7C6BB8461439E', price: 7000000000 }];
-    expect(sourcesFromCitations('Tôi rất tiếc, tôi không thể hỗ trợ yêu cầu này. Nếu bạn cần tư vấn về bất động sản, tôi sẵn sàng giúp bạn.', card, true)).toEqual([]);
+    expect(
+      sourcesFromCitations(
+        'Tôi rất tiếc, tôi không thể hỗ trợ yêu cầu này. Nếu bạn cần tư vấn về bất động sản, tôi sẵn sàng giúp bạn.',
+        card,
+        true,
+      ),
+    ).toEqual([]);
     expect(sourcesFromCitations('Căn này giá 7 tỷ, chưa có thông tin về sổ hồng.', card, true)).toEqual(card);
   });
 });
 
 describe('booking a named listing', () => {
   it('never asks for the area again', () => {
-    const history = [{ role: 'user', content: 'thuê nhà ở Quận 9' }, { role: 'assistant', content: 'Có 1 căn ở Quận 9.' }];
+    const history = [
+      { role: 'user', content: 'thuê nhà ở Quận 9' },
+      { role: 'assistant', content: 'Có 1 căn ở Quận 9.' },
+    ];
     expect(clarificationFor('Đặt lịch xem căn RVL-69B7C6BB8461439E', history).needed).toBe(false);
     expect(clarificationFor('Tôi muốn đặt lịch xem nhà', history).needed).toBe(false);
   });
 });
 
 describe('project and ward names count as a location', () => {
-  const history = [{ role: 'user', content: 'thuê nhà ở Quận 9' }, { role: 'assistant', content: 'Có 1 căn ở Quận 9.' }];
+  const history = [
+    { role: 'user', content: 'thuê nhà ở Quận 9' },
+    { role: 'assistant', content: 'Có 1 căn ở Quận 9.' },
+  ];
   it('does not ask for the area again', () => {
     expect(clarificationFor('Bán căn hộ studio Vinhomes Grand Park dưới 2 tỷ', history).needed).toBe(false);
     expect(clarificationFor('Thuê căn hộ ở Phú Mỹ Hưng', history).needed).toBe(false);

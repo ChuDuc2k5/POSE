@@ -15,35 +15,57 @@ import * as inbox from './admin-inquiries.handlers.js';
 export class CustomerController {
   @Post('guest/inquiries')
   @Public()
-  guestSubmit(@Req() request:Request,@Res() response:Response){return dispatch(request,response,guest.POST);}
+  guestSubmit(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, guest.POST);
+  }
   @Get('guest/inquiries')
   @Public()
-  guestList(@Req() request:Request,@Res() response:Response){return dispatch(request,response,guest.GET);}
+  guestList(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, guest.GET);
+  }
   @Get('admin/inquiries')
   @Public()
-  adminInquiries(@Req() request:Request,@Res() response:Response){return dispatch(request,response,inbox.GET);}
+  adminInquiries(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, inbox.GET);
+  }
   @Post('admin/inquiries/:id/read')
   @Public()
-  readInquiry(@Req() request:Request,@Res() response:Response){return dispatch(request,response,inbox.READ);}
+  readInquiry(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, inbox.READ);
+  }
   @Get('customer/favorites')
   @Public()
-  listFavorites(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, favorites.GET); }
+  listFavorites(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, favorites.GET);
+  }
   @Get('customer/inquiries')
   @Public()
-  listInquiries(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, inquiries.GET); }
+  listInquiries(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, inquiries.GET);
+  }
   @Post('customer/inquiries')
   @Public()
-  submitInquiry(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, inquiries.POST); }
+  submitInquiry(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, inquiries.POST);
+  }
   @Post('customer/inquiries/:id/confirm')
   @Public()
-  confirmInquiry(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, confirmation.POST); }
+  confirmInquiry(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, confirmation.POST);
+  }
   @Get('customer/favorites/status')
   @Public()
-  favoriteStatus(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, favoriteStatus.GET); }
+  favoriteStatus(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, favoriteStatus.GET);
+  }
   @Put('customer/favorites/:id')
   @Public()
-  saveFavorite(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, favorite.PUT); }
+  saveFavorite(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, favorite.PUT);
+  }
   @Delete('customer/favorites/:id')
   @Public()
-  removeFavorite(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, favorite.DELETE); }
+  removeFavorite(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, favorite.DELETE);
+  }
 }

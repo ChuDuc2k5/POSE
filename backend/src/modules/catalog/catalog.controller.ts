@@ -19,44 +19,72 @@ import * as lifecycle from './catalog-lifecycle.handlers.js';
 export class CatalogController {
   @Delete('admin/catalog/properties/:id')
   @Public()
-  trashProperty(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, lifecycle.DELETE); }
+  trashProperty(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, lifecycle.DELETE);
+  }
   @Post('admin/catalog/properties/:id/restore')
   @Public()
-  restoreProperty(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, lifecycle.RESTORE); }
+  restoreProperty(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, lifecycle.RESTORE);
+  }
   @Get('catalog/projects')
   @Public()
-  listProjects(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, projects.GET); }
+  listProjects(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, projects.GET);
+  }
   @Get('catalog/properties')
   @Public()
-  listProperties(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, properties.GET); }
+  listProperties(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, properties.GET);
+  }
   @Get('catalog/search')
   @Public()
-  search(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, search.GET); }
+  search(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, search.GET);
+  }
   @Get('catalog/properties/:id')
   @Public()
-  readProperty(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, property.GET); }
+  readProperty(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, property.GET);
+  }
   @Post('catalog/properties/:id/view')
   @Public()
-  recordPropertyView(@Req() request: Request, @Res() response: Response) { return dispatch<{id:string}>(request, response, propertyView.POST); }
+  recordPropertyView(@Req() request: Request, @Res() response: Response) {
+    return dispatch<{ id: string }>(request, response, propertyView.POST);
+  }
   @Get('properties/:id/similar')
   @Public()
-  similarProperties(@Req() request: Request, @Res() response: Response) { return dispatch<{id:string}>(request, response, similar.GET); }
+  similarProperties(@Req() request: Request, @Res() response: Response) {
+    return dispatch<{ id: string }>(request, response, similar.GET);
+  }
   @Get('catalog/media/:id')
   @Public()
-  downloadMedia(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, media.GET); }
+  downloadMedia(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, media.GET);
+  }
   @Get('admin/catalog/:kind')
   @Public()
-  listAdminCatalog(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, adminCatalog.GET); }
+  listAdminCatalog(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, adminCatalog.GET);
+  }
   @Post('admin/catalog/:kind')
   @Public()
-  createCatalogItem(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, adminCatalog.POST); }
+  createCatalogItem(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, adminCatalog.POST);
+  }
   @Get('admin/catalog/:kind/:id')
   @Public()
-  readCatalogItem(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, adminItem.GET); }
+  readCatalogItem(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, adminItem.GET);
+  }
   @Patch('admin/catalog/:kind/:id')
   @Public()
-  updateCatalogItem(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, adminItem.PATCH); }
+  updateCatalogItem(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, adminItem.PATCH);
+  }
   @Post('admin/catalog/properties/:id/media')
   @Public()
-  uploadPropertyMedia(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, upload.POST); }
+  uploadPropertyMedia(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, upload.POST);
+  }
 }

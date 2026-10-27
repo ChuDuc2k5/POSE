@@ -7,6 +7,10 @@ import * as handlers from './reports.handlers.js';
 @Public()
 @Controller('reports')
 export class ReportsController {
-  @Get('leads') leads(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, handlers.leads); }
-  @Get('options') options(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, handlers.options); }
+  @Get('leads') leads(@Req() req: Request, @Res() res: Response) {
+    return dispatch(req, res, handlers.leads);
+  }
+  @Get('options') options(@Req() req: Request, @Res() res: Response) {
+    return dispatch(req, res, handlers.options);
+  }
 }

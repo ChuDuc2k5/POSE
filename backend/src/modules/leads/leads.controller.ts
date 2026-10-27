@@ -8,11 +8,25 @@ import * as handlers from './leads.handlers.js';
 @Public()
 @Controller('leads')
 export class LeadsController {
-  @Get() list(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, handlers.list); }
-  @Get('options') options(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, handlers.options); }
-  @Get('property-owners') owners(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, handlers.owners); }
-  @Put('property-owners/:id') owner(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, handlers.setOwner); }
-  @Post('recheck') recheck(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, handlers.recheck); }
-  @Get(':id') detail(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, handlers.detail); }
-  @Patch(':id') mutate(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, handlers.mutate); }
+  @Get() list(@Req() req: Request, @Res() res: Response) {
+    return dispatch(req, res, handlers.list);
+  }
+  @Get('options') options(@Req() req: Request, @Res() res: Response) {
+    return dispatch(req, res, handlers.options);
+  }
+  @Get('property-owners') owners(@Req() req: Request, @Res() res: Response) {
+    return dispatch(req, res, handlers.owners);
+  }
+  @Put('property-owners/:id') owner(@Req() req: Request, @Res() res: Response) {
+    return dispatch(req, res, handlers.setOwner);
+  }
+  @Post('recheck') recheck(@Req() req: Request, @Res() res: Response) {
+    return dispatch(req, res, handlers.recheck);
+  }
+  @Get(':id') detail(@Req() req: Request, @Res() res: Response) {
+    return dispatch(req, res, handlers.detail);
+  }
+  @Patch(':id') mutate(@Req() req: Request, @Res() res: Response) {
+    return dispatch(req, res, handlers.mutate);
+  }
 }

@@ -26,20 +26,21 @@ describe('Hotfix 28 HARD30 regressions', () => {
   });
 
   it('does not attribute a customer bedroom criterion to a cited studio', () => {
-    expect(outputReason(
-      'Mình gợi ý căn Studio cửa sổ trời có 3 phòng ngủ [1].',
-      [listing],
-      'Mình cần căn hộ có 3 phòng ngủ.',
-    )).toBe('UNSUPPORTED_ROOM_COUNT');
+    expect(
+      outputReason(
+        'Mình gợi ý căn Studio cửa sổ trời có 3 phòng ngủ [1].',
+        [listing],
+        'Mình cần căn hộ có 3 phòng ngủ.',
+      ),
+    ).toBe('UNSUPPORTED_ROOM_COUNT');
   });
 
   it('rejects unmatched area and bedroom claims for nearby-area counts', () => {
-    expect(outputReason(
-      'Thủ Đức có căn hộ diện tích trên 100 m², 3 phòng ngủ, giá dưới 2 tỷ.',
-      [],
-      '',
-      { nearbyAreaCriteria: { areas: ['Thủ Đức'], matched: ['type', 'budget'], unmatched: ['area', 'bedrooms'] } } as never,
-    )).toBe('UNSUPPORTED_NEARBY_CRITERIA');
+    expect(
+      outputReason('Thủ Đức có căn hộ diện tích trên 100 m², 3 phòng ngủ, giá dưới 2 tỷ.', [], '', {
+        nearbyAreaCriteria: { areas: ['Thủ Đức'], matched: ['type', 'budget'], unmatched: ['area', 'bedrooms'] },
+      } as never),
+    ).toBe('UNSUPPORTED_NEARBY_CRITERIA');
   });
 
   it('uses the plain missing-data sentence for hedged unknown replies', () => {
@@ -49,7 +50,9 @@ describe('Hotfix 28 HARD30 regressions', () => {
       [],
       { includeAvailabilityNotice: false },
     );
-    expect(reply).toBe('Nếu dữ liệu không có, mình sẽ nói thẳng là mình chưa biết và nhờ chuyên viên kiểm tra giúp bạn.');
+    expect(reply).toBe(
+      'Nếu dữ liệu không có, mình sẽ nói thẳng là mình chưa biết và nhờ chuyên viên kiểm tra giúp bạn.',
+    );
   });
 
   it('dedupes the legal fact after trailing notes and keeps the advice', () => {

@@ -7,6 +7,8 @@ const nextConfig: NextConfig = {
   experimental: { proxyClientMaxBodySize: '22mb', proxyTimeout: 250000 },
   images: { qualities: [75, 90] },
   // Browsers still probe /favicon.ico; answer with the brand icon instead of a 404.
-  async rewrites() { return [{ source: '/favicon.ico', destination: '/brand/terava-icon-navy.svg' }]; },
+  async rewrites() {
+    return [{ source: '/favicon.ico', destination: '/brand/terava-icon-navy.svg' }];
+  },
 };
 export default nextConfig;

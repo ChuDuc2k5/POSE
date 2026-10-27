@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { historyReferenceQuestion, outsideCataloguePlace, referencedListingCodes } from '../src/modules/ai/history-aware.js';
+import {
+  historyReferenceQuestion,
+  outsideCataloguePlace,
+  referencedListingCodes,
+} from '../src/modules/ai/history-aware.js';
 
 const oneCardHistory = [
   { role: 'user', content: 'thuê căn hộ dưới 8 triệu' },
-  { role: 'assistant', content: 'Một căn hộ ở Bình Thạnh phù hợp [1].', sources: [{ id: 'card-1', code: 'HF21-BT-1', price: 5_300_000 }] },
+  {
+    role: 'assistant',
+    content: 'Một căn hộ ở Bình Thạnh phù hợp [1].',
+    sources: [{ id: 'card-1', code: 'HF21-BT-1', price: 5_300_000 }],
+  },
 ];
 
 describe('Hotfix 21 FLOW-3 routing', () => {

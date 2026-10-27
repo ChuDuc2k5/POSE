@@ -19,18 +19,47 @@ export class CallingScheduler implements OnModuleInit, OnApplicationShutdown {
   private lastResult: object | null = null;
   private lastError: string | null = null;
   private readonly logger = new Logger('CallingScheduler');
-  constructor(private readonly queues: QueueStatus, private readonly gateway: GatewayGateway) {}
-  status() { return { redis: this.enabled, dispatcherEvery, reconcileEvery, lastRunAt: this.lastRunAt, lastResult: this.lastResult, lastError: this.lastError }; }
+  constructor(
+    private readonly queues: QueueStatus,
+    private readonly gateway: GatewayGateway,
+  ) {}
+  status() {
+    return {
+      redis: this.enabled,
+      dispatcherEvery,
+      reconcileEvery,
+      lastRunAt: this.lastRunAt,
+      lastResult: this.lastResult,
+      lastError: this.lastError,
+    };
+  }
   async onModuleInit() {
     if (!this.queues.enabled || process.env.TELEPHONY_PROVIDER !== 'simulator') return;
     const name = process.env.CALLS_QUEUE_NAME || 'calls';
     try {
-      this.queue = new Queue(name, { connection: { ...queueConnection, maxRetriesPerRequest: 0, connectTimeout: 500, retryStrategy: () => null } });
-      this.queue.on('error', () => { this.enabled = false; });
-      await this.queue.upsertJobScheduler('calls-dispatch', { every: dispatcherEvery }, { name: 'dispatch', data: {}, opts: { removeOnComplete: 20, removeOnFail: 20 } });
-      await this.queue.upsertJobScheduler('calls-reconcile', { every: reconcileEvery }, { name: 'reconcile', data: {}, opts: { removeOnComplete: 20, removeOnFail: 20 } });
-      this.worker = new Worker(name, job => this.run(job.name === 'reconcile' ? 'reconcile' : 'dispatch'), { connection: { ...queueConnection, maxRetriesPerRequest: null }, concurrency: callConcurrency() });
-      this.worker.on('error', () => { this.enabled = false; });
+      this.queue = new Queue(name, {
+        connection: { ...queueConnection, maxRetriesPerRequest: 0, connectTimeout: 500, retryStrategy: () => null },
+      });
+      this.queue.on('error', () => {
+        this.enabled = false;
+      });
+      await this.queue.upsertJobScheduler(
+        'calls-dispatch',
+        { every: dispatcherEvery },
+        { name: 'dispatch', data: {}, opts: { removeOnComplete: 20, removeOnFail: 20 } },
+      );
+      await this.queue.upsertJobScheduler(
+        'calls-reconcile',
+        { every: reconcileEvery },
+        { name: 'reconcile', data: {}, opts: { removeOnComplete: 20, removeOnFail: 20 } },
+      );
+      this.worker = new Worker(name, (job) => this.run(job.name === 'reconcile' ? 'reconcile' : 'dispatch'), {
+        connection: { ...queueConnection, maxRetriesPerRequest: null },
+        concurrency: callConcurrency(),
+      });
+      this.worker.on('error', () => {
+        this.enabled = false;
+      });
       this.enabled = true;
     } catch {
       this.enabled = false;
@@ -42,13 +71,16 @@ export class CallingScheduler implements OnModuleInit, OnApplicationShutdown {
     try {
       const result = await systemClient().rpc('pose_system_call_context', { p_call: id });
       if (!result.error && result.data) await this.gateway.callStatus(result.data);
-    } catch { this.logger.warn('Chưa thể cập nhật trạng thái cuộc gọi trực tiếp.'); }
+    } catch {
+      this.logger.warn('Chưa thể cập nhật trạng thái cuộc gọi trực tiếp.');
+    }
   }
   async run(kind: 'dispatch' | 'reconcile') {
     this.lastRunAt = new Date().toISOString();
     try {
-      const result = await (kind === 'dispatch' ? dispatchDue : reconcileDue)(id => this.notify(id));
-      this.lastResult = result; this.lastError = null;
+      const result = await (kind === 'dispatch' ? dispatchDue : reconcileDue)((id) => this.notify(id));
+      this.lastResult = result;
+      this.lastError = null;
       return result;
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : 'CALLS_UNAVAILABLE';
@@ -56,12 +88,19 @@ export class CallingScheduler implements OnModuleInit, OnApplicationShutdown {
     }
   }
   async http(request: WebRequest, kind: 'dispatch' | 'reconcile') {
-    if (!cronAuthorized(request.headers.get('authorization'))) return catalogError('UNAUTHORIZED', 'Không có quyền thực thi.', 401);
-    try { return catalogJson(await this.run(kind)); }
-    catch { return catalogError('CALLS_UNAVAILABLE', 'Không thể xử lý cuộc gọi. Vui lòng thử lại.', 503); }
+    if (!cronAuthorized(request.headers.get('authorization')))
+      return catalogError('UNAUTHORIZED', 'Không có quyền thực thi.', 401);
+    try {
+      return catalogJson(await this.run(kind));
+    } catch {
+      return catalogError('CALLS_UNAVAILABLE', 'Không thể xử lý cuộc gọi. Vui lòng thử lại.', 503);
+    }
   }
   async onApplicationShutdown() {
-    await this.worker?.close(); await this.queue?.close();
-    this.worker = undefined; this.queue = undefined; this.enabled = false;
+    await this.worker?.close();
+    await this.queue?.close();
+    this.worker = undefined;
+    this.queue = undefined;
+    this.enabled = false;
   }
 }

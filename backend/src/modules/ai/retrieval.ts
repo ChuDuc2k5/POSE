@@ -3,46 +3,315 @@ import { Injectable, Optional } from '@nestjs/common';
 import { systemClient } from '../supabase/supabase.service.js';
 import { EmbeddingService } from './embeddings.js';
 import { rerank, type RerankModel } from './rerank.js';
-export type RetrievalFilters={transaction_type?:'Sale'|'Rent';type?:string;types?:string[];minPrice?:number;maxPrice?:number;maxPriceExclusive?:boolean;location?:string;locations?:string[];location_aliases?:string[];minArea?:number;maxArea?:number;bedrooms?:number;keywords?:string[];exclude_ids?:string[]};
-export type RetrievalContext={propertyId?:string|null;propertyIds?:string[]};
-export type RetrievalEmbedding={model:string;vector:string};
-export type RankedChunk={chunk_id:string;document_id:string;source_id:string|null;source_type:'Property'|'Faq';header:string;content:string;vector_rank:number|null;text_rank:number|null;similarity:number|null;embed_model?:string|null;rrf?:number;code?:string;name?:string;price?:number|null;availability?:string;updated_at?:string;location?:string;property_type?:string;transaction_type?:string;price_period?:string;area?:number|null;bedrooms?:number|null;cover_id?:string|null;citation_number?:number};
-export type RetrievalResult={found:boolean;grounding:'hybrid'|'fulltext'|'none';chunks:RankedChunk[];context:string;sources:Record<string,unknown>[];timings?:{embed?:number;rerank?:number}};
-export function currentModelRows(rows:RankedChunk[],model:string){return rows.filter(row=>row.embed_model===model||row.text_rank!=null);}
-export function reciprocalRankFusion(rows:RankedChunk[],k=60){const merged=new Map<string,RankedChunk>();for(const row of rows){const prior=merged.get(row.chunk_id);const score=(row.vector_rank?1/(k+row.vector_rank):0)+(row.text_rank?1/(k+row.text_rank):0);if(prior){prior.rrf=(prior.rrf||0)+score;prior.vector_rank??=row.vector_rank;prior.text_rank??=row.text_rank;prior.similarity??=row.similarity;}else merged.set(row.chunk_id,{...row,rrf:score});}return [...merged.values()].sort((a,b)=>(b.rrf||0)-(a.rrf||0)||a.chunk_id.localeCompare(b.chunk_id));}
-export function applyThresholds(rows:RankedChunk[],options?:{minScore?:number;relativeGap?:number;noAnswerScore?:number;minTextRank?:number;topK?:number}){const min=options?.minScore??Number(process.env.AI_RAG_MIN_SCORE||0.30),gap=options?.relativeGap??Number(process.env.AI_RAG_RELATIVE_GAP||0.15),noAnswer=options?.noAnswerScore??Number(process.env.AI_RAG_NO_ANSWER_SCORE||0.50),minTextRank=options?.minTextRank??Number(process.env.AI_RAG_MIN_TEXT_RANK||5),topK=options?.topK??Number(process.env.AI_RAG_TOP_K||5);const best=Math.max(0,...rows.map(row=>row.similarity??0)),hasText=rows.some(row=>row.text_rank!=null&&row.text_rank<=minTextRank);if(best<noAnswer&&!hasText)return [];const counts=new Map<string,number>();return rows.filter(row=>(row.text_rank!=null&&row.text_rank<=minTextRank)||(row.similarity!=null&&row.similarity>=min&&row.similarity>=best-gap)).filter(row=>{const key=row.source_id||row.document_id,n=counts.get(key)||0;if(n>=2)return false;counts.set(key,n+1);return true;}).slice(0,Math.max(1,Math.min(20,topK)));}
-export function deterministicReason(content:string){return (content.split(/(?<=[.!?。！？])\s+|\n|[•·;]/).map(part=>part.trim()).find(Boolean)||'').replace(/https?:\/\/\S+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g,'').replace(/(?:\+?\d[\d .-]{7,}\d)/g,'').replace(/\d[\d., ]*\s*(?:VND|đ|₫|tỷ|triệu|tr\.?)/gi,'').replace(/\s+/g,' ').trim().slice(0,80);}
- export function renderRetrievedContext(chunks:RankedChunk[],evidenceIds?:Set<string>){const numbers=new Map<string,number>();let next=1;const final:RankedChunk[]=[];const blocks:string[]=[];const sources:Record<string,unknown>[]=[];for(const row of chunks){if(evidenceIds&&(!row.source_id||!evidenceIds.has(row.source_id)))continue;const key=row.source_type==='Property'?row.source_id!:`${row.source_type}:${row.document_id}`;let n=numbers.get(key);if(!n){n=next++;numbers.set(key,n);sources.push({number:n,id:row.source_id,code:row.code,title:row.name||row.header,price:row.price,availability:row.availability,updated_at:row.updated_at,location:row.location,property_type:row.property_type,transaction_type:row.transaction_type,price_period:row.price_period,source_type:row.source_type,reason:(row as RankedChunk & {reason?:string}).reason,relaxed_reason:(row as RankedChunk & {relaxed_reason?:string}).relaxed_reason});}final.push({...row,citation_number:n});const live=row.source_type==='Property'?`\nGiá hiện tại: ${priceLabel(row.price,row.price_period==='Month'||row.transaction_type==='Rent')} · Tình trạng: ${row.availability} · Cập nhật: ${row.updated_at}`:'';blocks.push(`[${n}] ${row.header}\n${row.content}${live}`);}return {chunks:final,context:blocks.join('\n\n'),sources};}
-export function renderRetrievedContextWithCards(chunks:RankedChunk[],evidenceIds?:Set<string>){const rendered=renderRetrievedContext(chunks,evidenceIds);const reasons=new Map<string,string>();for(const row of rendered.chunks)if(row.source_id&&!reasons.has(row.source_id))reasons.set(row.source_id,deterministicReason(row.content));return {...rendered,sources:rendered.sources.map(source=>({...source,reason:source.id?reasons.get(String(source.id))||'':undefined}))};}
-@Injectable()
-export class RetrievalService{
-  constructor(private readonly embeddings:EmbeddingService,@Optional() private readonly injectedRpc?: (args:Record<string,unknown>)=>Promise<{data?:unknown[];error?:{message:string}}>,@Optional() private readonly injectedRerank?: RerankModel){}
-  async embed(query:string):Promise<RetrievalEmbedding|null>{try{const embedded=await this.embeddings.embed([query]);return embedded?{model:embedded.model,vector:`[${embedded.vectors[0].join(',')}]`}:null;}catch{return null;}}
-  async searchRowsWithEmbedding(query:string,filters:RetrievalFilters={},context:RetrievalContext={},embedding:RetrievalEmbedding|null=null):Promise<RankedChunk[]>{
-    const rpc=this.injectedRpc||((args)=>systemClient().rpc('pose_system_search_knowledge',args) as any);
-    const args={p_query:query,p_embedding:embedding?.vector||null,p_embed_model:embedding?.model||null,p_filters:filters,p_context:[...(context.propertyIds||[]),...(context.propertyId?[context.propertyId]:[])]};
-    let last:unknown;
-    for(let attempt=0;attempt<3;attempt++){
-      try{const result=await rpc(args);if(result.error)throw new Error(result.error.message||'RETRIEVAL_UNAVAILABLE');return reciprocalRankFusion((result.data||[]) as RankedChunk[]);}
-      catch(error){last=error;if(attempt<2)await new Promise(resolve=>setTimeout(resolve,100*(attempt+1)));}
-    }
-    throw last instanceof Error?last:new Error('RETRIEVAL_UNAVAILABLE');
+export type RetrievalFilters = {
+  transaction_type?: 'Sale' | 'Rent';
+  type?: string;
+  types?: string[];
+  minPrice?: number;
+  maxPrice?: number;
+  maxPriceExclusive?: boolean;
+  location?: string;
+  locations?: string[];
+  location_aliases?: string[];
+  minArea?: number;
+  maxArea?: number;
+  bedrooms?: number;
+  keywords?: string[];
+  exclude_ids?: string[];
+};
+export type RetrievalContext = { propertyId?: string | null; propertyIds?: string[] };
+export type RetrievalEmbedding = { model: string; vector: string };
+export type RankedChunk = {
+  chunk_id: string;
+  document_id: string;
+  source_id: string | null;
+  source_type: 'Property' | 'Faq';
+  header: string;
+  content: string;
+  vector_rank: number | null;
+  text_rank: number | null;
+  similarity: number | null;
+  embed_model?: string | null;
+  rrf?: number;
+  code?: string;
+  name?: string;
+  price?: number | null;
+  availability?: string;
+  updated_at?: string;
+  location?: string;
+  property_type?: string;
+  transaction_type?: string;
+  price_period?: string;
+  area?: number | null;
+  bedrooms?: number | null;
+  cover_id?: string | null;
+  citation_number?: number;
+};
+export type RetrievalResult = {
+  found: boolean;
+  grounding: 'hybrid' | 'fulltext' | 'none';
+  chunks: RankedChunk[];
+  context: string;
+  sources: Record<string, unknown>[];
+  timings?: { embed?: number; rerank?: number };
+};
+export function currentModelRows(rows: RankedChunk[], model: string) {
+  return rows.filter((row) => row.embed_model === model || row.text_rank != null);
+}
+export function reciprocalRankFusion(rows: RankedChunk[], k = 60) {
+  const merged = new Map<string, RankedChunk>();
+  for (const row of rows) {
+    const prior = merged.get(row.chunk_id);
+    const score = (row.vector_rank ? 1 / (k + row.vector_rank) : 0) + (row.text_rank ? 1 / (k + row.text_rank) : 0);
+    if (prior) {
+      prior.rrf = (prior.rrf || 0) + score;
+      prior.vector_rank ??= row.vector_rank;
+      prior.text_rank ??= row.text_rank;
+      prior.similarity ??= row.similarity;
+    } else merged.set(row.chunk_id, { ...row, rrf: score });
   }
-  async searchWithEmbedding(query:string,filters:RetrievalFilters={},context:RetrievalContext={},embedding:RetrievalEmbedding|null=null):Promise<RetrievalResult>{const ranked=await this.searchRowsWithEmbedding(query,filters,context,embedding);const canSkip=process.env.AI_MODEL!=='fixture' && !this.injectedRerank;const strict=canSkip && Boolean((filters.location||filters.locations?.length) && (filters.minPrice!==undefined||filters.maxPrice!==undefined));const clear=canSkip && ranked.length<=4 && ranked.length>0 && ranked.every(row=>(row.similarity??0)>=Number(process.env.AI_RAG_MIN_SCORE||0.3));const filtered=applyThresholds(ranked);const rerankStarted=performance.now();const result=(strict||clear)?{chunks:filtered,found:filtered.length>0,hasAnswer:true,fallback:false,latencyMs:0}:{...(await rerank(query,ranked,{model:this.injectedRerank})),latencyMs:performance.now()-rerankStarted};const faq=ranked.filter(row=>row.source_type==='Faq'&&((row.similarity??0)>=Number(process.env.AI_FAQ_MIN_SCORE||0.4)||(row.text_rank!=null&&row.text_rank<=3))).sort((a,b)=>(b.similarity??0)-(a.similarity??0)).slice(0,2);const chunks=[...result.chunks,...faq.filter(row=>!result.chunks.some(item=>item.chunk_id===row.chunk_id))];const timings={rerank:performance.now()-rerankStarted};if(!chunks.length)return {found:false,grounding:'none',chunks:[],context:'',sources:[],timings};const rendered=renderRetrievedContextWithCards(chunks);return {found:result.found,grounding:embedding?'hybrid':'fulltext',...rendered,timings};}
-  async search(query:string,filters:RetrievalFilters={},context:RetrievalContext={}):Promise<RetrievalResult>{const embedStarted=performance.now();const embedding=await this.embed(query);const result=await this.searchWithEmbedding(query,filters,context,embedding);return {...result,timings:{embed:performance.now()-embedStarted-(result.timings?.rerank||0),...result.timings}};}
+  return [...merged.values()].sort((a, b) => (b.rrf || 0) - (a.rrf || 0) || a.chunk_id.localeCompare(b.chunk_id));
+}
+export function applyThresholds(
+  rows: RankedChunk[],
+  options?: { minScore?: number; relativeGap?: number; noAnswerScore?: number; minTextRank?: number; topK?: number },
+) {
+  const min = options?.minScore ?? Number(process.env.AI_RAG_MIN_SCORE || 0.3),
+    gap = options?.relativeGap ?? Number(process.env.AI_RAG_RELATIVE_GAP || 0.15),
+    noAnswer = options?.noAnswerScore ?? Number(process.env.AI_RAG_NO_ANSWER_SCORE || 0.5),
+    minTextRank = options?.minTextRank ?? Number(process.env.AI_RAG_MIN_TEXT_RANK || 5),
+    topK = options?.topK ?? Number(process.env.AI_RAG_TOP_K || 5);
+  const best = Math.max(0, ...rows.map((row) => row.similarity ?? 0)),
+    hasText = rows.some((row) => row.text_rank != null && row.text_rank <= minTextRank);
+  if (best < noAnswer && !hasText) return [];
+  const counts = new Map<string, number>();
+  return rows
+    .filter(
+      (row) =>
+        (row.text_rank != null && row.text_rank <= minTextRank) ||
+        (row.similarity != null && row.similarity >= min && row.similarity >= best - gap),
+    )
+    .filter((row) => {
+      const key = row.source_id || row.document_id,
+        n = counts.get(key) || 0;
+      if (n >= 2) return false;
+      counts.set(key, n + 1);
+      return true;
+    })
+    .slice(0, Math.max(1, Math.min(20, topK)));
+}
+export function deterministicReason(content: string) {
+  return (
+    content
+      .split(/(?<=[.!?。！？])\s+|\n|[•·;]/)
+      .map((part) => part.trim())
+      .find(Boolean) || ''
+  )
+    .replace(/https?:\/\/\S+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '')
+    .replace(/(?:\+?\d[\d .-]{7,}\d)/g, '')
+    .replace(/\d[\d., ]*\s*(?:VND|đ|₫|tỷ|triệu|tr\.?)/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+}
+export function renderRetrievedContext(chunks: RankedChunk[], evidenceIds?: Set<string>) {
+  const numbers = new Map<string, number>();
+  let next = 1;
+  const final: RankedChunk[] = [];
+  const blocks: string[] = [];
+  const sources: Record<string, unknown>[] = [];
+  for (const row of chunks) {
+    if (evidenceIds && (!row.source_id || !evidenceIds.has(row.source_id))) continue;
+    const key = row.source_type === 'Property' ? row.source_id! : `${row.source_type}:${row.document_id}`;
+    let n = numbers.get(key);
+    if (!n) {
+      n = next++;
+      numbers.set(key, n);
+      sources.push({
+        number: n,
+        id: row.source_id,
+        code: row.code,
+        title: row.name || row.header,
+        price: row.price,
+        availability: row.availability,
+        updated_at: row.updated_at,
+        location: row.location,
+        property_type: row.property_type,
+        transaction_type: row.transaction_type,
+        price_period: row.price_period,
+        source_type: row.source_type,
+        reason: (row as RankedChunk & { reason?: string }).reason,
+        relaxed_reason: (row as RankedChunk & { relaxed_reason?: string }).relaxed_reason,
+      });
+    }
+    final.push({ ...row, citation_number: n });
+    const live =
+      row.source_type === 'Property'
+        ? `\nGiá hiện tại: ${priceLabel(row.price, row.price_period === 'Month' || row.transaction_type === 'Rent')} · Tình trạng: ${row.availability} · Cập nhật: ${row.updated_at}`
+        : '';
+    blocks.push(`[${n}] ${row.header}\n${row.content}${live}`);
+  }
+  return { chunks: final, context: blocks.join('\n\n'), sources };
+}
+export function renderRetrievedContextWithCards(chunks: RankedChunk[], evidenceIds?: Set<string>) {
+  const rendered = renderRetrievedContext(chunks, evidenceIds);
+  const reasons = new Map<string, string>();
+  for (const row of rendered.chunks)
+    if (row.source_id && !reasons.has(row.source_id)) reasons.set(row.source_id, deterministicReason(row.content));
+  return {
+    ...rendered,
+    sources: rendered.sources.map((source) => ({
+      ...source,
+      reason: source.id ? reasons.get(String(source.id)) || '' : undefined,
+    })),
+  };
+}
+@Injectable()
+export class RetrievalService {
+  constructor(
+    private readonly embeddings: EmbeddingService,
+    @Optional()
+    private readonly injectedRpc?: (
+      args: Record<string, unknown>,
+    ) => Promise<{ data?: unknown[]; error?: { message: string } }>,
+    @Optional() private readonly injectedRerank?: RerankModel,
+  ) {}
+  async embed(query: string): Promise<RetrievalEmbedding | null> {
+    try {
+      const embedded = await this.embeddings.embed([query]);
+      return embedded ? { model: embedded.model, vector: `[${embedded.vectors[0].join(',')}]` } : null;
+    } catch {
+      return null;
+    }
+  }
+  async searchRowsWithEmbedding(
+    query: string,
+    filters: RetrievalFilters = {},
+    context: RetrievalContext = {},
+    embedding: RetrievalEmbedding | null = null,
+  ): Promise<RankedChunk[]> {
+    const rpc = this.injectedRpc || ((args) => systemClient().rpc('pose_system_search_knowledge', args) as any);
+    const args = {
+      p_query: query,
+      p_embedding: embedding?.vector || null,
+      p_embed_model: embedding?.model || null,
+      p_filters: filters,
+      p_context: [...(context.propertyIds || []), ...(context.propertyId ? [context.propertyId] : [])],
+    };
+    let last: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const result = await rpc(args);
+        if (result.error) throw new Error(result.error.message || 'RETRIEVAL_UNAVAILABLE');
+        return reciprocalRankFusion((result.data || []) as RankedChunk[]);
+      } catch (error) {
+        last = error;
+        if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+      }
+    }
+    throw last instanceof Error ? last : new Error('RETRIEVAL_UNAVAILABLE');
+  }
+  async searchWithEmbedding(
+    query: string,
+    filters: RetrievalFilters = {},
+    context: RetrievalContext = {},
+    embedding: RetrievalEmbedding | null = null,
+  ): Promise<RetrievalResult> {
+    const ranked = await this.searchRowsWithEmbedding(query, filters, context, embedding);
+    const canSkip = process.env.AI_MODEL !== 'fixture' && !this.injectedRerank;
+    const strict =
+      canSkip &&
+      Boolean(
+        (filters.location || filters.locations?.length) &&
+        (filters.minPrice !== undefined || filters.maxPrice !== undefined),
+      );
+    const clear =
+      canSkip &&
+      ranked.length <= 4 &&
+      ranked.length > 0 &&
+      ranked.every((row) => (row.similarity ?? 0) >= Number(process.env.AI_RAG_MIN_SCORE || 0.3));
+    const filtered = applyThresholds(ranked);
+    const rerankStarted = performance.now();
+    const result =
+      strict || clear
+        ? { chunks: filtered, found: filtered.length > 0, hasAnswer: true, fallback: false, latencyMs: 0 }
+        : {
+            ...(await rerank(query, ranked, { model: this.injectedRerank })),
+            latencyMs: performance.now() - rerankStarted,
+          };
+    const faq = ranked
+      .filter(
+        (row) =>
+          row.source_type === 'Faq' &&
+          ((row.similarity ?? 0) >= Number(process.env.AI_FAQ_MIN_SCORE || 0.4) ||
+            (row.text_rank != null && row.text_rank <= 3)),
+      )
+      .sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0))
+      .slice(0, 2);
+    const chunks = [
+      ...result.chunks,
+      ...faq.filter((row) => !result.chunks.some((item) => item.chunk_id === row.chunk_id)),
+    ];
+    const timings = { rerank: performance.now() - rerankStarted };
+    if (!chunks.length) return { found: false, grounding: 'none', chunks: [], context: '', sources: [], timings };
+    const rendered = renderRetrievedContextWithCards(chunks);
+    return { found: result.found, grounding: embedding ? 'hybrid' : 'fulltext', ...rendered, timings };
+  }
+  async search(
+    query: string,
+    filters: RetrievalFilters = {},
+    context: RetrievalContext = {},
+  ): Promise<RetrievalResult> {
+    const embedStarted = performance.now();
+    const embedding = await this.embed(query);
+    const result = await this.searchWithEmbedding(query, filters, context, embedding);
+    return {
+      ...result,
+      timings: { embed: performance.now() - embedStarted - (result.timings?.rerank || 0), ...result.timings },
+    };
+  }
   // A question about one known listing (the detail page being viewed, or the single listing just
   // discussed): no rerank and no other listings, only that listing's own text plus the closest FAQs.
-  async focused(query:string,propertyIds:string[]):Promise<{own:RankedChunk[];faq:RankedChunk[]}>{
-    const rows=await this.searchRowsWithEmbedding(query,{},{propertyIds},await this.embed(query));
-    const faq=rows.filter(row=>row.source_type==='Faq'&&((row.similarity??0)>=Number(process.env.AI_FAQ_MIN_SCORE||0.4)||(row.text_rank!=null&&row.text_rank<=3))).sort((a,b)=>(b.similarity??0)-(a.similarity??0)).slice(0,2);
-    const own=rows.filter(row=>row.source_id&&propertyIds.includes(row.source_id));
-    const missing=propertyIds.filter(id=>!own.some(row=>row.source_id===id));
-    if(missing.length&&!this.injectedRpc){
-      const docs=await systemClient().from('kb_documents').select('id,source_id').eq('source_type','Property').in('source_id',missing);
-      const ids=(docs.data||[]).map(doc=>doc.id as string);
-      const chunks=ids.length?await systemClient().from('kb_chunks').select('id,document_id,header,content').in('document_id',ids).order('chunk_index'):{data:[]};
-      for(const chunk of (chunks.data||[]) as {id:string;document_id:string;header:string;content:string}[])own.push({chunk_id:chunk.id,document_id:chunk.document_id,source_id:(docs.data||[]).find(doc=>doc.id===chunk.document_id)?.source_id as string,source_type:'Property',header:chunk.header,content:chunk.content,vector_rank:null,text_rank:null,similarity:null});
+  async focused(query: string, propertyIds: string[]): Promise<{ own: RankedChunk[]; faq: RankedChunk[] }> {
+    const rows = await this.searchRowsWithEmbedding(query, {}, { propertyIds }, await this.embed(query));
+    const faq = rows
+      .filter(
+        (row) =>
+          row.source_type === 'Faq' &&
+          ((row.similarity ?? 0) >= Number(process.env.AI_FAQ_MIN_SCORE || 0.4) ||
+            (row.text_rank != null && row.text_rank <= 3)),
+      )
+      .sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0))
+      .slice(0, 2);
+    const own = rows.filter((row) => row.source_id && propertyIds.includes(row.source_id));
+    const missing = propertyIds.filter((id) => !own.some((row) => row.source_id === id));
+    if (missing.length && !this.injectedRpc) {
+      const docs = await systemClient()
+        .from('kb_documents')
+        .select('id,source_id')
+        .eq('source_type', 'Property')
+        .in('source_id', missing);
+      const ids = (docs.data || []).map((doc) => doc.id as string);
+      const chunks = ids.length
+        ? await systemClient()
+            .from('kb_chunks')
+            .select('id,document_id,header,content')
+            .in('document_id', ids)
+            .order('chunk_index')
+        : { data: [] };
+      for (const chunk of (chunks.data || []) as { id: string; document_id: string; header: string; content: string }[])
+        own.push({
+          chunk_id: chunk.id,
+          document_id: chunk.document_id,
+          source_id: (docs.data || []).find((doc) => doc.id === chunk.document_id)?.source_id as string,
+          source_type: 'Property',
+          header: chunk.header,
+          content: chunk.content,
+          vector_rank: null,
+          text_rank: null,
+          similarity: null,
+        });
     }
-    return {own,faq};
+    return { own, faq };
   }
 }

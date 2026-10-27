@@ -12,20 +12,32 @@ import * as contactConsents from './contact-consents.handlers.js';
 export class AccountController {
   @Post('account/avatar')
   @Public()
-  uploadAvatar(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, avatar.POST); }
+  uploadAvatar(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, avatar.POST);
+  }
   @Get('account/profile')
   @Public()
-  readProfile(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, profile.GET); }
+  readProfile(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, profile.GET);
+  }
   @Patch('account/profile')
   @Public()
-  updateProfile(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, profile.PATCH); }
+  updateProfile(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, profile.PATCH);
+  }
   @Post('account/phone/:action')
   @Public()
-  phoneAction(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, phone.POST); }
+  phoneAction(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, phone.POST);
+  }
   @Get('account/contact-consents')
   @Public()
-  readContactConsents(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, contactConsents.GET); }
+  readContactConsents(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, contactConsents.GET);
+  }
   @Post('account/contact-consents')
   @Public()
-  writeContactConsent(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, contactConsents.POST); }
+  writeContactConsent(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, contactConsents.POST);
+  }
 }

@@ -1,14 +1,20 @@
-type BedroomText = { name?: string | null; header?: string | null; description?: string | null; details?: string | null; bedrooms?: number | null };
+type BedroomText = {
+  name?: string | null;
+  header?: string | null;
+  description?: string | null;
+  details?: string | null;
+  bedrooms?: number | null;
+};
 
 const roomCountPattern = /(?<![\p{L}\d])(\d+)\s*(?:PN|phòng\s*ngủ|phòng)(?![\p{L}\d])/iu;
 const studioPattern = /(?<![\p{L}\d])(?:studio|0\s*(?:PN|phòng\s*ngủ|phòng)|1\s*(?:PN|phòng\s*ngủ))(?![\p{L}\d])/iu;
 
 export function bedroomText(item: BedroomText) {
-  return [item.name, item.header, item.description, item.details].filter(value => value != null).join(' ');
+  return [item.name, item.header, item.description, item.details].filter((value) => value != null).join(' ');
 }
 
 export function isStudioListing(item: BedroomText) {
-  return studioPattern.test([item.name, item.header].filter(value => value != null).join(' '));
+  return studioPattern.test([item.name, item.header].filter((value) => value != null).join(' '));
 }
 
 export function statedBedroomCount(item: BedroomText) {
@@ -23,4 +29,3 @@ export function bedroomMatchesFilter(item: BedroomText, requested: number) {
   const count = statedBedroomCount(item);
   return count === undefined || count === requested;
 }
-

@@ -4,8 +4,16 @@ import { catalogueOverviewIntent, concreteSearchKeywords, isMoreRequest } from '
 
 describe('hotfix 10c deterministic corrections', () => {
   it('lets the later price and area statements win', () => {
-    const result = inferSearch('Tôi cần đất mua dưới 1,5 tỷ, diện tích ít nhất 100 m², đường ô tô vào được, cách trung tâm không quá 10 km. À, tôi chỉ có 1,2 tỷ thôi, nhưng vẫn muốn diện tích tối thiểu 120 m².');
-    expect(result).toMatchObject({ type: 'Land', transaction_type: 'Sale', maxPrice: 1_200_000_000, minArea: 120, locations: centralFormerDistricts });
+    const result = inferSearch(
+      'Tôi cần đất mua dưới 1,5 tỷ, diện tích ít nhất 100 m², đường ô tô vào được, cách trung tâm không quá 10 km. À, tôi chỉ có 1,2 tỷ thôi, nhưng vẫn muốn diện tích tối thiểu 120 m².',
+    );
+    expect(result).toMatchObject({
+      type: 'Land',
+      transaction_type: 'Sale',
+      maxPrice: 1_200_000_000,
+      minArea: 120,
+      locations: centralFormerDistricts,
+    });
     expect(result?.keywords).toContain('đậu ô tô');
   });
 

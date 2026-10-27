@@ -20,5 +20,7 @@ export function prompt(name: string, values: Record<string, string> = {}): Loade
   return { version: base.version, text: base.text.replace(/\{\{(\w+)\}\}/g, (_, key: string) => values[key] ?? '') };
 }
 
-export function promptVersion(name: string) { return prompt(name).version; }
-export const promptVersions = Object.fromEntries(Object.keys(manifest).map(name => [name, manifest[name].version]));
+export function promptVersion(name: string) {
+  return prompt(name).version;
+}
+export const promptVersions = Object.fromEntries(Object.keys(manifest).map((name) => [name, manifest[name].version]));

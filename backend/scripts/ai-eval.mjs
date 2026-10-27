@@ -11,52 +11,197 @@ const validate = args.has('--validate');
 // The API enforces the frontend origin; evaluate through the frontend proxy by default.
 const base = process.env.AI_EVAL_BASE_URL || 'http://localhost:3000';
 const snapshotPath = 'C:/Users/Admin/POSE-tasks/rag-real-snapshot.json';
-const readJson = file => JSON.parse(readFileSync(resolve(file), 'utf8'));
+const readJson = (file) => JSON.parse(readFileSync(resolve(file), 'utf8'));
 const liveOverrides = fake ? {} : readJson('backend/test/fixtures/ai-eval.live.json');
-const standardCases = [...readJson('backend/test/fixtures/ai-eval.json').map(item => liveOverrides[item.id] ? { ...item, ...liveOverrides[item.id] } : item),
+const standardCases = [
+  ...readJson('backend/test/fixtures/ai-eval.json').map((item) =>
+    liveOverrides[item.id] ? { ...item, ...liveOverrides[item.id] } : item,
+  ),
   { id: 'g01', category: 'edge', input: 'Xin chào', expected: { cards_max: 0, no_tool: true } },
   { id: 'g02', category: 'edge', input: 'Cảm ơn', expected: { cards_max: 0, no_tool: true } },
-  { id: 'g03', category: 'edge', input: 'Còn cái nào rẻ hơn không?', history: [{ role: 'user', content: 'Tìm căn hộ ở Thủ Đức' }], expected: { cards_max: 5 } },
-  { id: 'g04', category: 'edge', input: 'Cái thứ hai thì sao?', history: [{ role: 'user', content: 'Chi tiết căn RV-A0805' }], expected: { cards_max: 5 } },
-  { id: 'f03', category: 'failure', input: 'Tìm căn hộ khi provider trả empty content', expected: { fallback: true, no_tool: true } },
-  { id: 'f04', category: 'failure', input: 'Tìm căn hộ khi provider trả 503', expected: { fallback: true, no_tool: true } }];
+  {
+    id: 'g03',
+    category: 'edge',
+    input: 'Còn cái nào rẻ hơn không?',
+    history: [{ role: 'user', content: 'Tìm căn hộ ở Thủ Đức' }],
+    expected: { cards_max: 5 },
+  },
+  {
+    id: 'g04',
+    category: 'edge',
+    input: 'Cái thứ hai thì sao?',
+    history: [{ role: 'user', content: 'Chi tiết căn RV-A0805' }],
+    expected: { cards_max: 5 },
+  },
+  {
+    id: 'f03',
+    category: 'failure',
+    input: 'Tìm căn hộ khi provider trả empty content',
+    expected: { fallback: true, no_tool: true },
+  },
+  {
+    id: 'f04',
+    category: 'failure',
+    input: 'Tìm căn hộ khi provider trả 503',
+    expected: { fallback: true, no_tool: true },
+  },
+];
 const faq100Cases = [
-  { id: 'faq51', group: 'faq100', question: 'Bên mình có nhà nào đang bán ở Thủ Đức không?', expected: { cards_min: 1, must_not_only_clarify: true, no_owner_reply: true } },
-  { id: 'faq53', group: 'faq100', question: 'Có nhà nào ở Quận 7 giá dưới 5 tỷ không bạn?', expected: { must_not_only_clarify: true, must_say_no_data: true, should_offer_handoff: true, no_owner_reply: true } },
-  { id: 'faq55', group: 'faq100', question: 'Có căn hộ nào đang bán mà được nhận nhà ngay không?', expected: { cards_min: 1, must_not_only_clarify: true, no_owner_reply: true } },
-  { id: 'faq60', group: 'faq100', question: 'Bên mình có căn hộ nào đang giảm giá không?', expected: { cards_min: 1, must_not_only_clarify: true, no_owner_reply: true } },
-  { id: 'faq61', group: 'faq100', question: 'Hiện tại bên mình có những căn hộ nào đang cho thuê?', expected: { cards_min: 1, must_not_only_clarify: true } },
-  { id: 'faq65', group: 'faq100', question: 'Có căn hộ nào cho thuê mà được dọn vào ở ngay không?', expected: { cards_min: 1, must_not_only_clarify: true } },
-  { id: 'faq82', group: 'faq100', question: 'Mình có khoảng 500 triệu thì có thể mua bất động sản nào không?', expected: { must_not_only_clarify: true, must_say_no_data: true, should_offer_handoff: true, no_owner_reply: true } },
-  { id: 'faq83', group: 'faq100', question: 'Nếu mua nhà trả góp thì mỗi tháng phải trả khoảng bao nhiêu?', property_code: 'RVL-68AE97E08D1EA45A', expected: { cards_min: 1, must_not_only_clarify: true } },
-  { id: 'faq84', group: 'faq100', question: 'Bên mình có căn hộ nào được hỗ trợ vay ngân hàng không?', expected: { cards_max: 0, must_not_only_clarify: true } },
-  { id: 'faq87', group: 'faq100', question: 'Nếu thanh toán toàn bộ một lần thì có được giảm giá không?', property_code: 'RVL-68AE97E08D1EA45A', expected: { cards_min: 1, must_not_only_clarify: true } },
-  { id: 'faq88', group: 'faq100', question: 'Mình muốn biết giá căn hộ này so với các căn khác trong khu vực có cao không?', property_code: 'RVL-68AE97E08D1EA45A', expected: { cards_min: 1, must_not_only_clarify: true } },
-  { id: 'faq89', group: 'faq100', question: 'Căn hộ này có đang được chủ nhà giảm giá bán không?', property_code: 'RVL-68AE97E08D1EA45A', expected: { cards_min: 1, must_not_only_clarify: true } },
-  { id: 'faq91', group: 'faq100', question: 'Mình mới tìm hiểu về bất động sản, bên mình có thể tư vấn giúp không?', expected: { cards_max: 0, must_not_only_clarify: true } },
-  { id: 'faq92', group: 'faq100', question: 'Mình muốn mua nhà lần đầu thì nên bắt đầu từ đâu?', expected: { cards_max: 0, must_not_only_clarify: true } },
-  { id: 'faq94', group: 'faq100', question: 'Bên mình có thể giới thiệu vài căn hộ phù hợp với ngân sách của mình không?', expected: { cards_min: 1, must_not_only_clarify: true, no_owner_reply: true } },
-  { id: 'faq96', group: 'faq100', question: 'Nếu căn hộ mình thích đã bán rồi thì bên mình có căn nào tương tự không?', property_code: 'RVL-68AE97E08D1EA45A', expected: { cards_min: 1, must_not_only_clarify: true } },
-  { id: 'faq97', group: 'faq100', question: 'Mình có thể xem nhiều căn hộ trong cùng một buổi được không?', expected: { cards_max: 0, must_not_only_clarify: true } },
-  { id: 'faq99', group: 'faq100', question: 'Bên mình có hỗ trợ làm thủ tục mua bán nhà đất không?', expected: { cards_max: 0, must_not_only_clarify: true } },
-  { id: 'faq100', group: 'faq100', question: 'Mình muốn để lại số điện thoại để được tư vấn thì làm thế nào?', expected: { cards_max: 0, must_not_only_clarify: true, no_owner_reply: true } },
+  {
+    id: 'faq51',
+    group: 'faq100',
+    question: 'Bên mình có nhà nào đang bán ở Thủ Đức không?',
+    expected: { cards_min: 1, must_not_only_clarify: true, no_owner_reply: true },
+  },
+  {
+    id: 'faq53',
+    group: 'faq100',
+    question: 'Có nhà nào ở Quận 7 giá dưới 5 tỷ không bạn?',
+    expected: { must_not_only_clarify: true, must_say_no_data: true, should_offer_handoff: true, no_owner_reply: true },
+  },
+  {
+    id: 'faq55',
+    group: 'faq100',
+    question: 'Có căn hộ nào đang bán mà được nhận nhà ngay không?',
+    expected: { cards_min: 1, must_not_only_clarify: true, no_owner_reply: true },
+  },
+  {
+    id: 'faq60',
+    group: 'faq100',
+    question: 'Bên mình có căn hộ nào đang giảm giá không?',
+    expected: { cards_min: 1, must_not_only_clarify: true, no_owner_reply: true },
+  },
+  {
+    id: 'faq61',
+    group: 'faq100',
+    question: 'Hiện tại bên mình có những căn hộ nào đang cho thuê?',
+    expected: { cards_min: 1, must_not_only_clarify: true },
+  },
+  {
+    id: 'faq65',
+    group: 'faq100',
+    question: 'Có căn hộ nào cho thuê mà được dọn vào ở ngay không?',
+    expected: { cards_min: 1, must_not_only_clarify: true },
+  },
+  {
+    id: 'faq82',
+    group: 'faq100',
+    question: 'Mình có khoảng 500 triệu thì có thể mua bất động sản nào không?',
+    expected: { must_not_only_clarify: true, must_say_no_data: true, should_offer_handoff: true, no_owner_reply: true },
+  },
+  {
+    id: 'faq83',
+    group: 'faq100',
+    question: 'Nếu mua nhà trả góp thì mỗi tháng phải trả khoảng bao nhiêu?',
+    property_code: 'RVL-68AE97E08D1EA45A',
+    expected: { cards_min: 1, must_not_only_clarify: true },
+  },
+  {
+    id: 'faq84',
+    group: 'faq100',
+    question: 'Bên mình có căn hộ nào được hỗ trợ vay ngân hàng không?',
+    expected: { cards_max: 0, must_not_only_clarify: true },
+  },
+  {
+    id: 'faq87',
+    group: 'faq100',
+    question: 'Nếu thanh toán toàn bộ một lần thì có được giảm giá không?',
+    property_code: 'RVL-68AE97E08D1EA45A',
+    expected: { cards_min: 1, must_not_only_clarify: true },
+  },
+  {
+    id: 'faq88',
+    group: 'faq100',
+    question: 'Mình muốn biết giá căn hộ này so với các căn khác trong khu vực có cao không?',
+    property_code: 'RVL-68AE97E08D1EA45A',
+    expected: { cards_min: 1, must_not_only_clarify: true },
+  },
+  {
+    id: 'faq89',
+    group: 'faq100',
+    question: 'Căn hộ này có đang được chủ nhà giảm giá bán không?',
+    property_code: 'RVL-68AE97E08D1EA45A',
+    expected: { cards_min: 1, must_not_only_clarify: true },
+  },
+  {
+    id: 'faq91',
+    group: 'faq100',
+    question: 'Mình mới tìm hiểu về bất động sản, bên mình có thể tư vấn giúp không?',
+    expected: { cards_max: 0, must_not_only_clarify: true },
+  },
+  {
+    id: 'faq92',
+    group: 'faq100',
+    question: 'Mình muốn mua nhà lần đầu thì nên bắt đầu từ đâu?',
+    expected: { cards_max: 0, must_not_only_clarify: true },
+  },
+  {
+    id: 'faq94',
+    group: 'faq100',
+    question: 'Bên mình có thể giới thiệu vài căn hộ phù hợp với ngân sách của mình không?',
+    expected: { cards_min: 1, must_not_only_clarify: true, no_owner_reply: true },
+  },
+  {
+    id: 'faq96',
+    group: 'faq100',
+    question: 'Nếu căn hộ mình thích đã bán rồi thì bên mình có căn nào tương tự không?',
+    property_code: 'RVL-68AE97E08D1EA45A',
+    expected: { cards_min: 1, must_not_only_clarify: true },
+  },
+  {
+    id: 'faq97',
+    group: 'faq100',
+    question: 'Mình có thể xem nhiều căn hộ trong cùng một buổi được không?',
+    expected: { cards_max: 0, must_not_only_clarify: true },
+  },
+  {
+    id: 'faq99',
+    group: 'faq100',
+    question: 'Bên mình có hỗ trợ làm thủ tục mua bán nhà đất không?',
+    expected: { cards_max: 0, must_not_only_clarify: true },
+  },
+  {
+    id: 'faq100',
+    group: 'faq100',
+    question: 'Mình muốn để lại số điện thoại để được tư vấn thì làm thế nào?',
+    expected: { cards_max: 0, must_not_only_clarify: true, no_owner_reply: true },
+  },
 ];
 const realCases = readJson('backend/test/fixtures/ai-eval-real-questions.json');
 // --only id1,id2 reruns chosen cases; --shard k/n runs every n-th case so n processes can share one model server.
-const optionValue = name => process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : null;
-const only = optionValue('--only')?.split(',').map(id => id.trim()).filter(Boolean);
+const optionValue = (name) => (process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : null);
+const only = optionValue('--only')
+  ?.split(',')
+  .map((id) => id.trim())
+  .filter(Boolean);
 const shard = optionValue('--shard')?.match(/^(\d+)\/(\d+)$/);
 const faq100 = args.has('--set') && process.argv[process.argv.indexOf('--set') + 1] === 'faq100';
-const cases = (real ? realCases : faq100 ? faq100Cases : standardCases).filter((item, index) => (!only || only.includes(item.id)) && (!shard || index % Number(shard[2]) === Number(shard[1]) - 1));
+const cases = (real ? realCases : faq100 ? faq100Cases : standardCases).filter(
+  (item, index) => (!only || only.includes(item.id)) && (!shard || index % Number(shard[2]) === Number(shard[1]) - 1),
+);
 const catalogueSnapshot = real ? readJson(snapshotPath) : [];
-const normalizeLocation = value => String(value ?? '').normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase('vi');
-const canonicalDistrict = value => String(value).replace(/^q\.?\s*(\d+)$/iu, 'Quận $1').replace(/^district\s+(\d+)$/iu, 'Quận $1');
+const normalizeLocation = (value) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLocaleLowerCase('vi');
+const canonicalDistrict = (value) =>
+  String(value)
+    .replace(/^q\.?\s*(\d+)$/iu, 'Quận $1')
+    .replace(/^district\s+(\d+)$/iu, 'Quận $1');
 const districtMatches = (location, district) => {
   if (!district || (Array.isArray(district) && !district.length)) return true;
-  if (Array.isArray(district)) return district.some(value => districtMatches(location, value));
-  const wanted = normalizeLocation(canonicalDistrict(district)), text = normalizeLocation(location);
+  if (Array.isArray(district)) return district.some((value) => districtMatches(location, value));
+  const wanted = normalizeLocation(canonicalDistrict(district)),
+    text = normalizeLocation(location);
   if (text.includes(wanted)) return true;
-  return hcmWards.some(ward => ward.formerDistricts.some(former => normalizeLocation(former) === wanted) && [ward.ward, ...ward.formerWards].some(alias => normalizeLocation(alias).length > 1 && text.includes(normalizeLocation(alias))));
+  return hcmWards.some(
+    (ward) =>
+      ward.formerDistricts.some((former) => normalizeLocation(former) === wanted) &&
+      [ward.ward, ...ward.formerWards].some(
+        (alias) => normalizeLocation(alias).length > 1 && text.includes(normalizeLocation(alias)),
+      ),
+  );
 };
 const matchesConstraints = (item, constraints) => {
   if (!constraints) return false;
@@ -64,93 +209,351 @@ const matchesConstraints = (item, constraints) => {
   if (constraints.property_type && item.property_type !== constraints.property_type) return false;
   if (!districtMatches(item.location, constraints.district)) return false;
   const price = item.price === null || item.price === undefined ? null : Number(item.price);
-  if (constraints.price_min !== null && constraints.price_min !== undefined && (price === null || price < constraints.price_min)) return false;
-  if (constraints.price_max !== null && constraints.price_max !== undefined && (price === null || price > constraints.price_max)) return false;
-  if (constraints.bedrooms !== null && constraints.bedrooms !== undefined && item.bedrooms !== constraints.bedrooms) return false;
+  if (
+    constraints.price_min !== null &&
+    constraints.price_min !== undefined &&
+    (price === null || price < constraints.price_min)
+  )
+    return false;
+  if (
+    constraints.price_max !== null &&
+    constraints.price_max !== undefined &&
+    (price === null || price > constraints.price_max)
+  )
+    return false;
+  if (constraints.bedrooms !== null && constraints.bedrooms !== undefined && item.bedrooms !== constraints.bedrooms)
+    return false;
   return true;
 };
 
 function validateRealCases() {
-  const catalogue = catalogueSnapshot, codes = new Set(catalogue.map(item => item.code)), locations = new Set(catalogue.map(item => item.location)), errors = [];
+  const catalogue = catalogueSnapshot,
+    codes = new Set(catalogue.map((item) => item.code)),
+    locations = new Set(catalogue.map((item) => item.location)),
+    errors = [];
   for (const item of realCases) {
-    for (const code of item.expected.cards_codes_any || []) if (!codes.has(code)) errors.push(`${item.id}: unknown code ${code}`);
-    for (const code of `${item.question} ${JSON.stringify(item.history || [])}`.match(/C(?:FL|FR)-[A-Z0-9]+/g) || []) if (!codes.has(code)) errors.push(`${item.id}: unknown code ${code}`);
-    for (const location of item.catalogue_locations || []) if (!locations.has(location)) errors.push(`${item.id}: unknown location ${location}`);
-    const isSearchCase = ['search_by_need', 'template_buy', 'template_rent'].includes(item.group) && !item.history && (item.expected.cards_codes_any || item.expected.cards_min !== undefined);
+    for (const code of item.expected.cards_codes_any || [])
+      if (!codes.has(code)) errors.push(`${item.id}: unknown code ${code}`);
+    for (const code of `${item.question} ${JSON.stringify(item.history || [])}`.match(/C(?:FL|FR)-[A-Z0-9]+/g) || [])
+      if (!codes.has(code)) errors.push(`${item.id}: unknown code ${code}`);
+    for (const location of item.catalogue_locations || [])
+      if (!locations.has(location)) errors.push(`${item.id}: unknown location ${location}`);
+    const isSearchCase =
+      ['search_by_need', 'template_buy', 'template_rent'].includes(item.group) &&
+      !item.history &&
+      (item.expected.cards_codes_any || item.expected.cards_min !== undefined);
     if (isSearchCase && !item.constraints) errors.push(`${item.id}: missing constraints`);
     if (item.constraints) {
-      const satisfying = catalogue.filter(row => matchesConstraints(row, item.constraints));
+      const satisfying = catalogue.filter((row) => matchesConstraints(row, item.constraints));
       const expectedCodes = item.expected.cards_codes_any || [];
-      for (const code of expectedCodes) if (!satisfying.some(row => row.code === code)) errors.push(`${item.id}: expected code ${code} is outside constraints`);
-      if (!satisfying.length && (expectedCodes.length || (item.expected.cards_min || 0) > 0)) errors.push(`${item.id}: no satisfying listings but case expects cards`);
-      if (!satisfying.length && (!item.expected.must_say_no_data || !item.expected.should_offer_handoff)) errors.push(`${item.id}: empty constraints require must_say_no_data and should_offer_handoff`);
+      for (const code of expectedCodes)
+        if (!satisfying.some((row) => row.code === code))
+          errors.push(`${item.id}: expected code ${code} is outside constraints`);
+      if (!satisfying.length && (expectedCodes.length || (item.expected.cards_min || 0) > 0))
+        errors.push(`${item.id}: no satisfying listings but case expects cards`);
+      if (!satisfying.length && (!item.expected.must_say_no_data || !item.expected.should_offer_handoff))
+        errors.push(`${item.id}: empty constraints require must_say_no_data and should_offer_handoff`);
       console.log(`COUNT ${item.id} ${satisfying.length}`);
     } else console.log(`COUNT ${item.id} n/a`);
   }
-  if (errors.length) { console.error(errors.join('\n')); process.exitCode = 1; return; }
-  const counts = Object.fromEntries([...new Set(realCases.map(item => item.group))].map(group => [group, realCases.filter(item => item.group === group).length]));
+  if (errors.length) {
+    console.error(errors.join('\n'));
+    process.exitCode = 1;
+    return;
+  }
+  const counts = Object.fromEntries(
+    [...new Set(realCases.map((item) => item.group))].map((group) => [
+      group,
+      realCases.filter((item) => item.group === group).length,
+    ]),
+  );
   console.log(`VALID real-questions cases=${realCases.length} codes=${codes.size} locations=${locations.size}`);
   console.log(`GROUPS ${JSON.stringify(counts)}`);
 }
 
 let child;
-async function startFake() { const built = spawnSync(process.execPath, ['node_modules/@nestjs/cli/bin/nest.js', 'build'], { cwd: resolve('backend'), stdio: 'inherit', windowsHide: true }); if (built.status !== 0) throw Error('backend build failed'); child = spawn(process.execPath, ['frontend/scripts/test-ai-agent.mjs', '--preview-only'], { cwd: resolve('.'), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }); let out = ''; child.stdout.on('data', data => out += data); child.stderr.on('data', data => out += data); for (let i = 0; i < 120; i++) { if (out.includes('PREVIEW READY')) return; if (child.exitCode !== null) throw Error(out); await delay(100); } throw Error(`fake fixture did not start: ${out}`); }
-async function stopFake() { if (child && child.exitCode === null) child.kill(); }
-async function setFakeMode(mode) { const response = await fetch('http://127.0.0.1:3301/fixture/mode', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) }); if (!response.ok) throw Error(`fixture mode failed: ${response.status}`); }
-async function liveLogs(sessionId) { if (!sessionId || !process.env.SUPABASE_URL || !process.env.SUPABASE_SECRET_KEY) return []; for (let attempt = 0; attempt < 3; attempt++) { try { return await liveLogsOnce(sessionId); } catch { await delay(2000 * (attempt + 1)); } } return []; }
-async function liveLogsOnce(sessionId) { const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/ai_request_log?session_id=eq.${sessionId}&select=session_id,kind,tools_called,status,total_tokens,latency_ms,prompt_version`, { headers: { apikey: process.env.SUPABASE_SECRET_KEY, Authorization: `Bearer ${process.env.SUPABASE_SECRET_KEY}` } }); return response.ok ? (await response.json()).map(row => ({ ...row, p_session_id: row.session_id })) : []; }
-async function getLogs() { try { const response = await fetch('http://127.0.0.1:3301/fixture/ai-request-logs'); return response.ok ? await response.json() : []; } catch { return []; } }
+async function startFake() {
+  const built = spawnSync(process.execPath, ['node_modules/@nestjs/cli/bin/nest.js', 'build'], {
+    cwd: resolve('backend'),
+    stdio: 'inherit',
+    windowsHide: true,
+  });
+  if (built.status !== 0) throw Error('backend build failed');
+  child = spawn(process.execPath, ['frontend/scripts/test-ai-agent.mjs', '--preview-only'], {
+    cwd: resolve('.'),
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+  let out = '';
+  child.stdout.on('data', (data) => (out += data));
+  child.stderr.on('data', (data) => (out += data));
+  for (let i = 0; i < 120; i++) {
+    if (out.includes('PREVIEW READY')) return;
+    if (child.exitCode !== null) throw Error(out);
+    await delay(100);
+  }
+  throw Error(`fake fixture did not start: ${out}`);
+}
+async function stopFake() {
+  if (child && child.exitCode === null) child.kill();
+}
+async function setFakeMode(mode) {
+  const response = await fetch('http://127.0.0.1:3301/fixture/mode', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  });
+  if (!response.ok) throw Error(`fixture mode failed: ${response.status}`);
+}
+async function liveLogs(sessionId) {
+  if (!sessionId || !process.env.SUPABASE_URL || !process.env.SUPABASE_SECRET_KEY) return [];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await liveLogsOnce(sessionId);
+    } catch {
+      await delay(2000 * (attempt + 1));
+    }
+  }
+  return [];
+}
+async function liveLogsOnce(sessionId) {
+  const response = await fetch(
+    `${process.env.SUPABASE_URL}/rest/v1/ai_request_log?session_id=eq.${sessionId}&select=session_id,kind,tools_called,status,total_tokens,latency_ms,prompt_version`,
+    {
+      headers: { apikey: process.env.SUPABASE_SECRET_KEY, Authorization: `Bearer ${process.env.SUPABASE_SECRET_KEY}` },
+    },
+  );
+  return response.ok ? (await response.json()).map((row) => ({ ...row, p_session_id: row.session_id })) : [];
+}
+async function getLogs() {
+  try {
+    const response = await fetch('http://127.0.0.1:3301/fixture/ai-request-logs');
+    return response.ok ? await response.json() : [];
+  } catch {
+    return [];
+  }
+}
 const resolvedProperties = new Map();
 async function propertyIdFor(item) {
   if (item.property_id) return item.property_id;
-  if (!item.property_code || resolvedProperties.has(item.property_code)) return resolvedProperties.get(item.property_code);
+  if (!item.property_code || resolvedProperties.has(item.property_code))
+    return resolvedProperties.get(item.property_code);
   try {
     const response = await fetch(`${base}/api/catalog/search?q=${encodeURIComponent(item.property_code)}&pageSize=5`);
-    const row = response.ok ? (await response.json()).items?.find(candidate => candidate.code === item.property_code) : null;
+    const row = response.ok
+      ? (await response.json()).items?.find((candidate) => candidate.code === item.property_code)
+      : null;
     resolvedProperties.set(item.property_code, row?.id);
     return row?.id;
-  } catch { return undefined; }
+  } catch {
+    return undefined;
+  }
 }
-const modeFor = item => item.id === 'n05' ? 'favorite' : item.id === 'n06' ? 'appointment' : item.id === 'n07' ? 'handoff' : item.id === 'e02' ? 'no-answer' : item.expected?.fallback ? (item.id === 'f01' ? 'timeout' : item.id === 'f02' ? 'invalid' : item.id === 'f03' ? 'empty' : 'down') : 'ok';
-const textOf = body => JSON.stringify(body.reply || body.message || body).toLocaleLowerCase('vi');
-const noDataPhrases = ['chưa có dữ liệu', 'không có dữ liệu', 'chưa được cung cấp', 'không thấy trong dữ liệu', 'chưa có thông tin'];
+const modeFor = (item) =>
+  item.id === 'n05'
+    ? 'favorite'
+    : item.id === 'n06'
+      ? 'appointment'
+      : item.id === 'n07'
+        ? 'handoff'
+        : item.id === 'e02'
+          ? 'no-answer'
+          : item.expected?.fallback
+            ? item.id === 'f01'
+              ? 'timeout'
+              : item.id === 'f02'
+                ? 'invalid'
+                : item.id === 'f03'
+                  ? 'empty'
+                  : 'down'
+            : 'ok';
+const textOf = (body) => JSON.stringify(body.reply || body.message || body).toLocaleLowerCase('vi');
+const noDataPhrases = [
+  'chưa có dữ liệu',
+  'không có dữ liệu',
+  'chưa được cung cấp',
+  'không thấy trong dữ liệu',
+  'chưa có thông tin',
+];
 const handoffPhrases = ['chuyên viên', 'nhân viên tư vấn', 'liên hệ', 'hỗ trợ thêm', 'tư vấn trực tiếp', 'đặt lịch'];
 noDataPhrases.push('không có căn', 'chưa có căn', 'không tìm thấy', 'không có thông tin', 'không có bất động sản');
 function failure(expected, response, rows, item) {
-  const body = response.body || {}, called = rows.flatMap(row => row.tools_called || []), answer = textOf(body);
+  const body = response.body || {},
+    called = rows.flatMap((row) => row.tools_called || []),
+    answer = textOf(body);
   if (expected.fallback && response.status !== 503) return `status=${response.status}, expected provider failure`;
-  if (expected.must_refuse && (response.status !== 200 || body.scope !== 'out_of_scope' || (body.sources || []).length || called.length)) return `scope=${body.scope || 'missing'}, sources=${(body.sources || []).length}, tools=${called.join(',')}`;
-  if (expected.cards_min !== undefined && (body.sources || []).length < expected.cards_min) return `sources=${(body.sources || []).length}, expected >=${expected.cards_min}`;
-  if (expected.cards_max !== undefined && (body.sources || []).length > expected.cards_max) return `sources=${(body.sources || []).length}, expected <=${expected.cards_max}`;
-  if (expected.related_min !== undefined && (body.related || []).length < expected.related_min) return `related=${(body.related || []).length}, expected >=${expected.related_min}`;
-  if (expected.cards_codes_any && !(body.sources || []).some(source => {
-    if (expected.cards_codes_any.includes(source.code) || expected.cards_codes_any.includes(source.property_code) || expected.cards_codes_any.includes(source.id)) return true;
-    if (!item.constraints || !real) return false;
-    const row = catalogueSnapshot.find(candidate => candidate.code === source.code || candidate.id === source.id || candidate.code === source.property_code);
-    return !!row && matchesConstraints(row, item.constraints);
-  })) return `sources do not include any expected code: ${expected.cards_codes_any.join(',')}`;
+  if (
+    expected.must_refuse &&
+    (response.status !== 200 || body.scope !== 'out_of_scope' || (body.sources || []).length || called.length)
+  )
+    return `scope=${body.scope || 'missing'}, sources=${(body.sources || []).length}, tools=${called.join(',')}`;
+  if (expected.cards_min !== undefined && (body.sources || []).length < expected.cards_min)
+    return `sources=${(body.sources || []).length}, expected >=${expected.cards_min}`;
+  if (expected.cards_max !== undefined && (body.sources || []).length > expected.cards_max)
+    return `sources=${(body.sources || []).length}, expected <=${expected.cards_max}`;
+  if (expected.related_min !== undefined && (body.related || []).length < expected.related_min)
+    return `related=${(body.related || []).length}, expected >=${expected.related_min}`;
+  if (
+    expected.cards_codes_any &&
+    !(body.sources || []).some((source) => {
+      if (
+        expected.cards_codes_any.includes(source.code) ||
+        expected.cards_codes_any.includes(source.property_code) ||
+        expected.cards_codes_any.includes(source.id)
+      )
+        return true;
+      if (!item.constraints || !real) return false;
+      const row = catalogueSnapshot.find(
+        (candidate) =>
+          candidate.code === source.code || candidate.id === source.id || candidate.code === source.property_code,
+      );
+      return !!row && matchesConstraints(row, item.constraints);
+    })
+  )
+    return `sources do not include any expected code: ${expected.cards_codes_any.join(',')}`;
   if (expected.no_tool && called.length) return `tool_called=${called.join(',')}`;
-  if (expected.no_write_tool && called.some(name => name !== 'search_properties' && name !== 'get_property_detail')) return `write_tool_called=${called.join(',')}`;
-  if (expected.tool && !((body.pending_actions || []).some(action => action.tool === expected.tool) || (body.proposals || []).some(action => action.tool === expected.tool) || called.includes(expected.tool))) return `tool_called=${called.join(',')}, expected ${expected.tool}`;
-  if (expected.must_say_no_data && !noDataPhrases.some(phrase => answer.includes(phrase))) return 'missing honest no-data phrase';
-  if (expected.must_not_only_clarify && body.clarify?.needed && !(body.sources || []).length && !(body.related || []).length && answer.trim() === String(body.clarify.question || '').trim()) return 'bare clarification';
-  if (expected.no_owner_reply && /đang muốn (?:bán|cho thuê\/bán) bất động sản|đăng tin, tìm người mua|tìm người thuê, đăng tin/i.test(answer)) return 'owner reply for buyer';
-  if (expected.should_offer_handoff && !handoffPhrases.some(phrase => answer.includes(phrase)) && !called.some(name => ['request_handoff', 'propose_appointment'].includes(name))) return 'missing handoff offer';
-  if (expected.must_not_contain?.some(value => answer.includes(value.toLocaleLowerCase('vi')))) return `contains forbidden text: ${expected.must_not_contain.find(value => answer.includes(value.toLocaleLowerCase('vi')))}`;
-  if (expected.must_mention_price_from_catalogue && !/(vnd|đ|tỷ|triệu|nghìn)/i.test(answer)) return 'missing catalogue price mention';
+  if (expected.no_write_tool && called.some((name) => name !== 'search_properties' && name !== 'get_property_detail'))
+    return `write_tool_called=${called.join(',')}`;
+  if (
+    expected.tool &&
+    !(
+      (body.pending_actions || []).some((action) => action.tool === expected.tool) ||
+      (body.proposals || []).some((action) => action.tool === expected.tool) ||
+      called.includes(expected.tool)
+    )
+  )
+    return `tool_called=${called.join(',')}, expected ${expected.tool}`;
+  if (expected.must_say_no_data && !noDataPhrases.some((phrase) => answer.includes(phrase)))
+    return 'missing honest no-data phrase';
+  if (
+    expected.must_not_only_clarify &&
+    body.clarify?.needed &&
+    !(body.sources || []).length &&
+    !(body.related || []).length &&
+    answer.trim() === String(body.clarify.question || '').trim()
+  )
+    return 'bare clarification';
+  if (
+    expected.no_owner_reply &&
+    /đang muốn (?:bán|cho thuê\/bán) bất động sản|đăng tin, tìm người mua|tìm người thuê, đăng tin/i.test(answer)
+  )
+    return 'owner reply for buyer';
+  if (
+    expected.should_offer_handoff &&
+    !handoffPhrases.some((phrase) => answer.includes(phrase)) &&
+    !called.some((name) => ['request_handoff', 'propose_appointment'].includes(name))
+  )
+    return 'missing handoff offer';
+  if (expected.must_not_contain?.some((value) => answer.includes(value.toLocaleLowerCase('vi'))))
+    return `contains forbidden text: ${expected.must_not_contain.find((value) => answer.includes(value.toLocaleLowerCase('vi')))}`;
+  if (expected.must_mention_price_from_catalogue && !/(vnd|đ|tỷ|triệu|nghìn)/i.test(answer))
+    return 'missing catalogue price mention';
   if (response.status >= 400 && !expected.fallback) return `http_status=${response.status} code=${body.code || 'none'}`;
   return null;
 }
 async function runCase(item, index) {
-  if (!fake && !real && item.category === 'failure') return { id: item.id, category: item.category, pass: null, reason: 'skipped live: provider failures are induced only in --fake' };
-  const before = await getLogs(), stream = index < 2, url = `${fake ? 'http://localhost:3300' : base}${stream ? '/api/ai/chat/stream' : '/api/ai/chat'}`;
+  if (!fake && !real && item.category === 'failure')
+    return {
+      id: item.id,
+      category: item.category,
+      pass: null,
+      reason: 'skipped live: provider failures are induced only in --fake',
+    };
+  const before = await getLogs(),
+    stream = index < 2,
+    url = `${fake ? 'http://localhost:3300' : base}${stream ? '/api/ai/chat/stream' : '/api/ai/chat'}`;
   if (fake) await setFakeMode(modeFor(item));
   const propertyId = await propertyIdFor(item);
-  const response = await fetch(url, { method: 'POST', headers: { Origin: fake ? 'http://localhost:3300' : new URL(base).origin, Accept: stream ? 'text/event-stream' : 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ message: item.question || item.input, history: item.history || [], store_transcript: false, ...(propertyId ? { property_id: propertyId } : {}) }) });
-  const raw = await response.text(); let body = {};
-  if (stream) { const done = raw.match(/event: done\ndata: (.*)/)?.[1], meta = raw.match(/event: meta\ndata: (.*)/)?.[1]; body = done ? { ...(meta ? JSON.parse(meta) : {}), ...(JSON.parse(done) || {}) } : { reply: raw, sources: [] }; } else { try { body = JSON.parse(raw); } catch { body = { reply: raw }; } }
-  await delay(fake ? 40 : 1500); const sessionId = body.session?.id || body.session_id, after = fake ? await getLogs() : await liveLogs(sessionId), rows = after.filter(row => (sessionId && row.p_session_id === sessionId) || (!sessionId && after.indexOf(row) >= before.length)); const reason = failure(item.expected || {}, { status: response.status, body }, rows, item); return { id: item.id, group: item.group, category: item.category, pass: !reason, reason: reason || 'ok' };
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Origin: fake ? 'http://localhost:3300' : new URL(base).origin,
+      Accept: stream ? 'text/event-stream' : 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      message: item.question || item.input,
+      history: item.history || [],
+      store_transcript: false,
+      ...(propertyId ? { property_id: propertyId } : {}),
+    }),
+  });
+  const raw = await response.text();
+  let body = {};
+  if (stream) {
+    const done = raw.match(/event: done\ndata: (.*)/)?.[1],
+      meta = raw.match(/event: meta\ndata: (.*)/)?.[1];
+    body = done ? { ...(meta ? JSON.parse(meta) : {}), ...(JSON.parse(done) || {}) } : { reply: raw, sources: [] };
+  } else {
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      body = { reply: raw };
+    }
+  }
+  await delay(fake ? 40 : 1500);
+  const sessionId = body.session?.id || body.session_id,
+    after = fake ? await getLogs() : await liveLogs(sessionId),
+    rows = after.filter(
+      (row) => (sessionId && row.p_session_id === sessionId) || (!sessionId && after.indexOf(row) >= before.length),
+    );
+  const reason = failure(item.expected || {}, { status: response.status, body }, rows, item);
+  return { id: item.id, group: item.group, category: item.category, pass: !reason, reason: reason || 'ok' };
 }
 
 if (validate) validateRealCases();
-else try { if (real && fake) throw Error('--set real-questions is live-only; remove --fake'); if (fake) await startFake(); const results = []; for (let index = 0; index < cases.length; index++) results.push(await runCase(cases[index], index)); const groups = real || faq100 ? [...new Set(cases.map(item => item.group))] : ['normal', 'edge', 'refuse', 'injection', 'failure']; const byGroup = Object.fromEntries(groups.map(group => { const rows = results.filter(row => (real || faq100 ? row.group : row.category) === group && row.pass !== null), pass = rows.filter(row => row.pass).length; return [group, { pass, total: rows.length, rate: rows.length ? pass / rows.length : 0 }]; })); const graded = results.filter(row => row.pass !== null), total = { pass: graded.filter(row => row.pass).length, cases: graded.length, skipped: results.length - graded.length, rate: graded.length ? graded.filter(row => row.pass).length / graded.length : 0 }; for (const row of results) console.log(`${row.pass === null ? 'SKIP' : row.pass ? 'PASS' : 'FAIL'} ${row.id} ${row.group || row.category} ${row.reason}`); console.log(`${real || faq100 ? 'GROUP' : 'CATEGORY'} ${JSON.stringify(byGroup)}`); console.log(`TOTAL ${total.pass}/${total.cases} (${(total.rate * 100).toFixed(1)}%)`); const dir = process.env.TEMP ? `${process.env.TEMP}\\pose-ai-eval` : resolve('..'); mkdirSync(dir, { recursive: true }); const file = `${dir}\\ai-eval-results-${Date.now()}.json`; writeFileSync(file, JSON.stringify({ date: new Date().toISOString(), mode: fake ? 'fake' : 'live', set: real ? 'real-questions' : faq100 ? 'faq100' : 'standard', results, byGroup, total }, null, 2)); console.log(`RESULTS ${file}`); if (total.rate < 1) process.exitCode = 1; } finally { await stopFake(); }
+else
+  try {
+    if (real && fake) throw Error('--set real-questions is live-only; remove --fake');
+    if (fake) await startFake();
+    const results = [];
+    for (let index = 0; index < cases.length; index++) results.push(await runCase(cases[index], index));
+    const groups =
+      real || faq100
+        ? [...new Set(cases.map((item) => item.group))]
+        : ['normal', 'edge', 'refuse', 'injection', 'failure'];
+    const byGroup = Object.fromEntries(
+      groups.map((group) => {
+        const rows = results.filter(
+            (row) => (real || faq100 ? row.group : row.category) === group && row.pass !== null,
+          ),
+          pass = rows.filter((row) => row.pass).length;
+        return [group, { pass, total: rows.length, rate: rows.length ? pass / rows.length : 0 }];
+      }),
+    );
+    const graded = results.filter((row) => row.pass !== null),
+      total = {
+        pass: graded.filter((row) => row.pass).length,
+        cases: graded.length,
+        skipped: results.length - graded.length,
+        rate: graded.length ? graded.filter((row) => row.pass).length / graded.length : 0,
+      };
+    for (const row of results)
+      console.log(
+        `${row.pass === null ? 'SKIP' : row.pass ? 'PASS' : 'FAIL'} ${row.id} ${row.group || row.category} ${row.reason}`,
+      );
+    console.log(`${real || faq100 ? 'GROUP' : 'CATEGORY'} ${JSON.stringify(byGroup)}`);
+    console.log(`TOTAL ${total.pass}/${total.cases} (${(total.rate * 100).toFixed(1)}%)`);
+    const dir = process.env.TEMP ? `${process.env.TEMP}\\pose-ai-eval` : resolve('..');
+    mkdirSync(dir, { recursive: true });
+    const file = `${dir}\\ai-eval-results-${Date.now()}.json`;
+    writeFileSync(
+      file,
+      JSON.stringify(
+        {
+          date: new Date().toISOString(),
+          mode: fake ? 'fake' : 'live',
+          set: real ? 'real-questions' : faq100 ? 'faq100' : 'standard',
+          results,
+          byGroup,
+          total,
+        },
+        null,
+        2,
+      ),
+    );
+    console.log(`RESULTS ${file}`);
+    if (total.rate < 1) process.exitCode = 1;
+  } finally {
+    await stopFake();
+  }
