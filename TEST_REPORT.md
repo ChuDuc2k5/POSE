@@ -3,20 +3,20 @@
 Tài liệu này tổng hợp **mọi bộ test và kết quả** từ đầu dự án tới nay, trọng tâm là trợ lý AI (M06).
 
 - Người tổng hợp: Chu Ngọc Việt Đức (`ChuDuc2k5`).
-- Cập nhật lần cuối: 27/10/2026, bản `79e5b5a` (main, đang chạy demo).
+- Cập nhật lần cuối: 27/10/2026, bản `c30f747` (hotfix 32, main, đang chạy demo).
 - Quy ước: mỗi hotfix AI chat sau khi qua cổng kiểm tra sẽ thêm một dòng ở mục 5 và cập nhật mục 1.
 
-## 1. Bản đang chạy (`79e5b5a`): kết quả mới nhất
+## 1. Bản đang chạy (`c30f747`, hotfix 32): kết quả mới nhất
 
 | Hạng mục | Kết quả | Mục tiêu |
 |---|---|---|
-| Backend `vitest` | 628 test đạt, 4 bỏ qua (64 file) | Đạt toàn bộ |
+| Backend `vitest` | 636 test đạt, 4 bỏ qua (65 file) | Đạt toàn bộ |
 | `test-ai-agent` (M06, provider giả) | 1488 kiểm tra đạt | Đạt toàn bộ |
 | `test-ai-chat-ui` (1280px và 380px) | 94 kiểm tra đạt | Đạt toàn bộ |
 | `test-discovery` (M03) | 101 kiểm tra đạt | Đạt toàn bộ |
-| **FLOW**, hội thoại nhiều lượt chạy thật | **85/87 lượt (97,7%)** | ≥ 85% |
-| **HARD30**, 30 câu khó (101–130) chấm tay | **8,77/10**, không câu nào dưới 8,5 | 8,9–9 |
-| **190 câu** chạy thật, kiểm tra tự động | **190/190 đạt** | Không lỗi cứng |
+| **FLOW**, hội thoại nhiều lượt chạy thật | **86/87 lượt (98,9%)** | ≥ 85% |
+| **HARD30**, 30 câu khó (101–130) chấm tay | **8,77/10** (lần 15). Lần 17 trên hotfix 32: 30/30 trả lời bình thường, đã sửa 116 và 113; chưa chấm lại đủ 30 câu | 8,9–9 |
+| **190 câu** chạy thật, kiểm tra tự động | **190/190 đạt** (trên `79e5b5a`) | Không lỗi cứng |
 | REAL60: thẻ căn khớp tiêu chí đề | 28/32 câu có thẻ khớp hoàn toàn (xem 3.1) | |
 
 ## 2. Bộ test tự động trong repo
@@ -111,6 +111,7 @@ Mỗi lượt được kiểm tự động: giá trong ngân sách, mua/thuê, l
 | gate 27 | hotfix 26–27 | 83/87 | Bảng phường từ Nghị quyết 1685 |
 | gate 30 | hotfix 26–30 | 54/87 | Môi trường hỏng giữa chừng (build lúc server đang chạy), sau đó lộ lỗi tên khu vực có dấu ngoặc |
 | **gate 31** | **`79e5b5a`** | **85/87 (97,7%)** | Còn trượt: "so sánh căn 1 và căn 2" (thiếu [2]) và "thế ở quận 9 đi" |
+| gate 32b | `28d2e88` (hotfix 32) | **86/87 (98,9%)** | Không có lỗi hồi quy; còn trượt "so sánh căn 1 và căn 2" (thiếu [2]), lượt này đạt hoặc trượt tùy lần chạy |
 | demo 27/10 | `79e5b5a` (cổng 3000) | **85/87 (97,7%)** | Trượt: "thế ở quận 9 đi" và "ở thủ đức" trong kịch bản đổi khu vực giữa hội thoại. "So sánh căn 1 và căn 2" đạt ở lần này, nên kết quả AI có dao động giữa các lần chạy |
 
 ## 4. Quy trình kiểm tra một hotfix AI chat
@@ -138,7 +139,8 @@ Mỗi lượt được kiểm tự động: giá trong ngân sách, mua/thuê, l
 | 28 | `cc5c52e` | Đếm đúng căn tương tự; trang chi tiết không tìm mới; số phòng, ngày tháng đúng | 574 / 1358 / 94 / 101 | — | 8,5 |
 | 29 (+b) | `3d5fa06` | Tên phường trùng phải ghi kèm quận; tên quận thắng tên phường; gắn tên khu vực mọi đường tìm | 615 / 1795 / 94 / 101 | (lỗi ngoặc, sửa ở 31) | — |
 | 30 | `9615282` | Loại studio khỏi tìm nhiều phòng ngủ (migration `20261027280000`); lọc lại danh sách không hỏi khu vực; trả lời khi không có căn khớp | 578 / 1358 / 94 / 101 | — | 8,6 |
-| **31** | **`284b5ee`** | Đưa giá trị vào truy vấn PostgREST trong ngoặc kép; trang chi tiết không tìm mới; định dạng số tiền | 628 / 1488 / 94 / 101 | **85/87** | **8,77** |
+| 31 | `284b5ee` | Đưa giá trị vào truy vấn PostgREST trong ngoặc kép; trang chi tiết không tìm mới; định dạng số tiền | 628 / 1488 / 94 / 101 | 85/87 | 8,77 |
+| **32 (+b)** | **`28d2e88`** | Giữ tiêu chí khi đổi khu vực; trích dẫn đúng số căn được nhắc ("căn số 2" → [2]); dấu phẩy thập phân; bỏ câu nói quá "giá đã bao gồm nội thất" | 636 / 1488 / 94 / 101 | **86/87** | lần 17: sửa 113, 116 |
 
 Cột "Suite" ghi theo thứ tự backend / `test-ai-agent` / chat UI / discovery. Số kiểm tra của `test-ai-agent` thay đổi theo số lần gọi mô hình trong fixture; số lệnh `check(` trong mã nguồn không giảm qua các hotfix.
 
