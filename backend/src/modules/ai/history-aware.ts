@@ -250,7 +250,7 @@ export function searchCriteriaFromHistory(message: string, history: { role: stri
     }
     const turnCriteria = inferredCriteria(turn.content);
     const areaOnly = (turnCriteria.location !== undefined || turnCriteria.locations !== undefined)
-      && turnCriteria.transaction_type === undefined && turnCriteria.type === undefined
+      && turnCriteria.transaction_type === undefined && turnCriteria.type === undefined && turnCriteria.types === undefined
       && turnCriteria.minPrice === undefined && turnCriteria.maxPrice === undefined
       && turnCriteria.minArea === undefined && turnCriteria.maxArea === undefined
       && turnCriteria.bedrooms === undefined;
@@ -284,10 +284,10 @@ export function isAreaOnlyRefinement(message: string, history: { role: string; c
   const current = inferredCriteria(message);
   const hasLocation = current.location !== undefined || current.locations !== undefined;
   if (!hasLocation || isMoreRequest(message)) return false;
-  const nonLocationKeys = ['type', 'transaction_type', 'minPrice', 'maxPrice', 'maxPriceExclusive', 'minArea', 'maxArea', 'bedrooms', 'keywords'];
+  const nonLocationKeys = ['type', 'types', 'transaction_type', 'minPrice', 'maxPrice', 'maxPriceExclusive', 'minArea', 'maxArea', 'bedrooms', 'keywords'];
   if (nonLocationKeys.some(key => current[key as keyof typeof current] !== undefined)) return false;
   const active = searchCriteriaFromHistory('', history);
-  return Boolean(active.transaction_type || active.type || active.minPrice !== undefined || active.maxPrice !== undefined || active.minArea !== undefined || active.maxArea !== undefined || active.bedrooms !== undefined);
+  return Boolean(active.transaction_type || active.type || active.types?.length || active.minPrice !== undefined || active.maxPrice !== undefined || active.minArea !== undefined || active.maxArea !== undefined || active.bedrooms !== undefined);
 }
 export function budgetFollowUp(message: string, history: HistoryTurn[]): BudgetFollowUp | null {
   const explicit = inferSearch(message);

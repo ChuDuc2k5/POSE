@@ -31,4 +31,4 @@ export function formerDistrictFromLocation(location: string | null | undefined) 
   return null;
 }
 
-export const formerDistricts = [...new Set(hcmWards.flatMap(row => row.formerDistricts))].sort((a, b) => a.localeCompare(b, 'vi'));
+export const formerDistricts = [...new Set(hcmWards.filter(row => row.formerProvince === 'TP.HCM').flatMap(row => row.formerDistricts))].sort((a, b) => a.localeCompare(b, 'vi'));

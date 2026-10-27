@@ -31,8 +31,8 @@ async function rows(filters: { transaction_type: 'Sale' | 'Rent'; type?: string;
 }
 
 /** Reuse the catalogue overview aggregate for budgeted area advice. */
-export async function areaSummary(filters: { transaction_type: 'Sale' | 'Rent'; type?: string; maxPrice: number }): Promise<string> {
-  const overview = await catalogueOverview('areas', filters.transaction_type, filters.maxPrice, filters.type);
+export async function areaSummary(filters: { transaction_type: 'Sale' | 'Rent'; type?: string; types?: string[]; maxPrice: number }): Promise<string> {
+  const overview = await catalogueOverview('areas', filters.transaction_type, filters.maxPrice, filters.type || filters.types);
   return overview.reply;
 }
 
