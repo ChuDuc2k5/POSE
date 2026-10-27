@@ -11,7 +11,7 @@ import { normalizePhone } from '../../common/profile-validation.js';
 import { object } from './extraction.js';
 import { inferSearch, inferTransactionType, centralFormerDistricts } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
-import { correctionData, labelMonthlyRent, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, normalizeCitations, discardInvalidCitations, redactListingCodesSafe, isAbusive, abusiveReply, dedupeListings, rewriteAvailabilityLabels, availabilityLabel, removeUnpromptedNegotiation, normalizeFinalReply, assembleFinalReply, availabilityNoticeForReply, outputDiagnostic, rewriteUnsupportedPolicy, isValidListingPrice, isRawListingDump, removeUnpromptedOwnerTemplate, type Evidence } from './guard.js';
+import { correctionData, labelMonthlyRent, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, normalizeCitations, discardInvalidCitations, redactListingCodesSafe, isAbusive, abusiveReply, dedupeListings, rewriteAvailabilityLabels, availabilityLabel, removeUnpromptedNegotiation, normalizeFinalReply, assembleFinalReply, availabilityNoticeForReply, outputDiagnostic, rewriteUnsupportedPolicy, isValidListingPrice, isRawListingDump, removeUnpromptedOwnerTemplate, formatReplyDate, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult, type RankedChunk } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { assistantPrompt, complete, querySearch, checkAnswer, extractNeedsAfterReply, streamAgentStep } from './llm.ts';
@@ -35,6 +35,15 @@ import { nearestRelaxationStages } from './nearest.js';
 export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI tạm thời không khả dụng. Bạn có thể thử lại, xem danh sách bất động sản hoặc gửi yêu cầu tư vấn.',retry:true,search_url:'/properties',inquiry_url:'/customer/inquiries/new'},503);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
 const realEstateWordsForHistory=(text:string)=>/căn|nhà|đất|phòng|giá|thuê|mua|bất động sản|dự án|khu vực|diện tích|chuyên viên|lịch xem|yêu thích|Q\d|RV-/i.test(text);
+function bedroomMatchesFilter(item:{bedrooms?:number|null;name?:string;description?:string|null;details?:string|null},requested:number) {
+  if(typeof item.bedrooms==='number')return item.bedrooms===requested;
+  const text=String(item.name || '')+' '+String(item.description || '')+' '+String(item.details || '');
+  const studio=/(?<![\p{L}\d])(?:studio|0\s*(?:PN|phòng\s*ngủ|phòng))(?![\p{L}])/iu;
+  const count=text.match(/(?<![\p{L}\d])(\d+)\s*(?:PN|phòng\s*ngủ|phòng)(?![\p{L}])/iu);
+  if(studio.test(text))return requested===0;
+  if(count)return Number(count[1])===requested;
+  return true;
+}
 async function identity() {
   const session=await authenticatedSession();
   if(session && session.role!=='User')return {error:catalogError('FORBIDDEN','Hội thoại dành cho khách hàng.',403)} as const;
@@ -50,7 +59,7 @@ async function retrieve(filters:Record<string,unknown>,context:string|null):Prom
   const scalar=(value:unknown)=>typeof value==='string'||typeof value==='number' ? value:'';
   const params=new URLSearchParams();if(typeof filters.location==='string')params.set('location',`ilike.%${filters.location}%`);if(filters.transaction_type)params.set('transaction_type',`eq.${scalar(filters.transaction_type)}`);if(filters.type)params.set('property_type',`eq.${scalar(filters.type)}`);if(filters.minPrice!==undefined)params.set('price',`gte.${scalar(filters.minPrice)}`);if(filters.maxPrice!==undefined)params.set('price',filters.maxPriceExclusive ? `lt.${scalar(filters.maxPrice)}` : `lte.${scalar(filters.maxPrice)}`);
   const allowed=new Set(['location','locations','location_aliases','transaction_type','type','types','minPrice','maxPrice','maxPriceExclusive','minArea','maxArea','bedrooms','exclude_ids','keywords']);if(Object.keys(filters).some(k=>!allowed.has(k)))throw new Error('INVALID_FILTER');
-  let query=authClient().from('property_public_catalog').select('id,code,name,cover_id,area,bedrooms,price,availability,updated_at,location,property_type,transaction_type,price_period');
+  let query=authClient().from('property_public_catalog').select('id,code,name,description,cover_id,area,bedrooms,price,availability,updated_at,location,property_type,transaction_type,price_period');
   if(context)query=query.eq('id',context);
   const locations=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations:[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases:[])].map(value=>String(value).replace(/[%_\\]/g,'\\$&'));
   if(locations.length)query=query.or(locations.map(value=>`location.ilike.%${value}%`).join(','));
@@ -68,11 +77,11 @@ async function retrieve(filters:Record<string,unknown>,context:string|null):Prom
   if(Array.isArray(filters.exclude_ids)&&filters.exclude_ids.length)query=query.not('id','in',`(${filters.exclude_ids.map(value=>String(value).replace(/[(),]/g,'')).join(',')})`);
   const result=await query.order('updated_at',{ascending:false}).order('id').limit(5);
   if(result.error)throw new Error('RETRIEVAL_UNAVAILABLE');
-  return (result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})).filter(isValidListingPrice) as Evidence[];
+  return (result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})).filter(isValidListingPrice).filter(item=>typeof filters.bedrooms!=='number'||bedroomMatchesFilter(item,Number(filters.bedrooms))) as Evidence[];
 }
 type StructuredCatalogueResult = { items: Evidence[]; count: number };
 async function retrieveStructured(filters:Record<string,unknown>,context:string|null):Promise<StructuredCatalogueResult> {
-  const select='id,code,name,cover_id,area,bedrooms,price,availability,updated_at,location,property_type,transaction_type,price_period';
+  const select='id,code,name,description,cover_id,area,bedrooms,price,availability,updated_at,location,property_type,transaction_type,price_period';
   let query=authClient().from('property_public_catalog').select(select,{count:'exact'});
   if(context)query=query.eq('id',context);
   const locations=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations:[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases:[])].map(value=>String(value).replace(/[%_\\]/g,'\\$&'));
@@ -91,7 +100,7 @@ async function retrieveStructured(filters:Record<string,unknown>,context:string|
   if(Array.isArray(filters.exclude_ids)&&filters.exclude_ids.length)query=query.not('id','in',`(${filters.exclude_ids.map(value=>String(value).replace(/[(),]/g,'')).join(',')})`);
   const result=await query.order('updated_at',{ascending:false}).order('id').limit(1000);
   if(result.error)throw new Error('RETRIEVAL_UNAVAILABLE');
-  const items=(result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})).filter(isValidListingPrice) as Evidence[];
+  const items=(result.data || []).map(p=>({...p,price:p.price===null ? null:Number(p.price)})).filter(isValidListingPrice).filter(item=>typeof filters.bedrooms!=='number'||bedroomMatchesFilter(item,Number(filters.bedrooms))) as Evidence[];
   return { items, count:items.length < 1000 ? items.length : Number(result.count ?? 0) };
 }
 async function retrieveIds(ids:string[]):Promise<Evidence[]> {
@@ -294,9 +303,10 @@ export class AiService {
     }
     // Comparisons and similar-listing requests keep the detail-page focus; their extra cards
     // are added separately below. Other-listing requests can still leave the focus.
-    const wantsOthers=/(?:căn|nhà|lô|chỗ|dự án)\s+(?:khác|tương tự)|rẻ hơn|cao hơn|gợi ý thêm|so sánh|còn căn nào/iu.test(source);
-    const comparisonQuestion=priceComparisonQuestion(source);
-    const similarQuestion=/(?:tương tự|căn khác|căn nào giống|giống căn)/iu.test(source);
+     const wantsOthers=/(?:căn|nhà|lô|chỗ|dự án)\s+(?:khác|tương tự)|rẻ hơn|cao hơn|gợi ý thêm|so sánh|còn căn nào/iu.test(source);
+     const comparisonQuestion=priceComparisonQuestion(source);
+     const similarQuestion=/(?:tương tự|căn khác|căn nào giống|giống căn)/iu.test(source);
+     const detailReference=Boolean(input.property_id && /(?:căn(?:\s+hộ)?|nhà|lô|đất)\s+này/iu.test(source) && !wantsOthers);
     const extraCostsQuestion=/(?:giá bán cuối cùng|phát sinh thêm chi phí|ký hợp đồng)/iu.test(source);
     const viewedPropertyId=typeof input.property_id==='string' && (!wantsOthers || comparisonQuestion || similarQuestion) ? input.property_id : null;
     // "Nhân viên liên hệ lại cho mình" is a hand-off request, not a search with no criteria.
@@ -309,7 +319,7 @@ export class AiService {
      const cashAmounts=moneyAmounts(source);
      const loanBudget=inferLoanBudget(source);
      const strictCashBudget=noLoanWords(source) && typeof inferSearch(source)?.maxPrice==='number' ? inferSearch(source)?.maxPrice as number : null;
-    let searchPerformed=(input.filters!==undefined || !!input.property_id) && !adviceOnly,rag:RetrievalResult|null=null;
+     let searchPerformed=(input.filters!==undefined || !!input.property_id) && !adviceOnly && !detailReference,rag:RetrievalResult|null=null;
     let structuredRemainingCount:number|null=null;
     const filterAmounts:number[]=[];
     let items:Evidence[]=[],related:Record<string,unknown>[]=[];
@@ -329,7 +339,7 @@ export class AiService {
       if(typeof filters.maxPrice==='number' && item.price!==null && item.price!==undefined && (filters.maxPriceExclusive ? item.price>=filters.maxPrice : item.price>filters.maxPrice))return false;
       if(typeof filters.minArea==='number' && (item.area===null || item.area===undefined || item.area<filters.minArea))return false;
       if(typeof filters.maxArea==='number' && (item.area===null || item.area===undefined || item.area>filters.maxArea))return false;
-      if(typeof filters.bedrooms==='number' && item.bedrooms!==null && item.bedrooms!==undefined && item.bedrooms!==filters.bedrooms)return false;
+       if(typeof filters.bedrooms==='number' && !bedroomMatchesFilter(item,filters.bedrooms))return false;
       return true;
     };
     const criteriaOnlyFollowUp=sanitizedHistory.length>0&&!moreRequest&&!!inferSearch(source)&&!moneyAmounts(source).length&&!/(?:tìm|kiếm|muốn|cần|gợi ý|có\s+căn|căn\s+hộ|nhà|đất|phòng|thuê|mua|bán|bất động sản)/iu.test(source);
@@ -543,7 +553,7 @@ export class AiService {
        searchPerformed=false;
      }
     else if(pureReference) { items=await retrieveIds(referenceIds); searchPerformed=false; }
-    else if((realEstateIntent || modelTopic==='real_estate') && !searchPerformed && !contactOnly && !adviceOnly) { items=await search(queryFilters,null,referenceIds,[standalone,...queryKeywords].join(' ')); searchPerformed=true; console.info(JSON.stringify({event:'search_filters',filters:queryFilters,found:items.length,related:related.length})); }
+     else if((realEstateIntent || modelTopic==='real_estate') && !searchPerformed && !detailReference && !contactOnly && !adviceOnly) { items=await search(queryFilters,null,referenceIds,[standalone,...queryKeywords].join(' ')); searchPerformed=true; console.info(JSON.stringify({event:'search_filters',filters:queryFilters,found:items.length,related:related.length})); }
     else if(adviceOnly && !contactOnly) {
       try {
         const faqOnlyResult=await this.retrieval.search(source,{},{});
@@ -583,6 +593,7 @@ export class AiService {
     // Relax in the order customers can evaluate: price, then area, then location.
     let nearestReason='';
     let availableAreasLine='';
+    let nearbyAreaCriteria:{areas:string[];matched:string[];unmatched:string[]}|undefined;
     let sameAreaTypesLine='';
     if(searchPerformed && !items.length && !budgetAdjustment && !contactOnly && !input.property_id && strictCashBudget===null && (queryFilters.location || queryFilters.locations || queryFilters.maxPrice!==undefined)){
        const query=[standalone,...queryKeywords].join(' ');
@@ -627,7 +638,11 @@ export class AiService {
         if (alternatives.length) {
           const monthly = queryFilters.transaction_type === 'Rent';
           const budget = priceLabel(queryFilters.maxPrice as number, monthly);
-          availableAreasLine = `\nKhu vực thực sự có tin phù hợp: ${alternatives.map(area => `${area.label} (${Number(area.count)} căn ≤ ${budget})`).join(', ')}.`;
+          const typeLabel=typeof queryFilters.type==='string' ? (typeLabels[queryFilters.type] || queryFilters.type) : 'loại hình đã chọn';
+          const unmatched=[typeof queryFilters.minArea==='number'||typeof queryFilters.maxArea==='number' ? 'area' : '',typeof queryFilters.bedrooms==='number' ? 'bedrooms' : ''].filter(Boolean);
+          const unmatchedText=unmatched.length ? `; dữ liệu này chưa đủ xác nhận ${unmatched.map(criteria=>criteria==='area' ? 'diện tích' : 'số phòng ngủ').join(' và ')}` : '';
+          availableAreasLine = `\nKhu vực thực sự có tin phù hợp với ${typeLabel} và ngân sách ${budget}: ${alternatives.map(area => `${area.label} (${Number(area.count)} căn ≤ ${budget})`).join(', ')}${unmatchedText}.`;
+          nearbyAreaCriteria={areas:alternatives.map(area=>String(area.label)),matched:['type','budget'],unmatched};
         }
       } catch (error) {
         console.warn(JSON.stringify({event:'catalogue_overview_for_no_match_failed',error:error instanceof Error ? error.message:'UNKNOWN'}));
@@ -723,6 +738,7 @@ export class AiService {
     }catch(error){console.warn(JSON.stringify({event:'market_summary_failed',error:error instanceof Error?error.message:'UNKNOWN'}));}
     items=items.filter(locationTextIsConsistent);
      related=related.filter(locationTextIsConsistent).filter(item=>typeof item.price==='number'&&Number.isFinite(item.price)&&item.price>0);
+     if(!searchPerformed && !similarQuestion && !comparisonQuestion)related=[];
      if(extraCostsQuestion&&!faqRows.some(row=>row.source_type==='Faq'&&/(?:Mua nhà đất thường phát sinh những chi phí nào|lệ phí trước bạ|thuế thu nhập cá nhân|phí bảo trì)/iu.test(`${row.header} ${row.content}`))){
        try{
          const costFaq=await this.retrieval.search('Mua nhà đất thường phát sinh những chi phí nào?',{},{});
@@ -739,7 +755,7 @@ export class AiService {
     const pendingActions:unknown[]=[];
     let bookingAction:unknown;
     const execute=async(name:string,args:unknown)=>{
-      if(name==='search_properties') { const a=args as Record<string,unknown>; const raw=object(a.filters) ? a.filters as Record<string,unknown> : {}; const f=Object.fromEntries(Object.entries(raw).filter(([,v])=>v!==null&&v!==undefined)); const found=await search(f,input.property_id as string|null || null); const labels:Record<string,string>={Available:'Đang mở bán',Sold:'Đã bán, không còn mở bán',Reserved:'Đã giữ chỗ, không còn mở bán',Unavailable:'Chưa khả dụng, không còn mở bán'}; return found.length ? found.map((p,i)=>`[${p.number || i+1}] ${p.code}: ${p.name}, giá ${priceLabel(p.price,p.price_period==='Month' || p.transaction_type==='Rent')}. ${labels[p.availability] || 'Chưa rõ khả dụng'}. Cập nhật ${p.updated_at}.`) : [`Chưa có kết quả phù hợp trong nguồn công bố. ${addressStart} có thể nói ngân sách hoặc khu vực tìm kiếm không?`]; }
+       if(name==='search_properties') { const a=args as Record<string,unknown>; const raw=object(a.filters) ? a.filters as Record<string,unknown> : {}; const f=Object.fromEntries(Object.entries(raw).filter(([,v])=>v!==null&&v!==undefined)); const found=await search(f,input.property_id as string|null || null); return found.length ? found.map((p,i)=>{const rent=p.transaction_type==='Rent';const labels:Record<string,string>={Available:rent?'Đang cho thuê':'Đang mở bán',Sold:rent?'Đã cho thuê, không còn trống':'Đã bán, không còn mở bán',Reserved:rent?'Đã có người giữ, không còn trống':'Đã giữ chỗ, không còn mở bán',Unavailable:rent?'Chưa khả dụng, không còn trống':'Chưa khả dụng, không còn mở bán'};return `[${p.number || i+1}] ${p.code}: ${p.name}, giá ${priceLabel(p.price,p.price_period==='Month' || rent)}. ${labels[p.availability] || 'Chưa rõ khả dụng'}. Cập nhật ${formatReplyDate(p.updated_at) || p.updated_at}.`;}) : [`Chưa có kết quả phù hợp trong nguồn công bố. ${addressStart} có thể nói ngân sách hoặc khu vực tìm kiếm không?`]; }
       if(name==='get_property_detail') { const code=(args as {code:string}).code; const result=await authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type,transaction_type,price_period').eq('code',code).maybeSingle(); return result.error || !result.data ? {found:false} : {found:true,property:result.data}; }
       if(name==='list_my_appointments') { if(guest) return {requires_sign_in:true}; const result=await who.client!.from('appointments').select('*').order('starts_at',{ascending:true}).limit(20); return result.error ? {error:'unavailable'} : {appointments:result.data || []}; }
       return {error:'unknown_read_tool'};
@@ -858,7 +874,7 @@ export class AiService {
      // Listing titles and detail text are source evidence too. This covers
      // importer titles whose displayed price differs from the numeric field.
      const listingTextForGuard=[...details.values(),...evidenceItems.map(item=>`${item.name || ''} ${item.location || ''} ${String((item as {description?:unknown}).description || '')}`)].join('\n');
-     const guardContext={retrievalFound:rag?.found??evidenceItems.length>0,faqOnly:evidenceItems.length>0&&evidenceItems.every(x=>x.source_type==='Faq'),filterAmounts:[...new Set([...filterAmounts,...rememberedBudgetAmounts,...currentBudgetAmounts])],previousPrices:[...new Set([...previousPrices,...relatedPrices])],sourceText:`${rag?.context||''}\n${generalKnowledge}\n${marketNote}\n${listingTextForGuard}`,listingText:listingTextForGuard,practice:generalKnowledge.length>0};
+      const guardContext={retrievalFound:rag?.found??evidenceItems.length>0,faqOnly:evidenceItems.length>0&&evidenceItems.every(x=>x.source_type==='Faq'),filterAmounts:[...new Set([...filterAmounts,...rememberedBudgetAmounts,...currentBudgetAmounts])],previousPrices:[...new Set([...previousPrices,...relatedPrices])],sourceText:`${rag?.context||''}\n${generalKnowledge}\n${marketNote}\n${listingTextForGuard}`,listingText:listingTextForGuard,practice:generalKnowledge.length>0,nearbyAreaCriteria};
      const derivedFinance=derivedFinanceAmounts(source,[...evidenceItems,...related].map(item=>item.price).filter((value): value is number => typeof value==='number' && Number.isFinite(value)));
       Object.assign(guardContext,{financeAmounts:[...(financeEvidence?.amounts || []),...derivedFinance,...historicalFinanceAmounts],financeRanges:financeEvidence?.ranges || [],financePresent:Boolean(financeEvidence || derivedFinance.length || historicalFinanceAmounts.length),faqEvidence:faqRows.length>0 || generalKnowledge.length>0});
        // Availability is inserted as a system notice during final assembly. Keep
@@ -874,11 +890,14 @@ export class AiService {
       };
       const groundedLegalDetail=legalFactFromText(legalDetail || JSON.stringify(evidenceItems[0] || {}));
       const legalFactReply=(item:Evidence, fact:string) => {
-        const number=item.number ?? 1;
-        return `Theo tin đăng, căn số ${number} [${number}] ${fact}. Mình không thể xác nhận pháp lý thay cho giấy tờ gốc; bạn nên kiểm tra bản gốc và cơ quan đăng ký đất đai.`;
+         const number=item.number ?? 1;
+         return legalContradiction
+           ? `Theo tin đăng, căn số ${number} [${number}] ${fact}. Tin đăng ghi căn này đã có sổ hồng, khác với thông tin bạn được nghe; mình không thể xác nhận lời hứa của nhân viên về thời hạn ra sổ. Bạn nên xem bản gốc giấy chứng nhận và kiểm tra tại cơ quan đăng ký đất đai.`
+           : `Theo tin đăng, căn số ${number} [${number}] ${fact}. Mình không thể xác nhận pháp lý thay cho giấy tờ gốc; bạn nên kiểm tra bản gốc và cơ quan đăng ký đất đai.`;
       };
       const legalTarget=evidenceItems.find((item,index)=>(item.number ?? index+1)===2) || evidenceItems[0];
       const legalQuestionDirect=/(?:pháp lý|sổ hồng|sổ đỏ|sổ riêng|giấy tờ|quy hoạch|thế chấp|tranh chấp)/iu.test(source) && !/(?:không tự ý đoán|không đưa ra ý kiến|không cam kết)/iu.test(source);
+      const legalContradiction=/(?:chưa có sổ|chưa có sổ hồng|bao giờ ra sổ|thời hạn ra sổ)/iu.test(source) && /(?:đã có sổ|sẵn sổ|được ghi là đã có sổ)/iu.test(groundedLegalDetail);
       if(legalTarget && legalQuestionDirect && groundedLegalDetail){
         result.reply=legalFactReply(legalTarget,groundedLegalDetail);
       }
@@ -1005,8 +1024,8 @@ export class AiService {
         body:modelBody,
         trailing:[areaToleranceSuffix,moreStatus,unsupportedSuffix,ownerSuffix,loanSuffix,bookingLine,contactLine,nearestLine,availableAreasLine,sameAreaTypesLine,similarLine,appendBudget],
       });
-      const premiseCorrection=/chưa có sổ|chưa có sổ hồng/iu.test(source) && /sẵn sổ|sổ hồng/iu.test(listingText) ? '\nTheo dữ liệu tin đăng, căn này được ghi là đã có sổ hồng; mình không thể xác nhận lời hứa của bên thứ ba. Bạn nên xem bản gốc giấy chứng nhận và kiểm tra tại cơ quan đăng ký đất đai.' : '';
-      const freshnessCorrection=/(?:bán rồi|đã bán|còn bán không|cập nhật lần cuối)/iu.test(source) && items[0]?.updated_at ? `\nMình xin lỗi vì tin có thể đã chậm so với thực tế. Dữ liệu tin đăng này cập nhật ngày ${String(items[0].updated_at).slice(0,10)}; mình có thể nhờ chuyên viên kiểm tra lại và gửi các căn tương tự.` : '';
+       const premiseCorrection=/chưa có sổ|chưa có sổ hồng/iu.test(source) && /sẵn sổ|sổ hồng/iu.test(listingText) && !legalContradiction ? '\nTheo dữ liệu tin đăng, căn này được ghi là đã có sổ hồng; mình không thể xác nhận lời hứa của bên thứ ba. Bạn nên xem bản gốc giấy chứng nhận và kiểm tra tại cơ quan đăng ký đất đai.' : '';
+       const freshnessCorrection=/(?:bán rồi|đã bán|còn bán không|cập nhật lần cuối)/iu.test(source) && items[0]?.updated_at ? `\nMình xin lỗi vì tin có thể đã chậm so với thực tế. Dữ liệu tin đăng này cập nhật ngày ${formatReplyDate(items[0].updated_at) || String(items[0].updated_at).slice(0,10)}; mình có thể nhờ chuyên viên kiểm tra lại và gửi các căn tương tự.` : '';
       const externalSiteCorrection=/(?:bên khác|website khác|trang khác|nơi khác)/iu.test(source) && !/không thể kiểm tra|không kiểm chứng|không xác minh/iu.test(result.reply) ? '\nTERAVA không thể kiểm tra hoặc xác minh trực tiếp các tin đăng trên website khác; chuyên viên có thể xác nhận lại giá với chủ nhà.' : '';
        const extraCostsComplete=/(?:lệ phí trước bạ|trước bạ).*0[,.]5%/iu.test(result.reply) && /thuế (?:thu nhập cá nhân|TNCN).*2%/iu.test(result.reply) && /phí công chứng/iu.test(result.reply) && /phí bảo trì.*2%/iu.test(result.reply);
        const extraCostsSuffix=extraCostsQuestion && !extraCostsComplete ? '\nThông thường, ngoài giá bán có thể phát sinh lệ phí trước bạ 0,5%, thuế TNCN 2% (thường bên bán chịu), phí công chứng và phí bảo trì 2% đối với căn hộ mới; bên chịu từng khoản và số tiền cụ thể cần xác nhận theo hợp đồng.' : '';
@@ -1044,7 +1063,7 @@ export class AiService {
     // Imported apartment details write the unit floor as "12 tầng", so for apartments the clause is always dropped.
       const finalSources=items.length ? items : evidenceItems;
        const finalIntro=!hasDisclosure && count===0 ? disclosure : '';
-       const finalNormalisedReply=normalizeFinalReply(viewedPropertyId ? floorsFixed : scrubOutsideDetailViewing(floorsFixed),source,finalSources,{specificListing:specificListingReply,includeAvailabilityNotice:false});
+        const finalNormalisedReply=normalizeFinalReply(viewedPropertyId ? floorsFixed : scrubOutsideDetailViewing(floorsFixed),source,finalSources,{specificListing:specificListingReply,includeAvailabilityNotice:false,relatedCount:related.length});
        const finalReply=finalNormalisedReply.trim()===finalIntro.trim() && modelBody.trim()
          ? assembleFinalReply({intro:finalIntro,body:'',originalBody:modelBody,fallbackNotice:availabilityNotice})
          : finalNormalisedReply;

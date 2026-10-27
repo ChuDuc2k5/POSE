@@ -121,7 +121,7 @@ export function scopeFromTopic(topic:'real_estate'|'smalltalk'|'out_of_scope', t
 }
 export const outOfScopeReply='Tôi chỉ hỗ trợ tìm hiểu bất động sản TERAVA, xem thông tin căn hộ/dự án và kết nối chuyên viên. Bạn có thể hỏi về giá, khu vực, loại hình hoặc lịch xem nhà.';
 export function correctionData(reason:string){
-  const corrections:Record<string,string>={UNSUPPORTED_PRICE_PERIOD:'Rent/Month: giá thuê VND/tháng. Sale/Total: giá bán tổng VND. Không trộn hai loại giá.',UNSUPPORTED_LANGUAGE:'Chỉ viết tiếng Việt, không dùng chữ Hán hay ngôn ngữ khác.',UNSUPPORTED_ROOM_COUNT:'Số phòng ngủ không có trong properties. Không mô tả căn có số phòng khách yêu cầu. Nói chưa biết số phòng, cần Sales xác nhận. Chép giá price nguyên số VND, không đổi đơn vị.',UNSUPPORTED_PRICE:'Chép đúng price nguyên số VND của căn; không đổi đơn vị hay gán giá khác.',UNSUPPORTED_COMMITMENT:'Không có dữ liệu giảm giá/pháp lý/thanh toán. Từ chối xác nhận, đề nghị Sales.',UNSUPPORTED_AVAILABILITY:'Chỉ Available còn bán; không giới thiệu trạng thái khác là còn bán.',PRIVATE_DATA_OR_SECRET:'Từ chối cung cấp dữ liệu cá nhân/secret, không trích lại nội dung đó.',RAW_LISTING_DUMP:'Không chép nguyên văn details. Trả lời trực tiếp câu hỏi về căn đang xem, dùng [1] cho dữ liệu tin đăng, rồi nêu phần chưa xác minh.'};
+  const corrections:Record<string,string>={UNSUPPORTED_PRICE_PERIOD:'Rent/Month: giá thuê VND/tháng. Sale/Total: giá bán tổng VND. Không trộn hai loại giá.',UNSUPPORTED_LANGUAGE:'Chỉ viết tiếng Việt, không dùng chữ Hán hay ngôn ngữ khác.',UNSUPPORTED_ROOM_COUNT:'Số phòng ngủ không có trong properties. Không mô tả căn có số phòng khách yêu cầu. Nói chưa biết số phòng, cần Sales xác nhận. Chép giá price nguyên số VND, không đổi đơn vị.',UNSUPPORTED_NEARBY_CRITERIA:'Chỉ nói khu vực có tin khớp loại hình và ngân sách. Không gán diện tích hoặc số phòng ngủ chưa khớp; nếu cần, nói rõ đó là kết quả nới tiêu chí.',UNSUPPORTED_PRICE:'Chép đúng price nguyên số VND của căn; không đổi đơn vị hay gán giá khác.',UNSUPPORTED_COMMITMENT:'Không có dữ liệu giảm giá/pháp lý/thanh toán. Từ chối xác nhận, đề nghị Sales.',UNSUPPORTED_AVAILABILITY:'Chỉ Available còn bán; không giới thiệu trạng thái khác là còn bán.',PRIVATE_DATA_OR_SECRET:'Từ chối cung cấp dữ liệu cá nhân/secret, không trích lại nội dung đó.',RAW_LISTING_DUMP:'Không chép nguyên văn details. Trả lời trực tiếp câu hỏi về căn đang xem, dùng [1] cho dữ liệu tin đăng, rồi nêu phần chưa xác minh.'};
   return {violations:[reason],correction:corrections[reason] || 'Bỏ nội dung không có trong properties, nói rõ chưa biết và đề nghị Sales.'};
 }
 export function injection(text:string) { return /bỏ qua (?:hướng dẫn|chỉ dẫn)|ignore (?:previous|all) (?:instructions|rules)|bạn là admin|(?:đọc|xem|liệt kê).{0,25}(?:lead|khách hàng).{0,15}(?:khác|tất cả)|read (?:other|all) (?:customers?|leads?)|đổi (?:role|quyền|consent)|change (?:role|consent)|(?:reveal|show|đọc|tiết lộ).{0,15}system prompt/i.test(text); }
@@ -144,7 +144,7 @@ export function groundedSummary(evidence:Evidence[]) {
   });
   return `Mình tìm thấy ${properties.length} căn bạn có thể tham khảo:\n${lines.join('\n')}\nBạn muốn mình lọc thêm theo phường/đường, điều chỉnh ngân sách hay hẹn chuyên viên xem căn nào?`;
 }
-export type Evidence={id:string;code:string;name:string;price:number|null;availability:string;updated_at:string;location:string;property_type:string;area?:number|null;bedrooms?:number|null;transaction_type?:'Sale'|'Rent';price_period?:'Total'|'Month';number?:number;source_type?:'Property'|'Faq';reason?:string;areaNearCriteria?:boolean};
+export type Evidence={id:string;code:string;name:string;price:number|null;availability:string;updated_at:string;location:string;property_type:string;area?:number|null;bedrooms?:number|null;description?:string|null;details?:string|null;transaction_type?:'Sale'|'Rent';price_period?:'Total'|'Month';number?:number;source_type?:'Property'|'Faq';reason?:string;areaNearCriteria?:boolean};
 export function isValidListingPrice(item:{price?:number|null;transaction_type?:string}) {
   if(item.price === null || item.price === undefined) return true;
   if(!Number.isFinite(item.price)) return false;
@@ -216,12 +216,17 @@ export function toolAllowed(tool:unknown): tool is {name:string;arguments:Record
   return false;
 }
 function references(text:string,evidence:Evidence[]){return evidence.filter(e=>[e.code,e.id,e.name].some(v=>new RegExp(`(?<![a-z0-9_-])${v.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?![a-z0-9_-])`,'i').test(text)));}
+function bedroomClaimMatches(item:Evidence,count:number) {
+  if(item.bedrooms===count)return true;
+  const text=`${item.name || ''} ${item.details || ''} ${item.description || ''}`;
+  return new RegExp(`(?<![\\p{L}\\d])${count}\\s*(?:PN|phòng\\s*ngủ|phòng)(?![\\p{L}])`,'iu').test(text);
+}
 function moneyText(text:string,evidence:Evidence[]){
   let result=text.replace(/[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}/gi,'').replace(/(?<![a-z\d_-])\d{4}-\d{2}-\d{2}(?:T[\d:.+Z-]+)?/gi,'');
   for(const e of evidence)result=result.replace(new RegExp(`(?<![a-z0-9_-])${e.code.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?![a-z0-9_-])`,'gi'),'');
   return result;
 }
-export type GuardContext = {retrievalFound?:boolean;faqOnly?:boolean;filterAmounts?:number[];previousPrices?:number[];financeAmounts?:number[];financeRanges?:[number,number][];financePresent?:boolean;faqEvidence?:boolean;sourceText?:string;listingText?:string;practice?:boolean};
+export type GuardContext = {retrievalFound?:boolean;faqOnly?:boolean;filterAmounts?:number[];previousPrices?:number[];financeAmounts?:number[];financeRanges?:[number,number][];financePresent?:boolean;faqEvidence?:boolean;sourceText?:string;listingText?:string;practice?:boolean;nearbyAreaCriteria?:{areas:string[];matched:string[];unmatched:string[]}};
 export function outputReason(reply:string,evidence:Evidence[],customerText='',context?:GuardContext) {
   const returned=new Set(evidence.map(e=>e.number).filter((n):n is number=>typeof n==='number'));
   for(const match of reply.matchAll(/\[(\d+)\]/g))if(returned.size&&!returned.has(Number(match[1])))return 'INVALID_CITATION';
@@ -244,6 +249,13 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
   if(clauses(reply).some(clause=>commitment(clause,grounded)))return 'UNSUPPORTED_COMMITMENT';
   // Travel times and distances ("khoảng 15-30 phút", "3 km") are only allowed when a cited source states them.
   const sourceText=`${context?.sourceText||''} ${evidence.map(e=>`${e.name||''} ${e.location||''}`).join(' ')}`;
+  const nearby=context?.nearbyAreaCriteria;
+  if(nearby?.unmatched.length && nearby.areas.some(area=>reply.toLocaleLowerCase('vi').includes(area.toLocaleLowerCase('vi')))) {
+    const unmatchedClaim=nearby.unmatched.some(criteria=>criteria==='area'
+      ? /diện\s+tích[\s\S]{0,30}\d+[\d.,]*\s*m(?:²|2)|\d+[\d.,]*\s*m(?:²|2)/iu.test(reply)
+      : criteria==='bedrooms' ? /\d+\s*(?:PN|phòng\s+ngủ|phòng)(?![\p{L}])/iu.test(reply) : false);
+    if(unmatchedClaim)return 'UNSUPPORTED_NEARBY_CRITERIA';
+  }
   for(const m of reply.matchAll(/\d+(?:[,.]\d+)?(?:\s*[-–]\s*\d+(?:[,.]\d+)?)?\s*(?:phút|km|cây số)(?![\p{L}])/giu))if(!sourceText.replace(/\s+/gu,'').includes(m[0].replace(/\s+/gu,'')) && !customerText.includes(m[0].replace(/\s+/gu,' ')) && !customerText.replace(/\s+/gu,'').includes(m[0].replace(/\s+/gu,'')))return 'UNSUPPORTED_TRAVEL';
   const uuid=/[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}/gi;
   if([...reply.matchAll(uuid)].some(m=>!evidence.some(e=>e.id.toLowerCase()===m[0].toLowerCase())))return 'UNSUPPORTED_PROPERTY';
@@ -252,7 +264,7 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
   // "mã"/"code" label. Plain tokens such as "Q7", "M8", "2PN" are building/district words, not codes,
   // and anything already present in the cited listings' names or locations is allowed.
   const evidenceText=evidence.map(e=>`${e.name||''} ${e.location||''}`).join(' ').toLowerCase();
-  const codes=[...withoutDates.matchAll(/(?<![\p{L}\d])[A-Z][A-Z\d]{0,5}-[A-Z\d]{1,24}(?![\p{L}\d])|(?:mã sản phẩm|mã căn hộ|mã căn|mã|code)\s*:?\s*([A-Za-z\d][A-Za-z\d_-]{1,40})/gu)];
+  const codes=[...withoutDates.matchAll(/(?<![\p{L}\d])[A-Z][A-Z\d]{0,5}(?:-[A-Z\d]{1,24})+(?![\p{L}\d])|(?:mã sản phẩm|mã căn hộ|mã căn|mã|code)\s*:?\s*([A-Za-z\d][A-Za-z\d_-]{1,40})/gu)];
   if(codes.some(m=>{const code=(m[1] || m[0]).toLowerCase();return !evidence.some(e=>e.code.toLowerCase()===code) && !evidenceText.includes(code);}))return 'UNSUPPORTED_PROPERTY';
   // Amounts stated in the listing text or FAQ, and a listing's price per m², are grounded too.
   const perSquareMetre=evidence.flatMap(e=>e.price!==null&&e.area ? [e.price/e.area] : []);
@@ -268,9 +280,9 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
   for(let clause of clauses(reply)){
     for(const room of clause.matchAll(/(\d+)\s*(?:PN|ph\u00f2ng ng\u1ee7)/giu)){
       const count=Number(room[1]);
-      if(evidence.some(p=>p.bedrooms===count || new RegExp('(?:^|[^\\d])'+count+'\\s*(?:PN|ph\u00f2ng ng\u1ee7)', 'iu').test(p.name))) clause=clause.replace(room[0],'');
+      if(evidence.some(p=>bedroomClaimMatches(p,count))) clause=clause.replace(room[0],'');
     }
-    const mentioned=references(clause,evidence);
+    const mentioned=[...references(clause,evidence),...([...clause.matchAll(/\[(\d+)\]/gu)].map(match=>evidence.find((item,index)=>(item.number ?? index+1)===Number(match[1]))).filter((item):item is Evidence=>Boolean(item)))];
     const prefix=reply.slice(0,reply.indexOf(clause)).toLowerCase();
     const last=(e:Evidence)=>Math.max(...[e.code,e.id,e.name].map(v=>prefix.lastIndexOf(v.toLowerCase())));
     const related=mentioned.length ? mentioned:references(prefix,evidence).sort((a,b)=>last(b)-last(a)).slice(0,1);
@@ -287,7 +299,8 @@ export function outputReason(reply:string,evidence:Evidence[],customerText='',co
     for(const room of clause.matchAll(/\d+\s*phòng ngủ/gi)){
       // Grounded when a listing states it (name, bedrooms field or listing text) or the customer asked for it.
       const said=room[0].toLowerCase(),count=Number(room[0].match(/\d+/)![0]);
-      if(evidence.some(p=>p.name.toLowerCase().includes(said)||p.bedrooms===count) || customerText.toLowerCase().includes(said) || sourceText.toLowerCase().includes(said) || new RegExp(`(?<!\\d)${count}\\s*(?:pn|phòng ngủ|phòng)(?![\\p{L}])`,'iu').test(sourceText))continue;
+      const criterion=/(?:bạn\s+cần|tôi\s+cần|mình\s+cần|nhu\s+cầu|tiêu\s+chí|yêu\s+cầu|tìm|muốn)[\s\S]{0,50}\d+\s*(?:PN|phòng\s+ngủ|phòng)(?![\p{L}])/iu;
+      if((mentioned.length ? mentioned : evidence).some(p=>bedroomClaimMatches(p,count)) || !mentioned.length && (criterion.test(clause) || criterion.test(customerText)))continue;
       const prefix=clause.slice(0,room.index!).split(/nhưng|tuy nhiên/i).at(-1) || '';
       const uncertain=/(?:không|chưa) (?:có|đủ) (?:thông tin|dữ liệu|căn cứ|bằng chứng)(?:\s+(?:để|có thể|khẳng định|xác nhận|cho biết|có)){0,6}\s*$/i.test(prefix)
         || /(?:không|chưa)(?: thể)? (?:xác nhận|xác định|khẳng định)(?: được| có)?\s*$/i.test(prefix);
@@ -371,12 +384,18 @@ export function dedupeListings<T extends { name?: string; price?: number|null; a
 const availabilityQuestion=(question:string)=>/(?:còn\s+(?:bán|trống|không|cho\s+thuê)|đã\s+bán\s+chưa|kiểm\s+tra(?:\s+(?:giúp|giùm))?[^.!?\n]{0,80}(?<![\p{L}])còn(?![\p{L}]))/iu.test(question);
 
 type AvailabilitySource={availability?:string;updated_at?:string;transaction_type?:string;property_id?:string|null};
+export function formatReplyDate(value: unknown) {
+  const match=String(value ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/u);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : '';
+}
+export function formatReplyDates(text:string) {
+  return text.replace(/(?<![\p{L}\d])\d{4}-\d{2}-\d{2}(?:T[\d:.+Z-]+)?(?![\p{L}\d])/gu,match=>formatReplyDate(match));
+}
 export function availabilityNoticeForReply(question:string,sources:AvailabilitySource[],specificListing=false) {
   if(!specificListing || !availabilityQuestion(question))return '';
   const available=sources.find(source=>source.availability==='Available');
   if(!available)return '';
-  const date=available.updated_at?.match(/^(\d{4})-(\d{2})-(\d{2})/u);
-  const formattedDate=date ? `${date[3]}/${date[2]}/${date[1]}` : '';
+  const formattedDate=formatReplyDate(available.updated_at);
   const status=available.transaction_type==='Rent' ? 'còn cho thuê' : 'còn bán';
   return `Theo tin đăng, căn này đang ghi là ${status}${formattedDate ? ` (cập nhật ${formattedDate})` : ''}. Mình không xác nhận được theo thời gian thực, chuyên viên sẽ kiểm tra lại giúp bạn.`;
 }
@@ -408,7 +427,7 @@ export function correctUnknownReply(reply:string) {
   return reply.replace(/(^|[.!?\n]\s*)([^.!?\n]*\bkhông(?:\s+\p{L}+){0,12}\s+nói\s+không\s+biết\b[^.!?\n]*[.!?]?)/giu, '$1Tin đăng chưa có thông tin; mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn.');
 }
 
-export type NormalizeFinalReplyOptions={specificListing?:boolean;includeAvailabilityNotice?:boolean};
+export type NormalizeFinalReplyOptions={specificListing?:boolean;includeAvailabilityNotice?:boolean;relatedCount?:number};
 export function normalizeFinalReply<T extends { availability?: string }>(reply:string, question:string, sources:T[], options:NormalizeFinalReplyOptions={}) {
   const specificListing=options.specificListing ?? sources.some(source=>Boolean((source as T & { property_id?: string|null }).property_id));
   const includeAvailabilityNotice=options.includeAvailabilityNotice ?? true;
@@ -450,8 +469,10 @@ export function normalizeFinalReply<T extends { availability?: string }>(reply:s
     for(let index=0;index<parts.length;index+=2){
       let sentence=parts[index],separator=parts[index+1] || '';
       if(!promise.test(sentence)){kept.push(sentence,separator);continue;}
-      if(!sources.length)continue;
-      sentence=sentence.replace(/\b\d+(?=\s+căn\s+(?:tương tự|khác|thay thế|gần tiêu chí|gần nhất|phù hợp))/iu,String(sources.length));
+      const relatedCount=options.relatedCount ?? sources.length;
+      const remainingStatus=/\b\d+\s+căn\s+(?:khác\s+đúng\s+tiêu\s+chí|khác\s+đúng\s+tiêu\s+chí;\s*dữ\s+liệu)/iu.test(sentence);
+      if(!remainingStatus && relatedCount<=0)continue;
+      if(!remainingStatus)sentence=sentence.replace(/\b\d+(?=\s+căn\s+(?:tương tự|khác|thay thế|gần tiêu chí|gần nhất|phù hợp))/iu,String(relatedCount));
       kept.push(sentence,separator);
     }
     return kept.join('');
@@ -495,18 +516,30 @@ export function normalizeFinalReply<T extends { availability?: string }>(reply:s
   const legalFact=/(?:(?:sổ\s+(?:hồng|đỏ)|pháp\s+lý)(?![\p{L}\p{N}])[^.!?\n]*(?:đã\s+có|chưa\s+có|được\s+ghi)|(?:đã\s+có|chưa\s+có|được\s+ghi)[^.!?\n]*(?:sổ\s+(?:hồng|đỏ)|pháp\s+lý)(?![\p{L}\p{N}]))/iu;
   const deterministicLegal=/^\s*Theo tin đăng,[^.!?\n]*(?:sổ\s+(?:hồng|đỏ)|pháp\s+lý)[^.!?\n]*cơ quan đăng ký/iu;
   const legalClaim=/(?:lời hứa|lời hẹn|nhân viên|thời hạn ra sổ|không thể xác nhận lời)/iu;
-  const legalParts=result.split(/((?<=[.!?])\s+)/u),hasDeterministic=legalParts.some((part,index)=>index%2===0&&deterministicLegal.test(part));
-  if(hasDeterministic){
-    let claimKept=false;const kept:string[]=[];
+  const legalParts=result.split(/((?<=[.!?])\s+)/u);
+  const legalSentences=legalParts.filter((_,index)=>index%2===0);
+  const factIndexes=legalSentences.map((sentence,index)=>legalFact.test(sentence) ? index : -1).filter(index=>index>=0);
+  if(factIndexes.length>1){
+    const firstFact=factIndexes[0];
+    const fact=legalSentences[firstFact].replace(/;\s*(?:mình|bạn)(?![\p{L}])[^.!?\n]*[.!?]?$/iu,'').trim();
+    const claimSentence=legalSentences.find((sentence,index)=>index!==firstFact && legalClaim.test(sentence));
+    const claim=claimSentence?.replace(/^(?:Theo\s+(?:dữ\s+liệu\s+)?tin\s+đăng,\s*)?căn\s+này\s+được\s+ghi\s+là\s+[^;.!?\n]+;\s*/iu,'').trim();
+    const advice=legalSentences.find((sentence,index)=>index!==firstFact && !legalClaim.test(sentence) && /bản gốc|cơ quan đăng ký/iu.test(sentence));
+    const replacement=[fact,claim,advice].filter(Boolean).join(' ');
+    const kept:string[]=[];let inserted=false;
     for(let index=0;index<legalParts.length;index+=2){
       const sentence=legalParts[index],separator=legalParts[index+1] || '';
-      if(deterministicLegal.test(sentence)){kept.push(sentence,separator);continue;}
-      if(legalFact.test(sentence))continue;
-      if(legalClaim.test(sentence)){if(claimKept)continue;claimKept=true;}
+      if(legalFact.test(sentence) || deterministicLegal.test(sentence) || legalClaim.test(sentence) || /bản gốc|cơ quan đăng ký/iu.test(sentence)){
+        if(!inserted && index/2===firstFact){kept.push(replacement,separator);inserted=true;}
+        continue;
+      }
       kept.push(sentence,separator);
     }
     result=kept.join('');
   }
+  const plainUnknown='Nếu dữ liệu không có, mình sẽ nói thẳng là mình chưa biết và nhờ chuyên viên kiểm tra giúp bạn.';
+  result=result.replace(/(?:Tin đăng chưa có thông tin;\s*mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn\.?|[^.!?\n]*không(?:\s+\p{L}+){0,12}\s+nói(?:\s+là)?\s+không\s+biết[^.!?\n]*[.!?]?)/giu,plainUnknown);
+  result=formatReplyDates(result);
   return result;
 }
 

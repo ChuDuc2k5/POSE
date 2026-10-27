@@ -30,6 +30,7 @@ const {stripPhones}=await import(pathToFileURL(join(temp,'privacy.mjs')));
 const {moneyAmounts}=await import(pathToFileURL(join(temp,'money.mjs')));
 const fakeEmbedding=(value)=>{const text=String(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[đĐ]/g,'d').toLowerCase();const tokens=text.match(/[a-z0-9]+/g)||[];const features=[...tokens,...tokens.slice(0,-1).map((x,i)=>`${x}_${tokens[i+1]}`)];const vector=Array(1024).fill(0);for(const feature of features){let h=2166136261;for(const c of feature){h^=c.charCodeAt(0);h=Math.imul(h,16777619);}vector[(h>>>0)%1024]+=1;}const norm=Math.hypot(...vector)||1;return vector.map(x=>x/norm);};
 const {validateModel,providerConfig,TURN_SCHEMA,SYSTEM_PROMPT}=await import(pathToFileURL(join(temp,'llm.mjs')));
+const bedroomMatches=(property,requested)=>{if(typeof property.bedrooms==='number')return property.bedrooms===requested;const text=String(property.name||'')+' '+String(property.description||'');if(/(?<![\p{L}\d])(?:studio|0\s*(?:PN|phòng\s*ngủ|phòng))(?![\p{L}])/iu.test(text))return requested===0;const count=text.match(/(?<![\p{L}\d])(\d+)\s*(?:PN|phòng\s*ngủ|phòng)(?![\p{L}])/iu);return count ? Number(count[1])===requested : true;};
 let checks=0;const check=(value,label)=>{assert.ok(value,label);checks++;};
 const field=(value,evidence)=>({value,confidence:.9,evidence});
 const all={intent:true,budget:{value:'match',evidence:'3 tỷ'},area_type:{value:'both',evidence:'Hồ Chí Minh, căn hộ'},timeline:{value:'lt3m',evidence:'tháng tới'},contact:{value:'ready',evidence:'đã xác minh, sẵn sàng'},next_step:{value:'appointment',evidence:'đề nghị hẹn'}};
@@ -346,7 +347,7 @@ const provider=createServer(async(req,res)=>{
  if(url.pathname.endsWith('/pose_ai_list_sessions')){
   if(!uid)return error('42501','AUTH_REQUIRED',401);
   const rows=[...sessions.values()].filter(s=>s.user_id===uid&&s.store_transcript&&s.status!=='Closed').sort((a,b)=>String(b.last_message_at||'').localeCompare(String(a.last_message_at||''))).map(s=>({id:s.id,title:String(messages.find(m=>m.session_id===s.id&&m.role==='user')?.content||'Cuộc trò chuyện mới').replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,'[email đã ẩn]').replace(/(?:\+?84|0)[35789](?:[ .()-]?\d){8}/g,'[đã ẩn số liên hệ]'),updated_at:s.last_message_at||s.created_at,message_count:s.message_count}));
-  return reply(200,rows);
+   return reply(200,rows);
  }
  if(url.pathname.endsWith('/pose_ai_read_session') || url.pathname.endsWith('/pose_system_ai_read_guest')){
   const s=sessions.get(input.p_session);if(!s || (token==='fixture-secret' ? s.user_id!==null || s.guest_token_hash!==input.p_hash:s.user_id!==uid))return error('P0002','NOT_FOUND',404);
@@ -426,7 +427,7 @@ const provider=createServer(async(req,res)=>{
   const keywords=Array.isArray(filters.keywords)?filters.keywords.map(String):[];
   const wanted=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations.map(String):[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases.map(String):[])].map(value=>value.toLocaleLowerCase('vi'));
   const rows=catalogueRows().filter(p=>p.publication==='Published'&&!p.archived&&(!context.length||knownContext.includes(p.id))&&(!amenityQuery||/hồ bơi/iu.test(String(p.amenities||'')))&&(!filters.transaction_type||p.transaction_type===filters.transaction_type)&&(!filters.type||p.property_type===filters.type)&&(!Array.isArray(filters.types)||!filters.types.length||filters.types.includes(p.property_type))&&(!wanted.length||wanted.some(value=>p.location.toLocaleLowerCase('vi').includes(value)))&&(!keywords.length||keywords.every(keyword=>`${p.name} ${p.amenities || ''} ${p.description || ''}`.toLocaleLowerCase('vi').includes(keyword.toLocaleLowerCase('vi'))))&&(typeof filters.minPrice!=='number'||p.price===null||p.price>=filters.minPrice)&&(typeof filters.maxPrice!=='number'||p.price===null||(filters.maxPriceExclusive?p.price<filters.maxPrice:p.price<=filters.maxPrice))).map((p,i)=>({chunk_id:`chunk-${i}`,document_id:`doc-${i}`,source_id:p.id,source_type:'Property',header:`${p.code} ${p.name}`,content:`${p.name} ${p.location} published listing. ${p.description || ''}`,vector_rank:context.includes(p.id)?Math.max(1,i):i+1,text_rank:context.includes(p.id)?1:i+1,similarity:context.includes(p.id)?.95:.9,embed_model:'fixture',code:p.code,name:p.name,location:p.location,property_type:p.property_type,transaction_type:p.transaction_type,price:p.price,price_period:p.price_period,availability:p.availability,updated_at:p.updated_at})).sort((a,b)=>(b.similarity-a.similarity)||(a.vector_rank-b.vector_rank));
-  return reply(200,rows);
+   return reply(200,typeof filters.bedrooms==='number' ? rows.filter(row=>bedroomMatches({name:row.name,description:row.content},Number(filters.bedrooms))) : rows);
  }
    if(url.pathname.endsWith('/property_public_catalog')){
   searchReads++;
@@ -435,7 +436,9 @@ const provider=createServer(async(req,res)=>{
   check(token==='fixture-public','Retrieval uses anon publishable key');
   let rows=catalogueRows().filter(p=>p.publication==='Published' && !p.archived);if(mode==='search')rows=rows.filter(p=>p.price!==null&&p.price<=3e9);
    for(const [k,v] of url.searchParams){if(k==='or'){const locations=[...v.matchAll(/location\.ilike\.%([^,%]*)%/g)].map(match=>match[1].toLocaleLowerCase('vi'));if(locations.length)rows=rows.filter(p=>locations.some(location=>String(p.location).toLocaleLowerCase('vi').includes(location)));}if(v.startsWith('ilike.'))rows=rows.filter(p=>String(p[k]).toLocaleLowerCase('vi').includes(v.slice(7,-1).toLocaleLowerCase('vi')));if(v.startsWith('eq.'))rows=rows.filter(p=>String(p[k])===v.slice(3));if(v.startsWith('in.'))rows=rows.filter(p=>v.slice(4,-1).split(',').includes(String(p[k])));if(v.startsWith('not.in.'))rows=rows.filter(p=>!v.slice(8,-1).split(',').includes(String(p[k])));if(v.startsWith('gte.'))rows=rows.filter(p=>(mode==='ok' && p[k]===null) || p[k]>=Number(v.slice(4)));if(v.startsWith('lte.'))rows=rows.filter(p=>(mode==='ok' && p[k]===null) || p[k]<=Number(v.slice(4)));if(v.startsWith('lt.'))rows=rows.filter(p=>(mode==='ok' && p[k]===null) || p[k]<Number(v.slice(3)));}
-   rows.sort((a,b)=>String(b.updated_at).localeCompare(String(a.updated_at))||String(a.id).localeCompare(String(b.id)));
+    const bedroomQuery=[...url.searchParams.getAll('or')].map(value=>value.match(/bedrooms\.eq\.(\d+)/)).find(Boolean);
+    if(bedroomQuery)rows=rows.filter(property=>bedroomMatches(property,Number(bedroomQuery[1])));
+    rows.sort((a,b)=>String(b.updated_at).localeCompare(String(a.updated_at))||String(a.id).localeCompare(String(b.id)));
    if(rows.some(p=>/AI_API_KEY|SUPABASE_/i.test(p.name))){unsafeSessionId=lastRequestSessionId;unsafePending=true;logs.push({session_id:lastRequestSessionId,reason:'UNSAFE_RETRIEVED_DATA',decision:'flagged'});}
    if(req.headers.prefer?.includes('count=exact'))res.setHeader('Content-Range',rows.length ? `0-${Math.min(rows.length,5)-1}/${rows.length}`:'*/0');
    return reply(200,req.headers.accept?.includes('application/vnd.pgrst.object+json') ? rows[0] || null:rows.slice(0,5));
@@ -533,7 +536,7 @@ try{
    const areaData=await area.json();
    check(areaData.clarify?.needed&&areaData.sources.length===0&&areaData.clarify.options.includes('Dưới 3 tỷ'),'Area-only answer asks for budget chips');
    const budget=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Dưới 3 tỷ',history:[...history,{role:'user',content:'Quận 7'},{role:'assistant',content:areaData.reply}]},flowCookie);
-   const budgetData=await budget.json();
+  const budgetData=await budget.json();
    check(!budgetData.clarify?.needed,'Budget answer after area does not loop');
   }
   {

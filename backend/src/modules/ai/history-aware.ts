@@ -343,8 +343,9 @@ export function clarificationFor(message: string, history: { role: string; conte
   const previousAssistant = [...history].reverse().find(turn => turn.role === 'assistant')?.content || '';
   const previousWasClarification = /khu vực nào|ngân sách.*(?:tháng|triệu|tỷ)|chưa rõ,? gợi ý/iu.test(previousAssistant);
   const criteriaReply = history.length > 0 && !explicitNewSearch.test(message) && (Object.keys(inferred).length > 0 || vagueCriteriaAnswer.test(message) || !!budgetAdjustment) && previousWasClarification;
-  if ((!searchIntent.test(message) && !criteriaReply) || (budgetAdjustment && !criteriaReply) || (!criteriaReply && (locationPattern.test(message) || namesPlace(message) || !!(inferred.location || inferred.locations?.length))) || isFollowUp(message) || listingCodes(message).length || /(?<![\p{L}])(?:đặt\s+lịch|hẹn\s+xem|lưu\s+căn|yêu\s+thích|liên\s+hệ|chuyên\s+viên)(?![\p{L}])/iu.test(message)) return { needed: false, question: null, options: [] };
   const location = typeof criteria.location === 'string' ? criteria.location : criteria.locations?.[0] || previousSearchLocation(history);
+  const activeCatalogueCriteria=Boolean(location || criteria.locations?.length || criteria.type || criteria.types?.length);
+  if (((!searchIntent.test(message) && !criteriaReply) && !budgetAdjustment) || (budgetAdjustment && !criteriaReply && !activeCatalogueCriteria) || (!criteriaReply && (locationPattern.test(message) || namesPlace(message) || !!(inferred.location || inferred.locations?.length))) || isFollowUp(message) || listingCodes(message).length || /(?<![\p{L}])(?:đặt\s+lịch|hẹn\s+xem|lưu\s+căn|yêu\s+thích|liên\s+hệ|chuyên\s+viên)(?![\p{L}])/iu.test(message)) return { needed: false, question: null, options: [] };
   const hasBudget = criteria.minPrice !== undefined || criteria.maxPrice !== undefined;
   const concrete = concreteSearchKeywords(message).length > 0 || /(?:\d+\s*(?:m²|m2|m\s*2|phòng|pn)|diện\s+tích|nội\s+thất|đầy\s+đủ|nguyên\s+căn|kinh\s+doanh|trong\s+\d+\s+tháng|hợp\s+đồng(?:\s+ngắn)?\s+hạn|dự\s+án|tên\s+(?:dự\s+án|khu)|khoảng\s+\d+)/iu.test(message);
   // A new search must establish the two fields that make a catalogue search useful.
@@ -385,7 +386,7 @@ export function clarificationFor(message: string, history: { role: string; conte
     return { needed: true, question: `${addressStart} muốn ${action} ở khu vực nào khác?`, options: ['Quận 9', 'Thủ Đức', 'Bình Thạnh', 'Chưa rõ, gợi ý giúp tôi'] };
   }
   const hasSourceCards = history.some(turn => Array.isArray((turn as { sources?: unknown[] }).sources) && (turn as { sources?: unknown[] }).sources!.length > 0);
-  if (!hasSourceCards && location && !locationPattern.test(message) && !namesPlace(message)) {
+  if (!hasSourceCards && location && !locationPattern.test(message) && !namesPlace(message) && !budgetAdjustment) {
     return { needed: true, question: `${addressStart} muốn ${action} ở ${location} như trước hay khu vực khác?`, options: [location, 'Khu vực khác', 'Không giới hạn khu vực'] };
   }
   return { needed: false, question: null, options: [] };
