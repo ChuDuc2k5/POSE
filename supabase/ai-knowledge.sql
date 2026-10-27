@@ -106,6 +106,7 @@ with eligible as(
  and (cardinality(p_context)=0 or d.source_type='Faq' or d.source_id=any(p_context))
  and (not(p_filters?'transaction_type') or d.source_type='Faq' or p.transaction_type=p_filters->>'transaction_type')
  and (not(p_filters?'type') or d.source_type='Faq' or p.property_type=p_filters->>'type')
+ and (not(p_filters?'types') or d.source_type='Faq' or p.property_type=any(array(select jsonb_array_elements_text(p_filters->'types'))))
  and (not(p_filters?'minPrice') or d.source_type='Faq' or p.price>=(p_filters->>'minPrice')::numeric)
  and (not(p_filters?'maxPrice') or d.source_type='Faq' or case when p_filters->>'maxPriceExclusive'='true' then p.price<(p_filters->>'maxPrice')::numeric else p.price<=(p_filters->>'maxPrice')::numeric end)
  and (not(p_filters?'location') or d.source_type='Faq' or strpos(lower(p.location),lower(p_filters->>'location'))>0 or exists(select 1 from jsonb_array_elements_text(coalesce(p_filters->'location_aliases','[]'::jsonb)) wanted where strpos(pose_private.kb_unaccent(lower(coalesce(p.location,''))),pose_private.kb_unaccent(lower(wanted)))>0))

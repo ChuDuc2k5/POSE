@@ -10,6 +10,7 @@ with eligible as(
  where d.published and (d.source_type='Faq' or p.id is not null)
  and (not(p_filters?'transaction_type') or d.source_type='Faq' or p.transaction_type=p_filters->>'transaction_type')
  and (not(p_filters?'type') or d.source_type='Faq' or p.property_type=p_filters->>'type')
+ and (not(p_filters?'types') or d.source_type='Faq' or p.property_type=any(array(select jsonb_array_elements_text(p_filters->'types'))))
  and (not(p_filters?'minPrice') or d.source_type='Faq' or p.price>=(p_filters->>'minPrice')::numeric)
  and (not(p_filters?'maxPrice') or d.source_type='Faq' or case when p_filters->>'maxPriceExclusive'='true' then p.price<(p_filters->>'maxPrice')::numeric else p.price<=(p_filters->>'maxPrice')::numeric end)
  and (not(p_filters?'minArea') or d.source_type='Faq' or p.area>=(p_filters->>'minArea')::numeric)
