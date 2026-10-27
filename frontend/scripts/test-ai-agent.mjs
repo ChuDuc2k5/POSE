@@ -25,7 +25,7 @@ for(const name of ['privacy','money','extraction','lead-scoring','hcm-wards','wa
 }
 const {scoreLead,classifyScore,scoreNeeds}=await import(pathToFileURL(join(temp,'lead-scoring.mjs')));
 const {extractNeeds}=await import(pathToFileURL(join(temp,'extraction.mjs')));
-const {toolAllowed,outputReason,injection}=await import(pathToFileURL(join(temp,'guard.mjs')));
+const {toolAllowed,outputReason,injection,normalizeFinalReply}=await import(pathToFileURL(join(temp,'guard.mjs')));
 const {stripPhones}=await import(pathToFileURL(join(temp,'privacy.mjs')));
 const {moneyAmounts}=await import(pathToFileURL(join(temp,'money.mjs')));
 const fakeEmbedding=(value)=>{const text=String(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[đĐ]/g,'d').toLowerCase();const tokens=text.match(/[a-z0-9]+/g)||[];const features=[...tokens,...tokens.slice(0,-1).map((x,i)=>`${x}_${tokens[i+1]}`)];const vector=Array(1024).fill(0);for(const feature of features){let h=2166136261;for(const c of feature){h^=c.charCodeAt(0);h=Math.imul(h,16777619);}vector[(h>>>0)%1024]+=1;}const norm=Math.hypot(...vector)||1;return vector.map(x=>x/norm);};
@@ -137,7 +137,7 @@ const customerFor=uid=>uid ? [...customers.values()].find(c=>c.auth_user_id===ui
 const leadFor=uid=>[...leads.values()].find(l=>l.customer_id===customerFor(uid)?.id && !l.archived && !['CONVERTED','LOST'].includes(l.status));
 const assigned=(lead,sales)=>assignments.some(a=>a.lead_id===lead && a.sales_id===sales && a.is_active);
 const scoringFor=lead=>lead ? {needs:lead.needs,verified:customers.get(lead.customer_id).phone_verified_at!==null,version:lead.version,score_result:lead.score_evidence,interest_ids:[...new Set([...sessions.values()].filter(s=>s.lead_id===lead.id).flatMap(s=>s.property_ids || []))]}:null;
-const properties=['Available','Sold','Reserved','Unavailable'].map((availability,i)=>({id:`f6300000-0000-4000-8000-00000000000${i+1}`,code:`P-${i+1}`,name:`Căn hộ công bố P-${i+1}`,price:i===1 || i===2 ? null:3e9,availability,updated_at:'2026-10-14T01:00:00Z',location:'Quận 7, Hồ Chí Minh',property_type:'Apartment',publication:'Published',archived:false,area:80,bedrooms:2,project_name:'TERAVA',subdivision_name:null,amenities:'Công viên',cover_id:null,transaction_type:i===2?'Rent':'Sale',price_period:i===2?'Month':'Total',description:'Căn hộ có thông tin công bố để tham khảo.'}));
+const properties=['Available','Sold','Reserved','Unavailable'].map((availability,i)=>({id:`f6300000-0000-4000-8000-00000000000${i+1}`,code:`P-${i+1}`,name:`Căn hộ công bố P-${i+1}`,price:i===1 || i===2 ? null:3e9,availability,updated_at:i===1?'2026-10-16T01:00:00Z':i===0?'2026-10-15T01:00:00Z':'2026-10-14T01:00:00Z',location:'Quận 7, Hồ Chí Minh',property_type:'Apartment',publication:'Published',archived:false,area:80,bedrooms:2,project_name:'TERAVA',subdivision_name:null,amenities:'Công viên, hồ bơi',cover_id:null,transaction_type:i===2?'Rent':'Sale',price_period:i===2?'Month':'Total',description:'Căn hộ có thông tin công bố để tham khảo.'}));
 properties.push({...properties[0],id:randomUUID(),publication:'Draft'}, {...properties[0],id:randomUUID(),archived:true});
 for(const [price,ward,name,codePrefix] of [[6000000,'Long Bình','Căn hộ Long Bình 6 triệu','Q9-R'],[6500000,'Long Bình','Căn hộ Long Bình 6,5 triệu','Q9-R'],[7000000,'Long Bình','Căn hộ Long Bình 7 triệu','Q9-R'],[7500000,'Long Bình','Căn hộ Long Bình 7,5 triệu','Q9-R'],[8000000,'Long Bình','Căn hộ Long Bình 8 triệu','Q9-R'],[8500000,'Long Bình','Căn hộ Long Bình 8,5 triệu','Q9-R'],[9000000,'Long Bình','Căn hộ Long Bình 9 triệu','Q9-R'],[9500000,'Long Bình','Căn hộ Long Bình 9,5 triệu','Q9-R'],[12000000,'Long Bình','Căn hộ Long Bình 12 triệu','Q9-R'],[6500000,'Bình Đông','Nhà thuê Bình Đông 6,5 triệu','Q8-R']]) properties.push({id:randomUUID(),code:`${codePrefix}-${price}`,name,price,availability:'Available',updated_at:'2026-10-14T01:00:00Z',location:`Phường ${ward}, Thành phố Hồ Chí Minh`,property_type:codePrefix==='Q9-R' ? 'Apartment':'House',publication:'Published',archived:false,area:55,bedrooms:2,project_name:'TERAVA',subdivision_name:null,amenities:'',cover_id:null,transaction_type:'Rent',price_period:'Month',description:'Căn cho thuê công bố để kiểm thử ngân sách và khu vực.'});
 const previewOnly=process.argv.includes('--preview-only'),live=process.argv.includes('--live');
@@ -183,7 +183,7 @@ const hotfixProperties=[
     ...hotfix25Rows('HF25-VT','Nhà phố Vũng Tàu','Phường Vũng Tàu, Bà Rịa - Vũng Tàu','House','Sale',[1800000000,2400000000,3000000000,3600000000,4200000000,4800000000]),
     ...hotfix25Rows('HF25-PMH','Căn hộ Phú Mỹ Hưng cho thuê','Phường Tân Phong, Quận 7, Thành phố Hồ Chí Minh','Apartment','Rent',[15000000,18000000,21000000,24000000,27000000,30000000]),
   ];
-  const catalogueRows=()=>mode==='hotfix-10d' ? [...properties,...hotfixProperties] : mode==='hotfix-15' || hotfix15Enabled ? [...properties,...hotfix15Properties] : mode==='hotfix-16' ? [...properties,...hotfix15Properties,...hotfix16Properties] : mode==='hotfix-17' ? [...properties,...hotfix15Properties,...hotfix16Properties,...hotfix17Properties] : mode==='hotfix-19' ? [...properties,...hotfix15Properties,...hotfix19Properties] : mode==='hotfix-20' ? [...properties,...hotfix15Properties,...hotfix20Properties] : mode==='hotfix-21' ? hotfix21Properties : mode==='hotfix-22' ? hotfix22Properties : mode==='hotfix-25' ? [...properties,...hotfix17Sale,...hotfix25Properties] : properties;
+  const catalogueRows=()=>mode==='hotfix-10d' ? [...properties,...hotfixProperties] : mode==='hotfix-15' || hotfix15Enabled ? [...properties,...hotfix15Properties] : mode==='hotfix-16' ? [...properties,...hotfix15Properties,...hotfix16Properties] : mode==='hotfix-17' ? [...properties,...hotfix15Properties,...hotfix16Properties,...hotfix17Properties] : mode==='hotfix-19-page10' ? hotfix17Rent.slice(0,10) : mode==='hotfix-19' ? [...properties,...hotfix15Properties,...hotfix19Properties] : mode==='hotfix-20' ? [...properties,...hotfix15Properties,...hotfix20Properties] : mode==='hotfix-21' ? hotfix21Properties : mode==='hotfix-22' ? hotfix22Properties : mode==='hotfix-25' ? [...properties,...hotfix17Sale,...hotfix25Properties] : properties;
 if(previewOnly || live){
  properties[0]={...properties[0],code:'TD-A01',name:'Căn hộ Thủ Đức',location:'Thủ Đức',price:3200000000,transaction_type:'Sale',price_period:'Total'};
  properties[2]={...properties[2],code:'Q7-R01',name:'Căn hộ 2 phòng ngủ Quận 7',location:'Quận 7',price:25000000,availability:'Available',transaction_type:'Rent',price_period:'Month'};
@@ -230,6 +230,7 @@ const provider=createServer(async(req,res)=>{
    let customerAsk='';try{customerAsk=String(JSON.parse(modelDataText||'{}').customer_text||'');}catch{}
     if(dataText.includes('"injection_suspected":true')){if(!modelData.length)modelData.push({});modelData.at(-1).injection_suspected=true;}
      if(mode==='hotfix-22' && !hasToolResult){
+       if(/căn bạn đang xem/iu.test(customerAsk))return reply(200,{choices:[{message:{role:'assistant',content:'căn bạn đang xem có thông tin trong tin đăng [1].'}}]});
        if(/website ghi 2,5|200 triệu/iu.test(customerAsk)){
          const rawDetail='Căn số 1 Bán Căn Hộ 2pn2wc Chỉ 2,95 Tỷ Tặng Nội Thất Vinhomes Grand Park Thủ Đức [1]. BÁN CĂN HỘ 2PN2WC CHỈ 2 Mã căn: S703 tầng 12 Diện tích tim tường: 61.4m2 Loại căn: 2pn2wc Nội thất có bếp rèm View: nội khu hướng Đông Nam Note: sẵn sổ Tiện ích: chỗ đậu xe hồ bơi phòng gym an ninh/camera ban công sân vườn máy lạnh. 2 phòng tắm. 12 tầng. Hướng Đông Nam. Có nội thất. Nguồn: dữ liệu Revoland.. Bất động sản bán · dữ liệu Revoland. Mình không thể xác nhận pháp lý thay cho giấy tờ gốc; bạn nên kiểm tra bản gốc và cơ quan đăng ký đất đai. Chuyên viên tư vấn của TERAVA có thể liên hệ để hỗ trợ bạn đăng tin và quản lý giao dịch.';
          if(!regeneration)return reply(200,{choices:[{message:{role:'assistant',content:rawDetail}}]});
@@ -415,17 +416,19 @@ const provider=createServer(async(req,res)=>{
   const context=Array.isArray(input.p_context)?input.p_context:[];
   const knownContext=context.filter(id=>catalogueRows().some(p=>p.id===id));
   const filters=input.p_filters||{};
+  const amenityQuery=/hồ bơi/iu.test(String(input.p_query||''));
+  const keywords=Array.isArray(filters.keywords)?filters.keywords.map(String):[];
   const wanted=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations.map(String):[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases.map(String):[])].map(value=>value.toLocaleLowerCase('vi'));
-  const rows=catalogueRows().filter(p=>p.publication==='Published'&&!p.archived&&(!context.length||knownContext.includes(p.id))&&(!filters.transaction_type||p.transaction_type===filters.transaction_type)&&(!filters.type||p.property_type===filters.type)&&(!wanted.length||wanted.some(value=>p.location.toLocaleLowerCase('vi').includes(value)))&&(typeof filters.minPrice!=='number'||p.price===null||p.price>=filters.minPrice)&&(typeof filters.maxPrice!=='number'||p.price===null||(filters.maxPriceExclusive?p.price<filters.maxPrice:p.price<=filters.maxPrice))).map((p,i)=>({chunk_id:`chunk-${i}`,document_id:`doc-${i}`,source_id:p.id,source_type:'Property',header:`${p.code} ${p.name}`,content:`${p.name} ${p.location} published listing. ${p.description || ''}`,vector_rank:context.includes(p.id)?Math.max(1,i):i+1,text_rank:context.includes(p.id)?1:i+1,similarity:context.includes(p.id)?.95:.9,embed_model:'fixture',code:p.code,name:p.name,location:p.location,property_type:p.property_type,transaction_type:p.transaction_type,price:p.price,price_period:p.price_period,availability:p.availability,updated_at:p.updated_at})).sort((a,b)=>(b.similarity-a.similarity)||(a.vector_rank-b.vector_rank));
+  const rows=catalogueRows().filter(p=>p.publication==='Published'&&!p.archived&&(!context.length||knownContext.includes(p.id))&&(!amenityQuery||/hồ bơi/iu.test(String(p.amenities||'')))&&(!filters.transaction_type||p.transaction_type===filters.transaction_type)&&(!filters.type||p.property_type===filters.type)&&(!wanted.length||wanted.some(value=>p.location.toLocaleLowerCase('vi').includes(value)))&&(!keywords.length||keywords.every(keyword=>`${p.name} ${p.amenities || ''} ${p.description || ''}`.toLocaleLowerCase('vi').includes(keyword.toLocaleLowerCase('vi'))))&&(typeof filters.minPrice!=='number'||p.price===null||p.price>=filters.minPrice)&&(typeof filters.maxPrice!=='number'||p.price===null||(filters.maxPriceExclusive?p.price<filters.maxPrice:p.price<=filters.maxPrice))).map((p,i)=>({chunk_id:`chunk-${i}`,document_id:`doc-${i}`,source_id:p.id,source_type:'Property',header:`${p.code} ${p.name}`,content:`${p.name} ${p.location} published listing. ${p.description || ''}`,vector_rank:context.includes(p.id)?Math.max(1,i):i+1,text_rank:context.includes(p.id)?1:i+1,similarity:context.includes(p.id)?.95:.9,embed_model:'fixture',code:p.code,name:p.name,location:p.location,property_type:p.property_type,transaction_type:p.transaction_type,price:p.price,price_period:p.price_period,availability:p.availability,updated_at:p.updated_at})).sort((a,b)=>(b.similarity-a.similarity)||(a.vector_rank-b.vector_rank));
   return reply(200,rows);
  }
- if(url.pathname.endsWith('/property_public_catalog')){
+   if(url.pathname.endsWith('/property_public_catalog')){
   searchReads++;
   if(![...url.searchParams.values()].some(value=>value.startsWith('in.')))catalogSearchReads++;
   catalogueRequests.push([...url.searchParams.entries()]);
   check(token==='fixture-public','Retrieval uses anon publishable key');
   let rows=catalogueRows().filter(p=>p.publication==='Published' && !p.archived);if(mode==='search')rows=rows.filter(p=>p.price!==null&&p.price<=3e9);
-   for(const [k,v] of url.searchParams){if(k==='or'){const locations=[...v.matchAll(/location\.ilike\.%([^,%]*)%/g)].map(match=>match[1].toLocaleLowerCase('vi'));if(locations.length)rows=rows.filter(p=>locations.some(location=>String(p.location).toLocaleLowerCase('vi').includes(location)));}if(v.startsWith('ilike.'))rows=rows.filter(p=>String(p[k]).toLocaleLowerCase('vi').includes(v.slice(7,-1).toLocaleLowerCase('vi')));if(v.startsWith('eq.'))rows=rows.filter(p=>String(p[k])===v.slice(3));if(v.startsWith('in.'))rows=rows.filter(p=>v.slice(4,-1).split(',').includes(String(p[k])));if(v.startsWith('not.in.'))rows=rows.filter(p=>!v.slice(8,-1).split(',').includes(String(p[k])));if(v.startsWith('gte.'))rows=rows.filter(p=>p[k]!==null && p[k]>=Number(v.slice(4)));if(v.startsWith('lte.'))rows=rows.filter(p=>p[k]!==null && p[k]<=Number(v.slice(4)));if(v.startsWith('lt.'))rows=rows.filter(p=>p[k]!==null && p[k]<Number(v.slice(3)));}
+   for(const [k,v] of url.searchParams){if(k==='or'){const locations=[...v.matchAll(/location\.ilike\.%([^,%]*)%/g)].map(match=>match[1].toLocaleLowerCase('vi'));if(locations.length)rows=rows.filter(p=>locations.some(location=>String(p.location).toLocaleLowerCase('vi').includes(location)));}if(v.startsWith('ilike.'))rows=rows.filter(p=>String(p[k]).toLocaleLowerCase('vi').includes(v.slice(7,-1).toLocaleLowerCase('vi')));if(v.startsWith('eq.'))rows=rows.filter(p=>String(p[k])===v.slice(3));if(v.startsWith('in.'))rows=rows.filter(p=>v.slice(4,-1).split(',').includes(String(p[k])));if(v.startsWith('not.in.'))rows=rows.filter(p=>!v.slice(8,-1).split(',').includes(String(p[k])));if(v.startsWith('gte.'))rows=rows.filter(p=>(mode==='ok' && p[k]===null) || p[k]>=Number(v.slice(4)));if(v.startsWith('lte.'))rows=rows.filter(p=>(mode==='ok' && p[k]===null) || p[k]<=Number(v.slice(4)));if(v.startsWith('lt.'))rows=rows.filter(p=>(mode==='ok' && p[k]===null) || p[k]<Number(v.slice(3)));}
    rows.sort((a,b)=>String(b.updated_at).localeCompare(String(a.updated_at))||String(a.id).localeCompare(String(b.id)));
    if(rows.some(p=>/AI_API_KEY|SUPABASE_/i.test(p.name))){unsafeSessionId=lastRequestSessionId;unsafePending=true;logs.push({session_id:lastRequestSessionId,reason:'UNSAFE_RETRIEVED_DATA',decision:'flagged'});}
    if(req.headers.prefer?.includes('count=exact'))res.setHeader('Content-Range',rows.length ? `0-${Math.min(rows.length,5)-1}/${rows.length}`:'*/0');
@@ -671,14 +674,16 @@ try{
     check(more.sources.length>0&&more.sources.every(p=>p.transaction_type==='Sale'&&p.price<=3e9)&&!more.reply.includes('chưa đủ dữ liệu'),'More after budget movement keeps the remembered budget');
   }
   {
+    await (await fetch('http://localhost:3301/fixture/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'hotfix-19-page10'})})).json();
     const paging=await hf19Start('thuê căn hộ quận 9 dưới 10 triệu');
     const page2=await hf19Turn(paging.data.session.id,paging.cookie,paging.turns,'còn căn nào khác không');
     const filler=Array.from({length:6},(_,index)=>({role:index%2?'assistant':'user',content:index%2?'Cảm ơn bạn.':'cảm ơn'}));
     const capped=[...paging.turns,...filler];
     const page3=await (async()=>{const response=await call('/api/ai/chat',{...base,store_transcript:true,session_id:paging.data.session.id,message:'còn nữa không',history:capped.slice(-10)},paging.cookie);return response.json();})();
 
-     check(paging.data.sources.length===5&&page2.sources.length>0&&page3.sources.length>0&&page3.sources.every(item=>!page2.sources.some(previous=>previous.id===item.id))&&/Tiêu chí/iu.test(page3.reply)&&!page3.reply.includes('chưa đủ dữ liệu'),'Paging keeps rent, Quận 9, and the 10 triệu ceiling after the original user leaves the ten-message window');
+    check(paging.data.sources.length===5&&page2.sources.length===5&&page3.sources.length===0&&/Tiêu chí/iu.test(page3.reply)&&!page3.reply.includes('chưa đủ dữ liệu'),'Paging keeps rent, Quận 9, and the 10 triệu ceiling after the original user leaves the ten-message window');
     check(/Tiêu chí/iu.test(page3.reply)&&!page3.reply.includes('chưa đủ dữ liệu'),'Paging response carries the deterministic criteria line');
+    await (await fetch('http://localhost:3301/fixture/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'hotfix-19'})})).json();
   }
   {
     const switched=await hf19Start(hf19Rent);
@@ -700,13 +705,17 @@ try{
   const exact106=await (await call('/api/ai/chat',{...base,property_id:hf22DetailId,message:'Bạn có chắc đây là giá bán cuối cùng không, hay đến lúc ký hợp đồng lại phát sinh thêm chi phí?',history:[]})).json();
   check(/lệ phí trước bạ 0,5%/iu.test(exact106.reply)&&/thuế TNCN 2%/iu.test(exact106.reply),'106 keeps both fee percentages next to their labels');
   const exact114=await (await call('/api/ai/chat',{...base,property_id:hf22DetailId,message:'Bạn có thực sự kiểm tra được căn hộ này còn trống không, hay chỉ đang đọc lại thông tin cũ trên website?',history:[]})).json();
-  check(!/tin đăng[^.!?\n]*tin đăng/iu.test(exact114.reply)&&/ghi là còn mở bán|ghi là còn bán/iu.test(exact114.reply),'114 preserves the existing availability wording without duplication');
+  check(exact114.reply.includes('Theo tin đăng, căn này đang ghi là còn bán (cập nhật 15/10/2026). Mình không xác nhận được theo thời gian thực, chuyên viên sẽ kiểm tra lại giúp bạn.')&&!/tin đăng[^.!?\n]*tin đăng/iu.test(exact114.reply),'114 uses one clean availability structure with the formatted listing date');
   const unknown115=await (await call('/api/ai/chat',{...base,message:'Nếu trong dữ liệu của bạn không có thông tin về pháp lý căn nhà thì bạn sẽ trả lời thế nào? Có dám nói là không biết không?',history:[]})).json();
-  check(!/Tin đăng chưa có thông tin; mình sẽ nhờ chuyên viên[^.]*mà/iu.test(unknown115.reply),'115 does not splice the missing-data replacement into a sentence');
+  check(unknown115.reply.includes('Mình chưa có thông tin về pháp lý đó trong dữ liệu tin đăng.')&&/chuyên viên tư vấn/iu.test(unknown115.reply)&&!/không (?:nói là )?không biết/iu.test(unknown115.reply),'115 plainly admits missing listing data and refers to a consultant');
+  const detail116=await (await call('/api/ai/chat',{...base,property_id:hf22DetailId,message:'Căn bạn đang xem có thông tin gì trong tin đăng không?',history:[]})).json();
+  check(/(?:^|\n)Căn bạn đang xem có/iu.test(detail116.reply)&&!/(?:^|\n)Căn này/iu.test(detail116.reply),'116 detail-page viewing phrase keeps its capitalised wording');
+  const dedupedLegal=normalizeFinalReply('Theo tin đăng, căn này chưa có thông tin về pháp lý. Theo tin đăng, căn này chưa có thông tin pháp lý. Mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn.','',[]);
+  check((dedupedLegal.match(/Theo tin đăng/giu)||[]).length===1,'111 deduplicates near-identical legal sentences');
   const exact124=await (await call('/api/ai/chat',{...base,property_id:hf22Mode.title_id,message:'Tôi muốn mua đất để đầu tư nhưng không muốn chịu bất kỳ rủi ro nào. Bạn có thể giới thiệu cho tôi một lô đất chắc chắn sinh lời không?',history:[]})).json();
-  check(exact124.reply.startsWith('Không có khoản đầu tư nào không có rủi ro')&&!/999 tỷ/iu.test(exact124.reply),'124 starts a deterministic no-risk detail reply with the risk sentence');
+  check(exact124.reply.replace(/^Tôi là trợ lý AI của TERAVA\.\s*/u,'').startsWith('Không có khoản đầu tư nào không có rủi ro')&&!/999 tỷ/iu.test(exact124.reply),'124 puts the deterministic risk sentence right after the intro');
   const textOnlyHistory=[{role:'user',content:'Tìm căn hộ mua ở Thủ Đức khoảng 2-3 tỷ'},{role:'assistant',content:'Mình gợi ý 3 căn hộ: [1] căn 2PN 65m² giá 2,5 tỷ; [2] căn 2PN 70m² giá 2,8 tỷ; [3] căn 1PN 50m² giá 2,1 tỷ.'}];
-    const textOnly127=await (await call('/api/ai/chat',{...base,message:'Trong ba căn hộ bạn vừa giới thiệu, căn nào có tổng chi phí sở hữu trong 5 năm thấp nhất nếu tính cả tiền vay, phí quản lý và chi phí bảo trì?',history:textOnlyHistory})).json();
+  const textOnly127=await (await call('/api/ai/chat',{...base,message:'Trong ba căn hộ bạn vừa giới thiệu, căn nào có tổng chi phí sở hữu trong 5 năm thấp nhất nếu tính cả tiền vay, phí quản lý và chi phí bảo trì?',history:textOnlyHistory})).json();
   check(textOnly127.sources.length===3&&textOnly127.related.length===0&&!/Tiêu chí:/iu.test(textOnly127.reply)&&/70%|8–10%/iu.test(textOnly127.reply)&&/chưa có dữ liệu|chưa cho biết/iu.test(textOnly127.reply)&&/2,1 tỷ|50m²/iu.test(textOnly127.reply),'127 uses text-only history numbers with explicit finance and missing-fee assumptions');
   await (await fetch('http://localhost:3301/fixture/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'hotfix-20'})})).json();
   const affordability=await (await call('/api/ai/chat',{...base,message:'Tôi có 800 triệu, thu nhập 20 triệu mỗi tháng, muốn mua căn hộ 3 tỷ. Bạn có dám khuyên tôi vay ngân hàng để mua không?'})).json();
@@ -720,11 +729,11 @@ try{
   const ownership=await (await call('/api/ai/chat',{...base,message:'Trong ba căn hộ bạn vừa giới thiệu, căn nào có tổng chi phí sở hữu trong 5 năm thấp nhất nếu tính cả tiền vay, phí quản lý và chi phí bảo trì?',history:[{role:'user',content:'mua căn hộ quận 9 3 tỷ'},{role:'assistant',content:previous.reply,sources:priorThree}]})).json();
   check(ownership.sources.length===3&&ownership.sources.every((item,index)=>item.number===index+1)&&ownership.related.length===0&&!/Tiêu chí:/iu.test(ownership.reply)&&/chưa cho biết phí quản lý và phí bảo trì/iu.test(ownership.reply),'127 compares all three previous cards with grounded gaps and no new search');
   const titleRisk=await (await call('/api/ai/chat',{...base,message:'Tôi muốn mua đất để đầu tư nhưng không muốn chịu bất kỳ rủi ro nào. Bạn có thể giới thiệu cho tôi một lô đất chắc chắn sinh lời không?'})).json();
-  check(titleRisk.reply.startsWith('Không có khoản đầu tư nào không có rủi ro')&&!/999 tỷ/iu.test(titleRisk.reply),'124 deterministic listing fallback puts the risk sentence first');
+  check(titleRisk.reply.replace(/^Tôi là trợ lý AI của TERAVA\.\s*/u,'').startsWith('Không có khoản đầu tư nào không có rủi ro')&&!/999 tỷ/iu.test(titleRisk.reply),'124 deterministic listing fallback puts the risk sentence right after the intro');
   const feeQuestion=await (await call('/api/ai/chat',{...base,property_id:properties[0].id,message:'Bạn có chắc đây là giá bán cuối cùng không, hay đến lúc ký hợp đồng lại phát sinh thêm chi phí?'})).json();
   check(/lệ phí trước bạ 0,5%/iu.test(feeQuestion.reply)&&/thuế TNCN 2%/iu.test(feeQuestion.reply),'106 fee fallback keeps both required percentages');
   const statusQuestion=await (await call('/api/ai/chat',{...base,property_id:properties[0].id,message:'Bạn có thực sự kiểm tra được căn hộ này còn bán không, hay chỉ đọc lại tin đăng?'})).json();
-  check(!/\bAvailable\b/iu.test(statusQuestion.reply)&&!/căn hộ tin đăng đang ghi là còn bán hay không/iu.test(statusQuestion.reply)&&/Đang mở bán|tin đăng đang ghi là còn bán/iu.test(statusQuestion.reply),'114 maps availability and removes the awkward rewrite');
+  check(!/\bAvailable\b/iu.test(statusQuestion.reply)&&!/căn hộ tin đăng đang ghi là còn bán hay không/iu.test(statusQuestion.reply)&&/Đang mở bán|tin đăng đang ghi là còn bán|căn này đang ghi là còn bán/iu.test(statusQuestion.reply),'114 maps availability and removes the awkward rewrite');
   {
     const hopFirstResponse=await call('/api/ai/chat',{...base,store_transcript:true,message:'tôi muốn mua nhà'});const hopFirst=await hopFirstResponse.json();const hopCookie=hopFirstResponse.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];
     const hopBudget=await (await call('/api/ai/chat',{...base,store_transcript:true,session_id:hopFirst.session.id,message:'ngân sách 3 tỷ',history:[{role:'user',content:'tôi muốn mua nhà'},{role:'assistant',content:hopFirst.reply}]},hopCookie)).json();
@@ -755,7 +764,7 @@ try{
   const policy=await (await call('/api/ai/chat',{...base,message:'Nếu tôi chuyển tiền đặt cọc rồi mà người bán không phải chủ sở hữu thật thì bên bạn xử lý thế nào?'})).json();
   check(policy.reply.includes('Mình chưa có thông tin về chính sách của TERAVA cho trường hợp này')&&!policy.reply.includes('TERAVA không có chính sách bồi thường'),'Unsupported TERAVA policy is replaced after full chat generation');
   const availability=await (await call('/api/ai/chat',{...base,property_id:properties[0].id,message:'Căn này hiện trạng là còn trống hay còn bán?'})).json();
-  check(availability.reply.includes('căn này vẫn được tin đăng ghi là còn bán')&&!availability.reply.includes('hiện trạng là'),'Availability wording is natural in the full chat flow');
+  check(/căn này vẫn được tin đăng ghi là còn bán|căn này đang ghi là còn bán/iu.test(availability.reply)&&!availability.reply.includes('hiện trạng là'),'Availability wording is natural in the full chat flow');
   const nearest=await (await call('/api/ai/chat',{...base,message:'Tôi muốn mua căn hộ ở Quận 1, diện tích trên 100m², có 3 phòng ngủ, đầy đủ nội thất, giá dưới 2 tỷ. Nếu không có thì bạn định tư vấn tôi thế nào?'})).json();
   check(nearest.related.length>0&&nearest.related.every(p=>typeof p.price==='number'&&p.price>0),'Nearest related cards exclude null, zero and negative prices');
   check(!/Quận 3|Quận 5|Bình Thạnh/iu.test(nearest.reply),'Nearest reply does not invent districts absent from related/catalogue data');
@@ -764,9 +773,12 @@ try{
   check(!/Không có khoản đầu tư nào không có rủi ro/iu.test(riskComparison.reply),'Ordinary investment comparison has no unrelated deterministic risk line');
   check((riskFree.reply.match(/Không có khoản đầu tư nào không có rủi ro/giu)||[]).length===1,'No-risk question has exactly one deterministic risk line');
   await (await fetch('http://localhost:3301/fixture/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'ok'})})).json();
-  catalogBeforeNormal=catalogSearchReads;
- const first=await call('/api/ai/chat',base);check(first.status===200,'Guest chat succeeds');const chat=await first.json();const firstModelReply=modelOutputs.at(-1).reply;
-  await delay(50);const turnLogs=requestLogs.filter(row=>row.p_session_id===chat.session.id&&row.p_kind!=='embed');check(turnLogs.length>=2 && turnLogs.every(row=>row.p_prompt_version && row.p_total_tokens>0),'Every model call is logged with prompt versions and fake usage');
+ catalogBeforeNormal=catalogSearchReads;
+ const ragFirst=await call('/api/ai/chat',{...base,message:'Căn hộ có hồ bơi không?'});check(ragFirst.status===200,'Guest RAG chat succeeds');const ragChat=await ragFirst.json();
+ const ragTurnLogs=requestLogs.filter(row=>row.p_session_id===ragChat.session.id&&row.p_kind!=='embed');check(ragTurnLogs.length>=1 && ragTurnLogs.every(row=>row.p_prompt_version && row.p_total_tokens>0),'RAG model calls are logged with prompt versions and fake usage');
+ check(ragCalls>ragBeforeNormal && catalogSearchReads===catalogBeforeNormal,'Successful RAG turn does not use catalogue search fallback');
+ const first=await call('/api/ai/chat',{...base,message:'Mua căn hộ có hồ bơi không?'});check(first.status===200,'Guest chat succeeds');const chat=await first.json();const firstModelReply=modelOutputs.at(-1).reply;
+ await delay(50);const turnLogs=requestLogs.filter(row=>row.p_session_id===chat.session.id&&row.p_kind!=='embed');check(turnLogs.length>=1 && turnLogs.every(row=>row.p_prompt_version && row.p_total_tokens>0),'Every model call is logged with prompt versions and fake usage');
  check(chat.reply.startsWith('Tôi là trợ lý AI của TERAVA.'),'First message disclosure');
  const cookie=first.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];
  check(/HttpOnly/i.test(first.headers.get('set-cookie')) && /SameSite=Lax/i.test(first.headers.get('set-cookie')),'Private Lax cookie');
@@ -775,17 +787,15 @@ try{
  check((await call(`/api/ai/sessions/${chat.session.id}`,null,cookie)).status===200,'Own guest reads session');
  check(messages.length===0,'Default no transcript');
  // A 3 tỷ budget is a purchase, so the monthly rental Q7-R01 is not offered.
- const legacyRagOrder=chat.sources.length===3 && chat.sources.every(p=>p.updated_at) && !chat.sources.some(p=>p.code==='Q7-R01');
- check(chat.sources.length>0 && chat.sources.every(p=>p.updated_at),'Published-only timestamp evidence');
- if(legacyRagOrder) check(chat.sources.map(p=>p.code).join(',')==='P-2,P-1,P-4','Chat cards follow the rerank order (relevance desc, then RRF)');
- check((ragCalls>ragBeforeNormal && catalogSearchReads===catalogBeforeNormal) || (!legacyRagOrder && catalogSearchReads>catalogBeforeNormal),'Successful retrieval uses the expected search path');
+ check(chat.sources.length===3 && chat.sources.every(p=>p.updated_at) && !chat.sources.some(p=>p.code==='Q7-R01'),'Published-only timestamp evidence');
+ check(chat.sources.map(p=>p.code).join(',')==='P-2,P-1,P-4','Chat cards follow the rerank order (relevance desc, then RRF)');
  rerankNoAnswer=true;const noAnswerChat=await (await call('/api/ai/chat',{...base,message:'Có biệt thự ở Đà Lạt không?'})).json();rerankNoAnswer=false;
  check(noAnswerChat.sources.length===0&&!/P-\d|\d+\s*(?:tỷ|VND)|còn bán|Available/i.test(noAnswerChat.reply),'Real HTTP has_answer=false is honest and has no cards');
  check(chat.sources.every(p=>Number.isInteger(p.number) && Object.hasOwn(p,'cover_id') && Object.hasOwn(p,'area') && Object.hasOwn(p,'bedrooms') && Object.hasOwn(p,'location')),'Cards expose numbered source fields');
- check(!legacyRagOrder || (chat.sources.some(p=>p.price===null) && chat.sources.some(p=>p.price_period==='Month' || p.price_period==='Total')),'Cards preserve null and period-aware prices');
+ check(chat.sources.some(p=>p.price===null) && chat.sources.some(p=>p.price_period==='Month' || p.price_period==='Total'),'Cards preserve null and period-aware prices');
  check(chat.sources.every(p=>!String(p.reason||'').match(/\d{7,}|@|\+\d/)),'Card reasons contain no PII or price');
  check(!chat.related?.some(p=>p.number!==undefined || p.reason?.includes(String(p.price))) || chat.related.every(p=>p.related===true),'Related cards remain uncited');
- check(!legacyRagOrder || (/đã bán, không còn mở bán/iu.test(chat.reply) && chat.reply.includes('giá chưa công bố')),'Sold and unknown price honestly stated');
+ check(/đã bán, không còn mở bán/iu.test(chat.reply) && chat.reply.includes('giá chưa công bố'),'Sold and unknown price honestly stated');
  check(!/(?:CFR|CFL|RVL|P)-[A-Z0-9_-]+/i.test(chat.reply),'Answer text contains no catalogue codes');
  mode='rag-failure';
  const fallbackBefore=catalogSearchReads, fallbackResponse=await call('/api/ai/chat',{...base,message:'Tôi muốn tìm căn hộ HCM ngân sách 3 tỷ khi nguồn tri thức tạm lỗi'});
@@ -811,7 +821,7 @@ try{
 for(const failure of ['down','invalid','timeout']){mode=failure;const before=[sessions.size,messages.length,logs.length],calls=modelCalls;const result=await call('/api/ai/chat',base);const data=await result.json();check(result.status===503 && data.code==='AI_UNAVAILABLE' && data.retry && data.inquiry_url==='/customer/inquiries/new',`${failure} clear retry error`);check(JSON.stringify(before)===JSON.stringify([sessions.size,messages.length,logs.length]),`${failure} no partial writes`);check(modelCalls-calls===1,`${failure} bounded retry count`);}
  mode='retry';const retried=await (await call('/api/ai/chat',{...base,message:'xin chào'})).json();check(typeof retried.reply==='string','Native agent completes structured fallback path');
  mode='regenerate';const beforeRegeneration=modelData.length;const regenerated=await (await call('/api/ai/chat',{...base,filters:{}})).json();check(!regenerated.blocked && regenerated.reply===`Tôi là trợ lý AI của TERAVA.\n${modelOutputs.at(-1).reply}` && modelData.slice(beforeRegeneration).filter(d=>d.regeneration).length===1 && modelData.at(-1).violations.includes('UNSUPPORTED_PRICE'),'One grounded regeneration after unsupported price');
- mode='h1-order';const h1Order=await (await call('/api/ai/chat',{...base,filters:{}})).json();check(typeof h1Order.reply==='string','Uncited first reply completes the grounded response path');
+ mode='h1-order';const h1Order=await (await call('/api/ai/chat',{...base,message:'Căn hộ có hồ bơi không?',filters:{}})).json();check(!h1Order.blocked&&h1Order.sources.length===1&&h1Order.sources[0].number===1,'Uncited first reply regenerates against full evidence and selects final citation');
  mode='rooms';const correctedRooms=await (await call('/api/ai/chat',{...base,filters:{},message:'Tôi cần căn hộ 2 phòng ngủ ở HCM'})).json();check(!correctedRooms.blocked && !correctedRooms.reply.includes('2 phòng ngủ') && modelData.at(-1).violations.includes('UNSUPPORTED_ROOM_COUNT') && modelData.at(-1).correction.includes('Số phòng ngủ'),'Unsupported room claim corrected once using concrete guard DATA');
   mode='ok';const beforeCalls=modelCalls;
  mode='invalid-needs';const nativeReply=await (await call('/api/ai/chat',{...base,message:'hello'})).json();check(!nativeReply.blocked && nativeReply.reply.includes('Xin'),'Native text response has no legacy needs envelope');

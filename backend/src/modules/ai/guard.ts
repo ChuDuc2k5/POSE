@@ -90,6 +90,22 @@ import { displayListingName } from './display.js';
 export const GUARD_VERSION='guard.v3';
 export const safeReply='Mình chưa đủ dữ liệu để trả lời chắc chắn câu này. Bạn muốn mình nhờ chuyên viên tư vấn kiểm tra và báo lại cho bạn không?';
 export const disclosure='Tôi là trợ lý AI của TERAVA.';
+export type FinalReplyParts={intro?:string;notices?:string[];body?:string;trailing?:string[];originalBody?:string;fallbackNotice?:string};
+/** Assemble system-inserted text around the model body in one stable order. */
+export function assembleFinalReply(parts:FinalReplyParts) {
+  const intro=String(parts.intro || '').trim();
+  const body=String(parts.body || '').trim();
+  const assembled=[intro,...(parts.notices || []),body,...(parts.trailing || [])]
+    .map(part=>String(part || '').trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+  const originalBody=sanitizeReply(String(parts.originalBody || ''));
+  const hasContentBeyondIntro=[...(parts.notices || []),body,...(parts.trailing || [])].some(part=>String(part || '').trim());
+  if(intro && originalBody && !hasContentBeyondIntro && assembled===intro)
+    return [intro,parts.fallbackNotice,originalBody].map(part=>String(part || '').trim()).filter(Boolean).join('\n').trim();
+  return assembled;
+}
 const realEstateWords=/căn|nhà|đất|phòng|giá|thuê|mua|bất động sản|dự án|khu vực|diện tích|chuyên viên|lịch xem|yêu thích|Q\d|RV-/i;
 // Fallback only: the validated query step (`topic`) decides scope. This list is used when
 // that step is unavailable. JS \b is ASCII-only, so Unicode letter lookarounds delimit words.
@@ -352,8 +368,22 @@ export function dedupeListings<T extends { name?: string; price?: number|null; a
   });
 }
 
+const availabilityQuestion=(question:string)=>/(?:còn\s+(?:bán|trống|không|cho\s+thuê)|đã\s+bán\s+chưa|kiểm\s+tra(?:\s+(?:giúp|giùm))?[^.!?\n]{0,80}(?<![\p{L}])còn(?![\p{L}]))/iu.test(question);
+
+type AvailabilitySource={availability?:string;updated_at?:string;transaction_type?:string;property_id?:string|null};
+export function availabilityNoticeForReply(question:string,sources:AvailabilitySource[],specificListing=false) {
+  if(!specificListing || !availabilityQuestion(question))return '';
+  const available=sources.find(source=>source.availability==='Available');
+  if(!available)return '';
+  const date=available.updated_at?.match(/^(\d{4})-(\d{2})-(\d{2})/u);
+  const formattedDate=date ? `${date[3]}/${date[2]}/${date[1]}` : '';
+  const status=available.transaction_type==='Rent' ? 'còn cho thuê' : 'còn bán';
+  return `Theo tin đăng, căn này đang ghi là ${status}${formattedDate ? ` (cập nhật ${formattedDate})` : ''}. Mình không xác nhận được theo thời gian thực, chuyên viên sẽ kiểm tra lại giúp bạn.`;
+}
+
 export function rewriteUnverifiedAvailability(reply:string, question:string, sources:{ availability?: string }[]) {
-  if(!sources.some(source=>source.availability==='Available') || !/(?:còn\s+trống|còn\s+bán|thực\s+sự|kiểm\s+tra.*còn)/iu.test(question))return reply;
+  const available=sources.find(source=>source.availability==='Available');
+  if(!available || !availabilityQuestion(question))return reply;
   let result=reply
     .replace(/tin đăng đang cập nhật tình trạng tin đăng đang ghi là còn bán/giu, 'tin đăng đang ghi là còn bán')
     .replace(/(?:căn(?:\s+hộ)?|nhà)\s+tin\s+đăng\s+(?:đang|được)\s+ghi\s+là\s+còn\s+bán(?:\s+hay\s+không)?/giu,'tin đăng đang ghi là còn bán; mình không thể xác nhận theo thời gian thực')
@@ -378,11 +408,106 @@ export function correctUnknownReply(reply:string) {
   return reply.replace(/(^|[.!?\n]\s*)([^.!?\n]*\bkhông(?:\s+\p{L}+){0,12}\s+nói\s+không\s+biết\b[^.!?\n]*[.!?]?)/giu, '$1Tin đăng chưa có thông tin; mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn.');
 }
 
-export function normalizeFinalReply<T extends { availability?: string }>(reply:string, question:string, sources:T[]) {
-  return removeUnpromptedNegotiation(
-    rewriteUnverifiedAvailability(correctUnknownReply(sanitizeReply(reply)), question, sources),
+export type NormalizeFinalReplyOptions={specificListing?:boolean;includeAvailabilityNotice?:boolean};
+export function normalizeFinalReply<T extends { availability?: string }>(reply:string, question:string, sources:T[], options:NormalizeFinalReplyOptions={}) {
+  const specificListing=options.specificListing ?? sources.some(source=>Boolean((source as T & { property_id?: string|null }).property_id));
+  const includeAvailabilityNotice=options.includeAvailabilityNotice ?? true;
+  let prepared=sanitizeReply(reply);
+  const originalMissing=prepared.match(/Tin đăng chưa có thông tin về ([^.!?\n]+)[.!?]\s*Mình (?:không tự ý đoán hay )?(?:nói(?: là)? )?không biết[^.!?\n]*[.!?]?/iu);
+  if(originalMissing)prepared=prepared.replace(originalMissing[0],`Mình chưa có thông tin về ${originalMissing[1]} trong dữ liệu tin đăng. Mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn.`);
+  let result=removeUnpromptedNegotiation(
+    (!specificListing && sources.length===1 ? rewriteUnverifiedAvailability(correctUnknownReply(prepared), question, sources) : correctUnknownReply(prepared)),
     question,
   );
+  const canonical=availabilityNoticeForReply(question,sources as AvailabilitySource[],specificListing);
+  if(canonical) {
+    const availability=/(?:còn\s+(?:bán|trống|không|cho\s+thuê)|đang\s+(?:mở\s+bán|cho\s+thuê)|đã\s+(?:được\s+)?bán(?:\s+chưa)?|tin\s+đăng(?:\s+đang|\s+được)?\s+ghi\s+là\s+còn\s+bán|thời\s+gian\s+thực|kiểm\s+tra\s+tình\s+trạng)/iu;
+    // Protect the complete system notice before splitting into sentences. Its
+    // first sentence intentionally contains availability wording and must not
+    // be mistaken for model text.
+    const marker='\uE000AVAILABILITY_NOTICE\uE001';
+    const canonicalPattern=new RegExp(canonical.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'giu');
+    const protectedResult=result.replace(canonicalPattern,marker);
+    const parts=protectedResult.split(/((?<=[.!?])\s+|\n+)/u),kept:string[]=[];
+    for(let index=0;index<parts.length;index+=2){
+      const sentence=parts[index],separator=parts[index+1] || '';
+      if(sentence.includes(marker)){kept.push(sentence,separator);continue;}
+      if(availability.test(sentence))continue;
+      kept.push(sentence,separator);
+    }
+    let restored=false;
+    result=kept.join('').replace(new RegExp(marker,'g'),()=>restored ? '' : (restored=true,canonical));
+    if(includeAvailabilityNotice && !result.includes(canonical))result=assembleFinalReply({notices:[canonical],body:result});
+  }
+  const legacyMissing=result.match(/Tin đăng chưa có thông tin về ([^.!?\n]+)\.\s*Tin đăng chưa có thông tin;\s*mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn\.?/iu);
+  if(legacyMissing)result=result.replace(legacyMissing[0],`Mình chưa có thông tin về ${legacyMissing[1]} trong dữ liệu tin đăng. Mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn.`);
+  const missingData=result.match(/Tin đăng chưa có thông tin về ([^.!?\n]+)[.!?]\s*Mình (?:không tự ý đoán hay )?(?:nói(?: là)? )?không biết[^.!?\n]*[.!?]?/iu);
+  if(missingData)result=result.replace(missingData[0],`Mình chưa có thông tin về ${missingData[1]} trong dữ liệu tin đăng. Mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn.`);
+  result=result.replace(/,\./gu,'.').replace(/\.,/gu,'.').replace(/\.{2,}/gu,'.').replace(/\s+\./gu,'.').trim();
+  const normalizePromisedCards=(text:string)=>{
+    const parts=text.split(/((?<=[.!?])\s+|\n+)/u),kept:string[]=[];
+    const promise=/\b\d+\s+căn\s+(?:tương tự|khác|thay thế|gần tiêu chí|gần nhất|phù hợp)/iu;
+    for(let index=0;index<parts.length;index+=2){
+      let sentence=parts[index],separator=parts[index+1] || '';
+      if(!promise.test(sentence)){kept.push(sentence,separator);continue;}
+      if(!sources.length)continue;
+      sentence=sentence.replace(/\b\d+(?=\s+căn\s+(?:tương tự|khác|thay thế|gần tiêu chí|gần nhất|phù hợp))/iu,String(sources.length));
+      kept.push(sentence,separator);
+    }
+    return kept.join('');
+  };
+  result=normalizePromisedCards(result);
+  const tokens=(text:string)=>text.normalize('NFC').toLocaleLowerCase('vi').match(/[\p{L}\p{N}]+/gu) || [];
+  const similarity=(left:string,right:string)=>{
+    const a=tokens(left),b=tokens(right);if(!a.length||!b.length)return 0;
+    if(Math.min(a.length,b.length)<5)return 0;
+    const rightSet=new Set(b);return a.filter(token=>rightSet.has(token)).length/Math.max(a.length,b.length);
+  };
+  const dedupeLine=(line:string)=>{
+    if(/^\s*(?:[-•*]|\d+\.)(?:\s|$)/u.test(line))return line;
+    const parts=line.split(/((?<=[.!?])\s+)/u),kept:string[]=[];
+    const citations=(text:string)=>[...text.matchAll(/\[(\d+)\]/gu)].map(match=>match[1]);
+    const numbers=(text:string)=>[...text.matchAll(/(?<![\p{L}\d])\d+(?:[.,]\d+)?(?![\p{L}\d])/gu)].map(match=>match[0]);
+    const comparable=(left:string,right:string)=>{
+      const leftCitations=citations(left),rightCitations=citations(right);
+      if((leftCitations.length || rightCitations.length) && JSON.stringify(leftCitations)!==JSON.stringify(rightCitations))return false;
+      if(JSON.stringify(numbers(left))!==JSON.stringify(numbers(right)))return false;
+      return similarity(left,right)>=.8;
+    };
+    for(let index=0;index<parts.length;index+=2){
+      const sentence=parts[index],separator=parts[index+1] || '';
+      if(kept.filter((_,position)=>position%2===0).some(previous=>comparable(previous,sentence)))continue;
+      kept.push(sentence,separator);
+    }
+    return kept.join('');
+  };
+  result=result.split(/(\r?\n)/u).map(part=>part.match(/^\r?\n$/u) ? part : dedupeLine(part)).join('');
+  const capitalizeSentenceStarts=(text:string)=>text.split(/(\r?\n)/u).map(line=>{
+    if(line.match(/^\r?\n$/u)||/^\s*(?:[-•*]|\d+\.)(?:\s|$)/u.test(line))return line;
+    let fixed=line.replace(/^(\s*)(\p{Ll})/u,(_,space,letter)=>space+letter.toLocaleUpperCase('vi'));
+    return fixed.replace(/([.!?]\s+)(\p{Ll})/gu,(match,prefix,letter,offset,whole)=>{
+      const before=(whole.slice(0,offset)+prefix).trim();
+      if(/(?:^|\s)(?:TP|Tp|Q|P|v\.v|St)\.$/u.test(before))return match;
+      return prefix+letter.toLocaleUpperCase('vi');
+    });
+  }).join('');
+  result=capitalizeSentenceStarts(result);
+  const legalFact=/(?:(?:sổ\s+(?:hồng|đỏ)|pháp\s+lý)(?![\p{L}\p{N}])[^.!?\n]*(?:đã\s+có|chưa\s+có|được\s+ghi)|(?:đã\s+có|chưa\s+có|được\s+ghi)[^.!?\n]*(?:sổ\s+(?:hồng|đỏ)|pháp\s+lý)(?![\p{L}\p{N}]))/iu;
+  const deterministicLegal=/^\s*Theo tin đăng,[^.!?\n]*(?:sổ\s+(?:hồng|đỏ)|pháp\s+lý)[^.!?\n]*cơ quan đăng ký/iu;
+  const legalClaim=/(?:lời hứa|lời hẹn|nhân viên|thời hạn ra sổ|không thể xác nhận lời)/iu;
+  const legalParts=result.split(/((?<=[.!?])\s+)/u),hasDeterministic=legalParts.some((part,index)=>index%2===0&&deterministicLegal.test(part));
+  if(hasDeterministic){
+    let claimKept=false;const kept:string[]=[];
+    for(let index=0;index<legalParts.length;index+=2){
+      const sentence=legalParts[index],separator=legalParts[index+1] || '';
+      if(deterministicLegal.test(sentence)){kept.push(sentence,separator);continue;}
+      if(legalFact.test(sentence))continue;
+      if(legalClaim.test(sentence)){if(claimKept)continue;claimKept=true;}
+      kept.push(sentence,separator);
+    }
+    result=kept.join('');
+  }
+  return result;
 }
 
 export function isRawListingDump(reply: string) {

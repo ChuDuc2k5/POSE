@@ -11,7 +11,7 @@ import { normalizePhone } from '../../common/profile-validation.js';
 import { object } from './extraction.js';
 import { inferSearch, inferTransactionType, centralFormerDistricts, genericHome } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
-import { correctionData, labelMonthlyRent, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, normalizeCitations, discardInvalidCitations, redactListingCodesSafe, isAbusive, abusiveReply, dedupeListings, rewriteUnverifiedAvailability, rewriteAvailabilityLabels, availabilityLabel, removeUnpromptedNegotiation, normalizeFinalReply, outputDiagnostic, rewriteUnsupportedPolicy, isValidListingPrice, isRawListingDump, removeUnpromptedOwnerTemplate, type Evidence } from './guard.js';
+import { correctionData, labelMonthlyRent, disclosure, GUARD_VERSION, safeReply, groundedSummary, isOutOfScope, scopeFromTopic, outOfScopeReply, explicitWriteIntent, sourcesFromCitations, normalizeCitations, discardInvalidCitations, redactListingCodesSafe, isAbusive, abusiveReply, dedupeListings, rewriteAvailabilityLabels, availabilityLabel, removeUnpromptedNegotiation, normalizeFinalReply, assembleFinalReply, availabilityNoticeForReply, outputDiagnostic, rewriteUnsupportedPolicy, isValidListingPrice, isRawListingDump, removeUnpromptedOwnerTemplate, type Evidence } from './guard.js';
 import { RetrievalService, renderRetrievedContextWithCards, deterministicReason, type RetrievalResult, type RankedChunk } from './retrieval.js';
 import { runAgent } from './agent.ts';
 import { assistantPrompt, complete, querySearch, checkAnswer, extractNeedsAfterReply, streamAgentStep } from './llm.ts';
@@ -151,7 +151,7 @@ function historicalOwnershipReply(items: Evidence[], question: string) {
   });
   const lowest = properties.filter(item => typeof item.price === 'number').sort((left, right) => (left.price ?? Infinity) - (right.price ?? Infinity))[0];
   const lowestNumber = lowest?.number ?? properties.indexOf(lowest) + 1;
-  const lowestArea = lowest?.area ? `/${lowest.area} m²` : '';
+  const lowestArea = lowest?.area ? `/${lowest.area}m²` : '';
   return `Mình đối chiếu các căn bạn vừa nhắc theo đúng số thứ tự; đây là ước tính minh họa, không phải báo giá vay:\n${lines.join('\n')}\nDữ liệu chưa cho biết phí quản lý và phí bảo trì; các khoản phí này chưa có dữ liệu nên chưa thể cộng thành tổng chi phí sở hữu 5 năm chính xác. Với các số đang biết và giả định trên, căn số ${lowestNumber}${lowestArea} có khả năng là phương án có tổng chi phí thấp nhất; bạn nên nhờ chuyên viên xác nhận các khoản phí và ngân hàng xác nhận lịch trả nợ.`;
 }
 
@@ -246,7 +246,7 @@ export class AiService {
          ? areas.map(area=>`${area.label} (${Number(area.count)} tin${maxPrice!==undefined ? ` ≤ ${priceLabel(maxPrice,monthly)}` : ''})`).join(', ')
          : 'chưa có khu vực phù hợp trong dữ liệu hiện có';
        const typeText=propertyType ? `${typeLabels[propertyType] || propertyType} ` : '';
-       const reply=`Hiện TERAVA chưa có tin ${typeText}${transactionType==='Rent' ? 'cho thuê' : transactionType==='Sale' ? 'đang bán' : ''} tại ${outsideCity}. TERAVA hiện có danh mục tại TP.HCM và một số khu vực lân cận; với tiêu chí hiện tại, các khu có tin là: ${areaLine}. Bạn muốn xem khu vực nào trong danh mục này?`;
+        const reply=assembleFinalReply({body:`Hiện TERAVA chưa có tin ${typeText}${transactionType==='Rent' ? 'cho thuê' : transactionType==='Sale' ? 'đang bán' : ''} tại ${outsideCity}. TERAVA hiện có danh mục tại TP.HCM và một số khu vực lân cận; với tiêu chí hiện tại, các khu có tin là: ${areaLine}. Bạn muốn xem khu vực nào trong danh mục này?`});
        const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:reply,p_sources:[],p_actions:[],p_fields:{},p_score:null});
        if(committed.error)return catalogDatabaseError(committed.error);
        return guestCatalog({session:committed.data,reply,scope:'in_scope',sources:[],related:[],clarify:{needed:false,question:null,options:areas.slice(0,3).map(area=>String(area.label))},proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
@@ -275,7 +275,7 @@ export class AiService {
        if(!areas.length){
          const nearest=await retrieve({transaction_type:transactionType,type:propertyType,minPrice:maxPrice+1},null);
          cards.push(...nearest.filter(item=>typeof item.price==='number' && item.price>maxPrice).sort((a,b)=>(a.price??Infinity)-(b.price??Infinity)).slice(0,3).map(item=>({...item,relaxed_reason:'Ngoài ngân sách đã nêu',reason:'Ngoài ngân sách đã nêu'})));
-         reply+=cards.length ? '\nMình gửi một vài lựa chọn gần nhất ở trên ngân sách đã nêu, có nhãn để bạn dễ cân nhắc. Chuyên viên cũng có thể tìm thêm giúp bạn.' : '\nMình có thể nhờ chuyên viên tìm thêm lựa chọn phù hợp hoặc tư vấn điều chỉnh ngân sách.';
+          reply=assembleFinalReply({body:reply,trailing:[cards.length ? 'Mình gửi một vài lựa chọn gần nhất ở trên ngân sách đã nêu, có nhãn để bạn dễ cân nhắc. Chuyên viên cũng có thể tìm thêm giúp bạn.' : 'Mình có thể nhờ chuyên viên tìm thêm lựa chọn phù hợp hoặc tư vấn điều chỉnh ngân sách.']});
        }
        const sources=cards.map((item,index)=>({...item,number:index+1,source_type:'Property' as const}));
        const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:reply,p_sources:sources,p_actions:[],p_fields:{},p_score:null});
@@ -285,7 +285,7 @@ export class AiService {
      if(overviewKind && !input.property_id && !referencedListingCodes(source,sanitizedHistory).codes.length){
        const overviewTransaction=/(?:cho\s+thuê|cho\s+thuê|thuê)/iu.test(source) ? 'Rent' : /(?:đang\s+bán|bên\s+mình\s+có\s+bán|bán)/iu.test(source) ? 'Sale' : undefined;
        const overview=await catalogueOverview(overviewKind,overviewTransaction);
-       const reply=`${count===0 ? `${disclosure}\n` : ''}${overview.reply}`.trimStart();
+        const reply=assembleFinalReply({intro:count===0 ? disclosure : '',body:overview.reply});
        const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id || null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:reply,p_sources:[],p_actions:[],p_fields:{},p_score:null});
        if(committed.error)return catalogDatabaseError(committed.error);
        return guestCatalog({session:committed.data,reply,scope:'in_scope',sources:[],related:[],clarify:{needed:true,question:null,options:overview.options},proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
@@ -293,8 +293,9 @@ export class AiService {
     // A question about a listing being viewed or just discussed ("đã gồm phí môi giới chưa?") is a buyer's question.
     if(ownerRequest(source) && !codeReference.codes.length && !input.property_id){
       const selling=/(?<![\p{L}])bán(?![\p{L}])/iu.test(source) && !/cho\s+thuê/iu.test(source);
-      const ownerReply=`${count===0 ? `${disclosure}\n` : ''}Mình hiểu ${address} đang muốn ${selling ? 'bán' : 'cho thuê/bán'} bất động sản. ${/phí|hoa\s+hồng|phần\s+trăm|chi\s+phí/iu.test(source) ? `Hiện mình chưa có thông tin về phí môi giới hay phần trăm hoa hồng; chuyên viên sẽ báo cụ thể cho ${address}. ` : ''}${unsupportedCriteria(source).includes('thời gian bán') ? `Hiện mình chưa có thông tin để ước tính thời gian bán được nhà; chuyên viên sẽ xem vị trí, giá và tình trạng nhà để tư vấn cụ thể cho ${address}. ` : ''}TERAVA có thể kết nối ${address} với chuyên viên để ${selling ? 'định giá, đăng tin, tìm người mua' : 'tìm người thuê, đăng tin'} và hỗ trợ hợp đồng. ${addressStart} muốn gặp chuyên viên tư vấn không?`;
-      const ownerReplyWithValuation=ownerValuationQuestion(source) ? `${ownerReply}\nHiện mình chưa có thông tin/dữ liệu để định giá thị trường căn của ${address}; chuyên viên sẽ kiểm tra cụ thể cho ${address}.` : ownerReply;
+       const ownerBody=`Mình hiểu ${address} đang muốn ${selling ? 'bán' : 'cho thuê/bán'} bất động sản. ${/phí|hoa\s+hồng|phần\s+trăm|chi\s+phí/iu.test(source) ? `Hiện mình chưa có thông tin về phí môi giới hay phần trăm hoa hồng; chuyên viên sẽ báo cụ thể cho ${address}. ` : ''}${unsupportedCriteria(source).includes('thời gian bán') ? `Hiện mình chưa có thông tin để ước tính thời gian bán được nhà; chuyên viên sẽ xem vị trí, giá và tình trạng nhà để tư vấn cụ thể cho ${address}. ` : ''}TERAVA có thể kết nối ${address} với chuyên viên để ${selling ? 'định giá, đăng tin, tìm người mua' : 'tìm người thuê, đăng tin'} và hỗ trợ hợp đồng. ${addressStart} muốn gặp chuyên viên tư vấn không?`;
+       const ownerReply=assembleFinalReply({intro:count===0 ? disclosure : '',body:ownerBody});
+       const ownerReplyWithValuation=ownerValuationQuestion(source) ? assembleFinalReply({body:ownerReply,trailing:[`Hiện mình chưa có thông tin/dữ liệu để định giá thị trường căn của ${address}; chuyên viên sẽ kiểm tra cụ thể cho ${address}.`]}) : ownerReply;
       const committed=await systemClient().rpc('pose_system_ai_commit_chat',{p_session:id,p_user:who.session?.user.id||null,p_hash:who.guestHash,p_store:input.store_transcript,p_message:source,p_reply:ownerReplyWithValuation,p_sources:[],p_actions:[],p_fields:{},p_score:null});
       if(committed.error)return catalogDatabaseError(committed.error);
       return guestCatalog({session:committed.data,reply:ownerReplyWithValuation,scope:'in_scope',sources:[],related:[],clarify:{needed:false,question:null,options:[]},proposals:[],pending_actions:[],inquiry_url:'/customer/inquiries/new'});
@@ -868,7 +869,10 @@ export class AiService {
      const guardContext={retrievalFound:rag?.found??evidenceItems.length>0,faqOnly:evidenceItems.length>0&&evidenceItems.every(x=>x.source_type==='Faq'),filterAmounts:[...new Set([...filterAmounts,...rememberedBudgetAmounts,...currentBudgetAmounts])],previousPrices:[...new Set([...previousPrices,...relatedPrices])],sourceText:`${rag?.context||''}\n${generalKnowledge}\n${marketNote}\n${listingTextForGuard}`,listingText:listingTextForGuard,practice:generalKnowledge.length>0};
      const derivedFinance=derivedFinanceAmounts(source,[...evidenceItems,...related].map(item=>item.price).filter((value): value is number => typeof value==='number' && Number.isFinite(value)));
       Object.assign(guardContext,{financeAmounts:[...(financeEvidence?.amounts || []),...derivedFinance,...historicalFinanceAmounts],financeRanges:financeEvidence?.ranges || [],financePresent:Boolean(financeEvidence || derivedFinance.length || historicalFinanceAmounts.length),faqEvidence:faqRows.length>0 || generalKnowledge.length>0});
-      result.reply=removeUnpromptedNegotiation(rewriteUnverifiedAvailability(rewriteAvailabilityLabels(removeReplyArtifacts(discardInvalidCitations(normalizeListedPrices(labelMonthlyRent(normalizeCitations(result.reply,evidenceItems),evidenceItems),evidenceItems),evidenceItems),evidenceItems,moreRequest),evidenceItems),source,evidenceItems),source);
+       // Availability is inserted as a system notice during final assembly. Keep
+       // the model body untouched here so status claims can be removed as whole
+       // sentences by normalizeFinalReply.
+       result.reply=removeUnpromptedNegotiation(rewriteAvailabilityLabels(removeReplyArtifacts(discardInvalidCitations(normalizeListedPrices(labelMonthlyRent(normalizeCitations(result.reply,evidenceItems),evidenceItems),evidenceItems),evidenceItems),evidenceItems,moreRequest),evidenceItems),source);
       const legalDetail=[...details.values(),...(rag?.chunks || []).map(chunk=>String(chunk.content || '')),...evidenceItems.map(item=>String((item as {description?:unknown}).description || ''))].find(detail=>{const folded=[...detail.normalize('NFD')].filter(char=>{const code=char.codePointAt(0) || 0; return code<0x300 || code>0x36f;}).join('').replace(String.fromCodePoint(0x0111),'d').toLocaleLowerCase('vi'); return folded.includes('so hong') || folded.includes('so do') || folded.includes('san so') || folded.includes('so rieng');});
       const legalFactFromText=(detail:string) => {
         const folded=[...detail.normalize('NFD')].filter(char=>{const code=char.codePointAt(0) || 0; return code<0x300 || code>0x36f;}).join('').replace(String.fromCodePoint(0x0111),'d').toLocaleLowerCase('vi');
@@ -895,21 +899,17 @@ export class AiService {
       log('final_output',result.reply,violation);
       const retryMessages=[...agentMessages,{role:'user' as const,content:`BEGIN_UNTRUSTED_DATA\n${JSON.stringify({regeneration:true,violation,...correctionData(violation)})}\nEND_UNTRUSTED_DATA`}];
        agent=actionRequest || !compactAnswer ? await run(retryMessages) : await complete({question:standalone,history:sanitizedHistory,market_summary:marketNote||undefined,finance_calculation:financeNote||undefined,viewed_listing:viewedPropertyId?'Khách đang xem căn [1] trên trang chi tiết; "căn này" là căn [1].':undefined,properties:modelProperties(evidenceItems),general_knowledge:generalKnowledge||undefined,customer_text:source,customer_name:customerName||undefined,search_performed:searchPerformed,budget_follow_up:budgetAdjustment ? `${budgetAdjustment.direction}; ${JSON.stringify(budgetAdjustment.filters)}` : undefined}).then(model=>({text:model.reply,messages:[],pending:[],blocked:[],steps:1}));
-        result.reply=removeUnpromptedNegotiation(
-         rewriteUnverifiedAvailability(
-           rewriteAvailabilityLabels(
-             removeReplyArtifacts(
-               discardInvalidCitations(labelMonthlyRent(normalizeCitations(correctUnknownReply(sanitizeReply(agent.text || safeReply)),evidenceItems),evidenceItems),evidenceItems),
-               evidenceItems,
-               moreRequest,
-             ),
-             evidenceItems,
-           ),
-           source,
-           evidenceItems,
-         ),
+         result.reply=removeUnpromptedNegotiation(
+          rewriteAvailabilityLabels(
+            removeReplyArtifacts(
+              discardInvalidCitations(labelMonthlyRent(normalizeCitations(correctUnknownReply(sanitizeReply(agent.text || safeReply)),evidenceItems),evidenceItems),evidenceItems),
+              evidenceItems,
+              moreRequest,
+            ),
+            evidenceItems,
+          ),
           source,
-       );
+        );
        result.reply=normalizeListedPrices(result.reply,evidenceItems);
        result.reply=removeUnpromptedOwnerTemplate(result.reply,explicitWriteIntent(source));
        const retryViolation=this.guard.outputReason(result.reply,evidenceItems,source,guardContext) || ((viewedPropertyId || codeReference.codes.length===1) && isRawListingDump(result.reply) ? 'RAW_LISTING_DUMP' : null);
@@ -998,8 +998,16 @@ export class AiService {
         const postLegalReply=legalTarget && legalQuestionDirect && postLegalFact ? legalFactReply(legalTarget,postLegalFact) : '';
         const finalLegalReply=evidenceItems.length===1 && legalQuestionDirect && groundedLegalDetail ? legalFactReply(evidenceItems[0],groundedLegalDetail) : '';
        const deterministicListingReply=blocked ? (evidenceItems.length ? groundedSummary(evidenceItems) : safeReply) : result.reply;
-      const deterministicRiskPrefix=blocked&&evidenceItems.length&&riskQuestion ? `${investmentRiskLine.trimStart()}\n` : '';
-       const reply=deterministicRiskPrefix+(!hasDisclosure && count===0 ? `${disclosure}\n`:'')+criteriaLine+(moreNoNew ? '' : (cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatchPrefix))+(moreNoNew || cheaperNoMatch || blocked && !items.length && noMatch && !modelAlreadyNoMatch ? '' : (postLegalReply || finalLegalReply || (blocked ? deterministicListingReply:result.reply)))+areaToleranceSuffix+moreStatus+unsupportedSuffix+ownerSuffix+loanSuffix+bookingLine+contactLine+nearestLine+availableAreasLine+sameAreaTypesLine+similarLine+appendBudget;
+      const specificListingReply=Boolean(viewedPropertyId || codeReference.codes.length===1);
+      const availabilityNotice=availabilityNoticeForReply(source,evidenceItems,specificListingReply);
+      const systemBodyPrefix=moreNoNew ? '' : (cheaperNoMatch ? cheaperFallbackReply(items,area,nearbyFor(area)) : noMatchPrefix);
+      const modelBody=moreNoNew || cheaperNoMatch || blocked && !items.length && noMatch && !modelAlreadyNoMatch ? '' : (postLegalReply || finalLegalReply || (blocked ? deterministicListingReply:result.reply));
+      const reply=assembleFinalReply({
+        intro:!hasDisclosure && count===0 ? disclosure : '',
+        notices:[availabilityNotice,investmentRiskLine,criteriaLine,systemBodyPrefix],
+        body:modelBody,
+        trailing:[areaToleranceSuffix,moreStatus,unsupportedSuffix,ownerSuffix,loanSuffix,bookingLine,contactLine,nearestLine,availableAreasLine,sameAreaTypesLine,similarLine,appendBudget],
+      });
       const premiseCorrection=/chưa có sổ|chưa có sổ hồng/iu.test(source) && /sẵn sổ|sổ hồng/iu.test(listingText) ? '\nTheo dữ liệu tin đăng, căn này được ghi là đã có sổ hồng; mình không thể xác nhận lời hứa của bên thứ ba. Bạn nên xem bản gốc giấy chứng nhận và kiểm tra tại cơ quan đăng ký đất đai.' : '';
       const freshnessCorrection=/(?:bán rồi|đã bán|còn bán không|cập nhật lần cuối)/iu.test(source) && items[0]?.updated_at ? `\nMình xin lỗi vì tin có thể đã chậm so với thực tế. Dữ liệu tin đăng này cập nhật ngày ${String(items[0].updated_at).slice(0,10)}; mình có thể nhờ chuyên viên kiểm tra lại và gửi các căn tương tự.` : '';
       const externalSiteCorrection=/(?:bên khác|website khác|trang khác|nơi khác)/iu.test(source) && !/không thể kiểm tra|không kiểm chứng|không xác minh/iu.test(result.reply) ? '\nTERAVA không thể kiểm tra hoặc xác minh trực tiếp các tin đăng trên website khác; chuyên viên có thể xác nhận lại giá với chủ nhà.' : '';
@@ -1031,14 +1039,19 @@ export class AiService {
            return districts.every(district=>known.includes(district.normalize('NFC').toLocaleLowerCase('vi'))) ? whole : `${fallback}${punctuation}`;
          });
        };
-       const enrichedReply=historicalReply ? reply : neighbourFixed(policyFixed(dedupeNoMatchReply(reply+areaDeviationSuffix+financeSuffix+(deterministicRiskPrefix ? '' : investmentRiskLine)+premiseCorrection+freshnessCorrection+externalSiteCorrection+extraCostsSuffix)));
+       const enrichedReply=historicalReply ? reply : neighbourFixed(policyFixed(dedupeNoMatchReply(assembleFinalReply({body:reply,trailing:[areaDeviationSuffix,financeSuffix,premiseCorrection,freshnessCorrection,externalSiteCorrection,extraCostsSuffix]}))));
      // Only a detail-page chat may say the customer "is viewing" a listing (also covers regenerated answers).
      const viewingFixed=viewedPropertyId ? enrichedReply : enrichedReply.replace(/(^|[.!?\n]\s*)Bạn đang xem(?: có)?(?: các| những)? (?=(?:hai|ba|\d+)?\s*(?:căn|nhà|lô|đất))/gu,'$1Mình gợi ý ');
     // "tầng 12 của tòa nhà có 12 tầng": the unit floor never tells how tall the building is, unless the listing says so.
     const floorsFixed=viewingFixed.replace(/\s*(?:của|trong)\s+tòa(?: nhà)?(?: có)?\s+(\d+)\s+tầng(?=[\s,.;])/giu,(match,floors)=>evidenceItems.some(item=>item.property_type==='Apartment') || !new RegExp(`${floors}\\s*tầng`,'iu').test(listingText.replace(/tầng\s*\d+/giu,'')) ? '' : match);
     // Imported apartment details write the unit floor as "12 tầng", so for apartments the clause is always dropped.
-      const finalNormalisedReply=normalizeFinalReply(scrubOutsideDetailViewing(floorsFixed),source,evidenceItems);
-      const replyWithoutListingCodes=redactListingCodesSafe(finalNormalisedReply,evidenceItems).trimStart();
+      const finalSources=items.length ? items : evidenceItems;
+       const finalIntro=!hasDisclosure && count===0 ? disclosure : '';
+       const finalNormalisedReply=normalizeFinalReply(viewedPropertyId ? floorsFixed : scrubOutsideDetailViewing(floorsFixed),source,finalSources,{specificListing:specificListingReply,includeAvailabilityNotice:false});
+       const finalReply=finalNormalisedReply.trim()===finalIntro.trim() && modelBody.trim()
+         ? assembleFinalReply({intro:finalIntro,body:'',originalBody:modelBody,fallbackNotice:availabilityNotice})
+         : finalNormalisedReply;
+       const replyWithoutListingCodes=redactListingCodesSafe(finalReply,evidenceItems).trimStart();
     // needs_v1 is deliberately not on the response path. The deterministic
     // extraction below remains available for the commit, while the richer LLM
     // extraction runs after the reply has been sent and can never fail the turn.
