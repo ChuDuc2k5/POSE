@@ -820,24 +820,20 @@ const hotfix17GoVap = Array.from({ length: 4 }, (_, index) => {
 const hotfix17Properties = [...hotfix17Sale, ...hotfix17Rent, ...hotfix17GoVap];
 const hf19Q7 = 'Qu' + String.fromCodePoint(0x1ead) + 'n 7';
 const hf19BinhThanh = 'B' + String.fromCodePoint(0x00ec) + 'nh Th' + String.fromCodePoint(0x1ea1) + 'nh';
-const hotfix19Q7 = hotfix17Rent
-  .slice(0, 4)
-  .map((item, index) => ({
-    ...item,
-    id: randomUUID(),
-    code: `HF19-Q7-${index + 1}`,
-    name: `C${String.fromCodePoint(0x0103)}n h${String.fromCodePoint(0x1ed9)} ${hf19Q7} thu${String.fromCodePoint(0x00ea)} ${item.price / 1e6} tri${String.fromCodePoint(0x1ec7)}u`,
-    location: `Ph${String.fromCodePoint(0x01b0)}${String.fromCodePoint(0x1edd)}ng 1, ${hf19Q7}, Th${String.fromCodePoint(0x00e0)}nh ph${String.fromCodePoint(0x1ed1)} H${String.fromCodePoint(0x1ed3)} Ch${String.fromCodePoint(0x00ed)} Minh`,
-  }));
-const hotfix19BinhThanh = hotfix17Rent
-  .slice(4, 8)
-  .map((item, index) => ({
-    ...item,
-    id: randomUUID(),
-    code: `HF19-BT-${index + 1}`,
-    name: `C${String.fromCodePoint(0x0103)}n h${String.fromCodePoint(0x1ed9)} ${hf19BinhThanh} thu${String.fromCodePoint(0x00ea)} ${item.price / 1e6} tri${String.fromCodePoint(0x1ec7)}u`,
-    location: `Ph${String.fromCodePoint(0x01b0)}${String.fromCodePoint(0x1edd)}ng 1, ${hf19BinhThanh}, Th${String.fromCodePoint(0x00e0)}nh ph${String.fromCodePoint(0x1ed1)} H${String.fromCodePoint(0x1ed3)} Ch${String.fromCodePoint(0x00ed)} Minh`,
-  }));
+const hotfix19Q7 = hotfix17Rent.slice(0, 4).map((item, index) => ({
+  ...item,
+  id: randomUUID(),
+  code: `HF19-Q7-${index + 1}`,
+  name: `C${String.fromCodePoint(0x0103)}n h${String.fromCodePoint(0x1ed9)} ${hf19Q7} thu${String.fromCodePoint(0x00ea)} ${item.price / 1e6} tri${String.fromCodePoint(0x1ec7)}u`,
+  location: `Ph${String.fromCodePoint(0x01b0)}${String.fromCodePoint(0x1edd)}ng 1, ${hf19Q7}, Th${String.fromCodePoint(0x00e0)}nh ph${String.fromCodePoint(0x1ed1)} H${String.fromCodePoint(0x1ed3)} Ch${String.fromCodePoint(0x00ed)} Minh`,
+}));
+const hotfix19BinhThanh = hotfix17Rent.slice(4, 8).map((item, index) => ({
+  ...item,
+  id: randomUUID(),
+  code: `HF19-BT-${index + 1}`,
+  name: `C${String.fromCodePoint(0x0103)}n h${String.fromCodePoint(0x1ed9)} ${hf19BinhThanh} thu${String.fromCodePoint(0x00ea)} ${item.price / 1e6} tri${String.fromCodePoint(0x1ec7)}u`,
+  location: `Ph${String.fromCodePoint(0x01b0)}${String.fromCodePoint(0x1edd)}ng 1, ${hf19BinhThanh}, Th${String.fromCodePoint(0x00e0)}nh ph${String.fromCodePoint(0x1ed1)} H${String.fromCodePoint(0x1ed3)} Ch${String.fromCodePoint(0x00ed)} Minh`,
+}));
 hotfix17Rent[1].description = `Tin ${String.fromCodePoint(0x0111)}ang ghi c${String.fromCodePoint(0x0103)}n n${String.fromCodePoint(0x00e0)}y s${String.fromCodePoint(0x1eb5)}n s${String.fromCodePoint(0x1ed5)} h${String.fromCodePoint(0x1ed3)}ng.`;
 const hotfix19Raw = {
   ...hotfix17Rent[2],
@@ -1972,6 +1968,31 @@ const provider = createServer(async (req, res) => {
     });
     return reply(200, randomUUID());
   }
+  if (url.pathname === '/fixture/seed-ai-local') {
+    requestLogs.push({
+      p_model: 'gpt-4.1-mini',
+      p_prompt_tokens: 90,
+      p_completion_tokens: 30,
+      p_total_tokens: 120,
+      p_latency_ms: 25,
+      p_status: 'ok',
+      p_estimated_cost_usd: 0.001,
+      p_question_preview: 'OpenAI fixture',
+      created_at: '2026-10-24T00:00:00.000Z',
+    });
+    requestLogs.push({
+      p_model: 'qwen3-4b-instruct-2507',
+      p_prompt_tokens: 220,
+      p_completion_tokens: 80,
+      p_total_tokens: 300,
+      p_latency_ms: 40,
+      p_status: 'ok',
+      p_estimated_cost_usd: 0,
+      p_question_preview: 'local fixture',
+      created_at: '2026-10-24T00:00:00.000Z',
+    });
+    return reply(200, { seeded: true });
+  }
   if (url.pathname === '/fixture/ai-request-logs') return reply(200, requestLogs);
   if (url.pathname.endsWith('/pose_system_admin_ai_usage')) {
     if (role !== 'Admin') return error('42501', 'FORBIDDEN', 403);
@@ -1999,7 +2020,7 @@ const provider = createServer(async (req, res) => {
     if (role !== 'Admin') return reply(200, []);
     const rows = requestLogs.map((r, i) => ({
       id: `log-${i}`,
-      created_at: r.created_at || new Date().toISOString(),
+      created_at: r.created_at || '2026-10-24T00:00:00.000Z',
       turn_id: r.p_turn_id,
       question_preview: r.p_question_preview,
       kind: r.p_kind,
@@ -2014,7 +2035,17 @@ const provider = createServer(async (req, res) => {
       status: r.p_status,
       error_code: r.p_error_code || null,
     }));
-    const sum = (list, key) => list.reduce((n, r) => n + Number(r[key] || 0), 0),
+    const provider = (model) => {
+        const value = String(model || '')
+          .trim()
+          .toLowerCase();
+        if (value === 'deterministic') return 'Deterministic';
+        if (value.startsWith('gpt-') || value.startsWith('o') || value.startsWith('text-embedding-3-')) return 'OpenAI';
+        return 'Local';
+      },
+      openAiRows = rows.filter((r) => provider(r.model) === 'OpenAI'),
+      localRows = rows.filter((r) => provider(r.model) === 'Local'),
+      sum = (list, key) => list.reduce((n, r) => n + Number(r[key] || 0), 0),
       turnIds = [...new Set(rows.map((r) => r.turn_id).filter(Boolean))];
     const turn = (id) => {
       const list = rows.filter((r) => r.turn_id === id);
@@ -2039,36 +2070,79 @@ const provider = createServer(async (req, res) => {
         ['today', 'week', 'month'].map((period) => ({
           period,
           questions: turnIds.length,
-          calls: rows.length,
-          total_tokens: sum(rows, 'total_tokens'),
-          cost_usd: sum(rows, 'estimated_cost_usd'),
+          calls: openAiRows.length,
+          total_tokens: sum(openAiRows, 'total_tokens'),
+          cost_usd: sum(openAiRows, 'estimated_cost_usd'),
+          local_tokens: sum(localRows, 'total_tokens'),
+          local_calls: localRows.length,
           avg_turn_latency_ms: turnIds.length ? sum(rows, 'latency_ms') / turnIds.length : null,
           p95_turn_latency_ms: turnIds.length ? Math.max(...turnIds.map((id) => turn(id).turn_latency_ms)) : null,
-          error_fallback_rate: rows.length ? rows.filter((r) => r.status !== 'ok').length / rows.length : 0,
+          error_fallback_rate: openAiRows.length
+            ? openAiRows.filter((r) => r.status !== 'ok').length / openAiRows.length
+            : 0,
+          log_started_at: rows.length ? rows.map((r) => r.created_at).sort()[0] : null,
         })),
       );
     if (url.pathname.endsWith('_series'))
       return reply(
         200,
-        rows.length
+        openAiRows.length
           ? [
               {
                 bucket_start: new Date(new Date().setUTCHours(-7, 0, 0, 0)).toISOString(),
                 questions: turnIds.length,
-                calls: rows.length,
-                total_tokens: sum(rows, 'total_tokens'),
-                cost_usd: sum(rows, 'estimated_cost_usd'),
+                calls: openAiRows.length,
+                total_tokens: sum(openAiRows, 'total_tokens'),
+                cost_usd: sum(openAiRows, 'estimated_cost_usd'),
               },
             ]
           : [],
       );
+    if (url.pathname.endsWith('_by_model')) {
+      const grouped = new Map();
+      for (const row of [...openAiRows, ...localRows]) {
+        const key = `${provider(row.model)}|${row.model}`;
+        const current = grouped.get(key) || {
+          model: row.model,
+          provider: provider(row.model),
+          calls: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          cost_usd: 0,
+          avg_latency_ms: 0,
+        };
+        current.calls++;
+        current.input_tokens += row.prompt_tokens;
+        current.output_tokens += row.completion_tokens;
+        current.cost_usd += Number(row.estimated_cost_usd || 0);
+        current.avg_latency_ms += row.latency_ms;
+        grouped.set(key, current);
+      }
+      const models = [...grouped.values()].map((row) => ({ ...row, avg_latency_ms: row.avg_latency_ms / row.calls }));
+      models.push({
+        model: 'Tổng OpenAI',
+        provider: 'OpenAI',
+        calls: openAiRows.length,
+        input_tokens: sum(openAiRows, 'prompt_tokens'),
+        output_tokens: sum(openAiRows, 'completion_tokens'),
+        cost_usd: sum(openAiRows, 'estimated_cost_usd'),
+        avg_latency_ms: openAiRows.length ? sum(openAiRows, 'latency_ms') / openAiRows.length : 0,
+      });
+      models.sort(
+        (a, b) =>
+          (a.provider === 'OpenAI' ? 1 : 2) - (b.provider === 'OpenAI' ? 1 : 2) ||
+          (a.model === 'Tổng OpenAI' ? 1 : 0) - (b.model === 'Tổng OpenAI' ? 1 : 0) ||
+          a.model.localeCompare(b.model),
+      );
+      return reply(200, models);
+    }
     if (url.pathname.endsWith('_by_kind')) {
-      const kinds = [...new Set(rows.map((r) => `${r.kind}|${r.model}`))];
+      const kinds = [...new Set(openAiRows.map((r) => `${r.kind}|${r.model}`))];
       return reply(
         200,
         kinds.map((k) => {
           const [kind, model] = k.split('|'),
-            list = rows.filter((r) => r.kind === kind && r.model === model);
+            list = openAiRows.filter((r) => r.kind === kind && r.model === model);
           return {
             kind,
             model,
@@ -4160,8 +4234,9 @@ try {
       );
       check(
         (await call('/api/admin/ai-dashboard/series?bucket=week', null, admin)).status === 200 &&
-          (await call('/api/admin/ai-dashboard/kinds', null, admin)).status === 200,
-        'Dashboard series and kinds for Admin',
+          (await call('/api/admin/ai-dashboard/kinds', null, admin)).status === 200 &&
+          (await call('/api/admin/ai-dashboard/models', null, admin)).status === 200,
+        'Dashboard series, kinds and models for Admin',
       );
       check(
         (await call('/api/admin/ai-dashboard/series?bucket=year', null, admin)).status === 400 &&

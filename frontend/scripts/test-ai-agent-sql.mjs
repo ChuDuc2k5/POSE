@@ -6,7 +6,12 @@ import { join } from 'node:path';
 // Install outside the repository and set PGLITE_PATH to that package directory.
 if (!process.env.PGLITE_PATH) throw new Error('Set PGLITE_PATH to an external @electric-sql/pglite installation.');
 const { PGlite } = await import(pathToFileURL(join(process.env.PGLITE_PATH, 'dist/index.js')));
-const vector = await import(pathToFileURL(join(process.env.PGLITE_PATH, '..', 'pglite-pgvector', 'dist/index.js')));
+let vector;
+try {
+  vector = await import(pathToFileURL(join(process.env.PGLITE_PATH, '..', 'pglite-pgvector', 'dist/index.js')));
+} catch {
+  vector = await import(pathToFileURL(join(process.env.PGLITE_PATH, 'dist/vector/index.js')));
+}
 const unaccent = await import(pathToFileURL(join(process.env.PGLITE_PATH, 'dist', 'contrib', 'unaccent.js')));
 const db = new PGlite({
   extensions: {
@@ -70,6 +75,7 @@ try {
     'ai-request-log-cost.sql',
     'ai-request-log-session.sql',
     'ai-request-log-turns.sql',
+    'migrations/20261027290000_ai_dashboard_openai_split.sql',
   ]) {
     let sql = await readFile(new URL(`../../supabase/${file}`, import.meta.url), 'utf8');
     if (file === 'ai-request-log.sql')
@@ -117,10 +123,12 @@ try {
  ('a0000000-0000-4000-8000-000000000001','authenticated','authenticated','verified@example.test',now(),'{"role":"User","account_status":"active"}','+84901234567',now()),
  ('a0000000-0000-4000-8000-000000000002','authenticated','authenticated','unverified@example.test',now(),'{"role":"User","account_status":"active"}',null,null),
  ('a0000000-0000-4000-8000-000000000003','authenticated','authenticated','sales-one@example.test',now(),'{"role":"User","account_status":"active"}',null,null),
- ('a0000000-0000-4000-8000-000000000004','authenticated','authenticated','sales-two@example.test',now(),'{"role":"User","account_status":"active"}',null,null);
+  ('a0000000-0000-4000-8000-000000000004','authenticated','authenticated','sales-two@example.test',now(),'{"role":"User","account_status":"active"}',null,null),
+  ('a0000000-0000-4000-8000-000000000005','authenticated','authenticated','admin@example.test',now(),'{"role":"Admin","account_status":"active"}',null,null);
  insert into auth.sessions(id,user_id,created_at,updated_at) values
  ('a1000000-0000-4000-8000-000000000001','a0000000-0000-4000-8000-000000000001',now(),now()),
- ('a1000000-0000-4000-8000-000000000002','a0000000-0000-4000-8000-000000000002',now(),now());
+  ('a1000000-0000-4000-8000-000000000002','a0000000-0000-4000-8000-000000000002',now(),now()),
+  ('a1000000-0000-4000-8000-000000000005','a0000000-0000-4000-8000-000000000005',now(),now());
  insert into public.users(id,full_name,email,auth_user_id,role,account_status) values
  ('b0000000-0000-4000-8000-000000000001','Sales Owner','sales-one@example.test','a0000000-0000-4000-8000-000000000003','Sales','active'),
  ('b0000000-0000-4000-8000-000000000002','Sales Ward','sales-two@example.test','a0000000-0000-4000-8000-000000000004','Sales','active');
@@ -360,10 +368,15 @@ try {
   ($1,'Tìm căn hộ Quận 7','chat','gpt-4.1-mini','assistant@5','{search_properties,save_favorite}',100,40,140,120,'ok',0.001,'2026-10-20 23:30:03+00'),
   ($2,'Cảm ơn','chat','gpt-4.1-mini','assistant@5','{}',20,10,30,60,'fallback',0.0002,'2026-10-20 16:30:00+00'),
   ($3,'Xin chào','embed','text-embedding-3-small',null,'{}',10,0,10,5,'ok',0,'2026-10-18 12:00:00+00'),
-  ($4,'Hôm nay','chat','gpt-4.1-mini','assistant@5','{}',15,5,20,50,'ok',0.00002,now())`,
+  ($4,'Hôm nay','chat','gpt-4.1-mini','assistant@5','{}',15,5,20,50,'ok',0.00002,now()),
+  ($4,'Local','chat','qwen3-4b-instruct-2507','local@1','{}',250,50,300,40,'ok',0,now()),
+  (null,'Deterministic','query','deterministic',null,'{}',99,0,99,0,'ok',0,now())`,
     [turnIdA, turnIdB, turnIdC, turnIdD],
   );
   await db.exec("set test.ai_admin='1'");
+  await db.exec(
+    `set request.jwt.claims='{"sub":"a0000000-0000-4000-8000-000000000005","role":"authenticated","session_id":"a1000000-0000-4000-8000-000000000005"}'`,
+  );
   await db.exec('set role authenticated');
   const turns = (
     await db.query(
@@ -420,30 +433,86 @@ try {
     )
   ).rows;
   if (kinds[0]?.c !== 2 || kinds[0]?.tok !== 170) throw new Error('by_kind mismatch: ' + JSON.stringify(kinds));
+  await db.exec('set role postgres');
+  const providers = (
+    await db.query(
+      "select pose_private.ai_model_provider('gpt-4.1-mini') openai, pose_private.ai_model_provider('o4-mini') o_model, pose_private.ai_model_provider('qwen3-4b-instruct-2507') local, pose_private.ai_model_provider('deterministic') deterministic",
+    )
+  ).rows[0];
+  if (
+    providers.openai !== 'OpenAI' ||
+    providers.o_model !== 'OpenAI' ||
+    providers.local !== 'Local' ||
+    providers.deterministic !== 'Deterministic'
+  )
+    throw new Error('provider classification mismatch: ' + JSON.stringify(providers));
+  await db.exec('set role authenticated');
+  const models = (
+    await db.query(
+      "select model,provider,calls::int c,input_tokens::int input,output_tokens::int output,cost_usd::text cost,avg_latency_ms::int latency from public.pose_system_admin_ai_by_model('2026-10-01','2026-11-01')",
+    )
+  ).rows;
+  if (
+    models.map((row) => row.provider).join(',') !== 'OpenAI,OpenAI,OpenAI,Local' ||
+    models[0].model !== 'gpt-4.1-mini' ||
+    models[1].model !== 'text-embedding-3-small' ||
+    models[2].model !== 'Tổng OpenAI' ||
+    models[2].c !== 6 ||
+    models[2].input !== 235 ||
+    models[2].output !== 75 ||
+    Number(models[2].cost) !== 0.00192 ||
+    models[3].model !== 'qwen3-4b-instruct-2507' ||
+    models[3].c !== 1 ||
+    models[3].input !== 250 ||
+    models[3].output !== 50
+  )
+    throw new Error('by_model mismatch: ' + JSON.stringify(models));
   const turnCalls = (await db.query('select kind from public.pose_system_admin_ai_turn_calls($1)', [turnIdA])).rows
     .map((r) => r.kind)
     .join(',');
   if (turnCalls !== 'query,rerank,chat') throw new Error('turn_calls order mismatch: ' + turnCalls);
   const overview = (
     await db.query(
-      'select period,questions::int q,calls::int c,total_tokens::int tok from public.pose_system_admin_ai_overview()',
+      'select period,questions::int q,calls::int c,total_tokens::int tok,local_tokens::int local_tok,local_calls::int local_c,log_started_at::text started from public.pose_system_admin_ai_overview()',
     )
   ).rows;
   if (
     overview.map((r) => r.period).join(',') !== 'today,week,month' ||
     overview[0].q !== 1 ||
     overview[0].c !== 1 ||
-    overview[0].tok !== 20
+    overview[0].tok !== 20 ||
+    overview[0].local_tok !== 300 ||
+    overview[0].local_c !== 1 ||
+    !overview[0].started
   )
     throw new Error('overview mismatch: ' + JSON.stringify(overview));
+  const usage = (await db.query("select * from public.pose_system_admin_ai_usage('2026-10-01','2026-11-01',0,0)")).rows;
+  if (!usage.length) throw new Error('admin_ai_usage returned no Admin rows');
   await db.exec('reset role');
   await db.exec("set test.ai_admin='0'");
+  await db.exec(
+    `set request.jwt.claims='{"sub":"a0000000-0000-4000-8000-000000000001","role":"authenticated","session_id":"a1000000-0000-4000-8000-000000000001"}'`,
+  );
   await db.exec('set role authenticated');
-  const hidden =
-    (await db.query("select count(*)::int n from public.pose_system_admin_ai_turns('2026-10-01','2026-11-01')")).rows[0]
-      .n + (await db.query('select count(*)::int n from public.pose_system_admin_ai_overview()')).rows[0].n;
+  const dashboardCalls = [
+    ['select * from public.pose_system_admin_ai_overview()', []],
+    ["select * from public.pose_system_admin_ai_series('day','2026-10-01','2026-11-01')", []],
+    ["select * from public.pose_system_admin_ai_by_kind('2026-10-01','2026-11-01')", []],
+    ["select * from public.pose_system_admin_ai_by_model('2026-10-01','2026-11-01')", []],
+    ["select * from public.pose_system_admin_ai_turns('2026-10-01','2026-11-01')", []],
+    ['select * from public.pose_system_admin_ai_turn_calls($1)', [turnIdA]],
+    ["select * from public.pose_system_admin_ai_usage('2026-10-01','2026-11-01',0,0)", []],
+  ];
+  for (const [sql, params] of dashboardCalls) {
+    let denied = false;
+    try {
+      await db.query(sql, params);
+    } catch (error) {
+      denied = error?.code === '42501' || String(error?.message || error).includes('AI_DASHBOARD_FORBIDDEN');
+    }
+    if (!denied) throw new Error(`non-admin AI dashboard call was not rejected: ${sql}`);
+  }
   await db.exec('reset role');
-  if (hidden !== 0) throw new Error('non-admin can read AI dashboard rows');
   {
     let denied = false;
     await db.exec('set role anon');
@@ -457,7 +526,7 @@ try {
   }
   await db.exec('delete from public.ai_request_log');
   console.log(
-    'PASS: M06 AI dashboard SQL: turns (3 calls, 250 tokens, tools, latency, search), VN-day and Monday-week series, by kind, turn calls, overview today; non-admin 0 rows, anon denied.',
+    'PASS: M06 AI dashboard SQL: turns (3 calls, 250 tokens, tools, latency, search), VN-day and Monday-week series, by kind, model, turn calls, usage, overview today; non-admin 42501 for every dashboard RPC, anon denied.',
   );
   console.log(
     'PASS: M06 AI request log stores tokens, prompt version, tools and per-request cost; anon/authenticated denied.',

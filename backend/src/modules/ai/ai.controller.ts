@@ -141,6 +141,9 @@ export class AdminAiDashboardController {
   @Roles('Admin') @Get('kinds') kinds(@Req() req: Request, @Res() res: Response) {
     return dispatch(req, res, (request) => this.ai.getAiDashboard(request, 'kinds'));
   }
+  @Roles('Admin') @Get('models') models(@Req() req: Request, @Res() res: Response) {
+    return dispatch(req, res, (request) => this.ai.getAiDashboard(request, 'models'));
+  }
   @Roles('Admin') @Get('turns') turns(@Req() req: Request, @Res() res: Response) {
     return dispatch(req, res, (request) => this.ai.getAiDashboard(request, 'turns'));
   }

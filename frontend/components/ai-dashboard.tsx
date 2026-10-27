@@ -15,6 +15,9 @@ type Period = {
   avg_turn_latency_ms: number | null;
   p95_turn_latency_ms: number | null;
   error_fallback_rate: number;
+  local_tokens: number;
+  local_calls: number;
+  log_started_at: string | null;
 };
 type Point = { bucket_start: string; questions: number; calls: number; total_tokens: number; cost_usd: number };
 type KindRow = {
@@ -26,6 +29,15 @@ type KindRow = {
   avg_latency_ms: number;
   p95_latency_ms: number;
   error_rate: number;
+};
+type ModelRow = {
+  model: string;
+  provider: 'OpenAI' | 'Local';
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  avg_latency_ms: number;
 };
 type Turn = {
   turn_id: string;
@@ -94,6 +106,15 @@ const ms = (value: unknown) =>
       ? `${(num(value) / 1000).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} s`
       : `${Math.round(num(value))} ms`;
 const percent = (value: unknown) => `${(num(value) * 100).toLocaleString('vi-VN', { maximumFractionDigits: 1 })}%`;
+const logDate = (value: string | null | undefined) =>
+  value
+    ? new Date(value).toLocaleDateString('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      })
+    : '…';
 
 /** Start of the bucket containing `date`, in Asia/Ho_Chi_Minh (UTC+7, no DST); weeks start on Monday. */
 function bucketStart(date: Date, bucket: Bucket) {
@@ -226,6 +247,7 @@ export function AiDashboard() {
   const [bucket, setBucket] = useState<Bucket>('day');
   const [series, setSeries] = useState<Point[] | null>(null);
   const [kinds, setKinds] = useState<KindRow[] | null>(null);
+  const [models, setModels] = useState<ModelRow[] | null>(null);
   const [turns, setTurns] = useState<Turn[] | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -280,6 +302,9 @@ export function AiDashboard() {
     catalogRequest<{ items: KindRow[] }>(`/api/admin/ai-dashboard/kinds?${params}`, { signal })
       .then((r) => setKinds(r.items))
       .catch(fail);
+    catalogRequest<{ items: ModelRow[] }>(`/api/admin/ai-dashboard/models?${params}`, { signal })
+      .then((r) => setModels(r.items))
+      .catch(fail);
     return () => controller.abort();
   }, [bucket, range]);
 
@@ -315,6 +340,7 @@ export function AiDashboard() {
     setBucket(next);
     setSeries(null);
     setKinds(null);
+    setModels(null);
     setTurns(null);
     setPage(1);
     setOpen(null);
@@ -325,6 +351,7 @@ export function AiDashboard() {
     setOverview(null);
     setSeries(null);
     setKinds(null);
+    setModels(null);
     setTurns(null);
     setReload((v) => v + 1);
   }
@@ -341,6 +368,7 @@ export function AiDashboard() {
     });
   const config = buckets.find((b) => b.key === bucket)!,
     pages = Math.max(1, Math.ceil(total / 25));
+  const startedAt = overview?.find((row) => row.log_started_at)?.log_started_at;
 
   return (
     <AdminWorkspaceShell section="ai">
@@ -349,6 +377,12 @@ export function AiDashboard() {
           <span className="eyebrow">TERAVA AI</span>
           <h1>AI Platform Dashboard</h1>
           <p>Token, chi phí và tốc độ của mọi lần gọi mô hình AI, theo từng câu hỏi của khách hàng.</p>
+          <p className="ai-dash-note">
+            Số liệu lấy từ log của backend TERAVA, bắt đầu từ {logDate(startedAt)}. Chỉ cộng các model OpenAI vào tổng
+            token/chi phí; model chạy cục bộ (Qwen, bge-m3) hiển thị riêng. Không gồm script chạy riêng (rag-eval,
+            kb-reindex) và công cụ khác dùng chung API key — đối chiếu trang Usage của OpenAI. Chi phí là ước tính theo
+            giá niêm yết, chưa trừ giảm giá prompt caching.
+          </p>
         </div>
         <button type="button" className="button secondary" onClick={refresh}>
           <RefreshCw size={15} aria-hidden="true" />
@@ -369,7 +403,20 @@ export function AiDashboard() {
               <Activity size={16} />
             </span>
           </div>
-          <ul>{periodRows((r) => tokens(r.total_tokens))}</ul>
+          <ul>
+            {periods.map((p) => {
+              const row = overview?.find((o) => o.period === p.key);
+              return (
+                <li key={p.key}>
+                  <span>{p.label}</span>
+                  <div className="ai-dash-stat-values">
+                    <b>{row ? tokens(row.total_tokens) : '…'}</b>
+                    {row && <small>+ {tokens(row.local_tokens)} token model cục bộ (miễn phí, không tính)</small>}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         </article>
         <article>
           <div>
@@ -391,7 +438,20 @@ export function AiDashboard() {
               <MessageSquare size={16} />
             </span>
           </div>
-          <ul>{periodRows((r) => `${num(r.questions)} · ${num(r.calls)}`)}</ul>
+          <ul>
+            {periods.map((p) => {
+              const row = overview?.find((o) => o.period === p.key);
+              return (
+                <li key={p.key}>
+                  <span>{p.label}</span>
+                  <div className="ai-dash-stat-values">
+                    <b>{row ? `${num(row.questions)} · ${num(row.calls)}` : '…'}</b>
+                    {row && <small>+ {tokens(row.local_calls)} lần gọi model cục bộ (miễn phí, không tính)</small>}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         </article>
         <article>
           <div>
@@ -434,6 +494,53 @@ export function AiDashboard() {
         ) : (
           <UsageChart points={series} bucket={bucket} />
         )}
+      </section>
+
+      <section className="catalog-list-panel ai-dash-panel" aria-labelledby="ai-by-model">
+        <div className="ai-dash-head">
+          <h2 id="ai-by-model">Theo model</h2>
+          <p>
+            {config.count} {config.label.toLowerCase()} gần nhất
+          </p>
+        </div>
+        <div className="catalog-table-scroll">
+          <table className="ai-dash-models">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Nhà cung cấp</th>
+                <th>Số lần</th>
+                <th>Token vào</th>
+                <th>Token ra</th>
+                <th>Chi phí</th>
+                <th>Độ trễ TB</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!models ? (
+                <tr>
+                  <td colSpan={7}>Đang tải…</td>
+                </tr>
+              ) : !models.length ? (
+                <tr>
+                  <td colSpan={7}>Chưa có dữ liệu sử dụng AI.</td>
+                </tr>
+              ) : (
+                models.map((model) => (
+                  <tr key={`${model.provider}-${model.model}`} className={model.model === 'Tổng OpenAI' ? 'total' : ''}>
+                    <td>{model.model}</td>
+                    <td>{model.provider}</td>
+                    <td>{tokens(model.calls)}</td>
+                    <td>{tokens(model.input_tokens)}</td>
+                    <td>{tokens(model.output_tokens)}</td>
+                    <td>{usd(model.cost_usd)}</td>
+                    <td>{ms(model.avg_latency_ms)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="catalog-list-panel ai-dash-panel" aria-labelledby="ai-by-kind">

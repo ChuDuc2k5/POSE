@@ -3435,7 +3435,11 @@ export class AiService {
     });
     return result.error ? catalogDatabaseError(result.error) : catalogJson({ items: result.data || [] });
   }
-  async getAiDashboard(request: NextRequest, kind: 'overview' | 'series' | 'kinds' | 'turns' | 'turn', id?: string) {
+  async getAiDashboard(
+    request: NextRequest,
+    kind: 'overview' | 'series' | 'kinds' | 'models' | 'turns' | 'turn',
+    id?: string,
+  ) {
     // Read-only GET (see getUsage): authorization is the Admin session check below.
     const session = await authenticatedSession();
     if (!session) return catalogError('UNAUTHORIZED', 'Vui lòng đăng nhập.', 401);
@@ -3452,12 +3456,18 @@ export class AiService {
       const result = await authClient(session.access).rpc('pose_system_admin_ai_overview');
       return result.error ? catalogDatabaseError(result.error) : catalogJson({ items: result.data || [] });
     }
-    if (kind === 'series' || kind === 'kinds') {
+    if (kind === 'series' || kind === 'kinds' || kind === 'models') {
       const bucket = url.searchParams.get('bucket');
       if (kind === 'series' && bucket && !['day', 'week', 'month'].includes(bucket))
         return catalogError('INVALID_INPUT', 'Bucket không hợp lệ.', 400);
+      const rpc =
+        kind === 'series'
+          ? 'pose_system_admin_ai_series'
+          : kind === 'kinds'
+            ? 'pose_system_admin_ai_by_kind'
+            : 'pose_system_admin_ai_by_model';
       const result = await authClient(session.access).rpc(
-        kind === 'series' ? 'pose_system_admin_ai_series' : 'pose_system_admin_ai_by_kind',
+        rpc,
         kind === 'series'
           ? {
               p_bucket: bucket || 'day',

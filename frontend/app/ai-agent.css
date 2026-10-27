@@ -1698,6 +1698,25 @@
   font-size: 18px;
   letter-spacing: -0.03em;
 }
+.ai-dash-stat-values {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  text-align: right;
+}
+.ai-dash-stat-values small {
+  color: var(--nx-muted);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.25;
+}
+.ai-dash-note {
+  max-width: 860px;
+  margin: 8px 0 0;
+  color: var(--nx-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
 .ai-dash-panel {
   margin-bottom: 22px;
 }
@@ -1827,6 +1846,14 @@
   display: block;
   font-size: 10px;
   color: var(--nx-muted);
+}
+.ai-dash-models {
+  min-width: 680px;
+}
+.ai-dash-models tr.total td {
+  border-top: 2px solid var(--nx-line-strong);
+  background: var(--nx-primary-soft);
+  font-weight: 600;
 }
 .ai-dash-question {
   max-width: 280px;

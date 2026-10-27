@@ -95,6 +95,8 @@ try {
     body: JSON.stringify({ message: 'Tôi muốn tìm căn hộ, gọi 0901234567', store_transcript: false, history: [] }),
   });
   assert.equal(seeded.status, 200, 'seed chat turn');
+  const localFixture = await fetch('http://localhost:3301/fixture/seed-ai-local', { method: 'POST' });
+  assert.equal(localFixture.status, 200, 'seed local model row');
   await delay(500);
   await send('Network.setCookie', { name: 'pose-access', value: 'fixture-Admin', url: 'http://localhost:3300' });
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
@@ -102,6 +104,40 @@ try {
   await delay(700);
   await wait("document.querySelector('h1')?.textContent.includes('AI Platform Dashboard')");
   assert.ok(await evaluate("document.body.innerText.includes('Hôm nay')"));
+  await wait("document.querySelector('.ai-dash-note')?.textContent.includes('24/10/2026')");
+  await wait("!!document.querySelector('.ai-dash-models tbody tr')");
+  assert.ok(await evaluate("document.body.innerText.includes('OpenAI') && document.body.innerText.includes('Local')"));
+  assert.ok(await evaluate("document.body.innerText.includes('Tổng OpenAI')"), 'OpenAI total row shown');
+  const fixtureLogs = await (await fetch('http://localhost:3301/fixture/ai-request-logs')).json();
+  const provider = (model) => {
+    const value = String(model || '')
+      .trim()
+      .toLowerCase();
+    if (value === 'deterministic') return 'Deterministic';
+    if (value.startsWith('gpt-') || value.startsWith('o') || value.startsWith('text-embedding-3-')) return 'OpenAI';
+    return 'Local';
+  };
+  const openAiLogs = fixtureLogs.filter((row) => provider(row.p_model) === 'OpenAI');
+  const overviewResponse = await fetch('http://localhost:3300/api/admin/ai-dashboard/overview', {
+    headers: { Cookie: 'pose-access=fixture-Admin' },
+  });
+  const overview = await overviewResponse.json();
+  assert.equal(overviewResponse.status, 200);
+  for (const row of overview.items) {
+    assert.equal(Number(row.calls), openAiLogs.length, 'overview calls use OpenAI rows');
+    assert.equal(
+      Number(row.total_tokens),
+      openAiLogs.reduce((sum, log) => sum + Number(log.p_total_tokens || 0), 0),
+    );
+    assert.equal(
+      Number(row.total_tokens),
+      fixtureLogs.reduce((sum, log) => sum + Number(log.p_total_tokens || 0), 0) -
+        fixtureLogs
+          .filter((log) => provider(log.p_model) === 'Local')
+          .reduce((sum, log) => sum + Number(log.p_total_tokens || 0), 0),
+      'overview excludes local tokens',
+    );
+  }
   await shot('dashboard-1280');
   await evaluate("document.querySelector('.ai-dash-segmented button:nth-child(2)').click()");
   await wait(
