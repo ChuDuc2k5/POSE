@@ -443,7 +443,22 @@ const provider=createServer(async(req,res)=>{
   catalogueRequests.push([...url.searchParams.entries()]);
   check(token==='fixture-public','Retrieval uses anon publishable key');
   let rows=catalogueRows().filter(p=>p.publication==='Published' && !p.archived);if(mode==='search')rows=rows.filter(p=>p.price!==null&&p.price<=3e9);
-   for(const [k,v] of url.searchParams){if(k==='or'){const locations=[...v.matchAll(/location\.ilike\.%([^,%]*)%/g)].map(match=>match[1].toLocaleLowerCase('vi'));if(locations.length)rows=rows.filter(p=>locations.some(location=>String(p.location).toLocaleLowerCase('vi').includes(location)));}if(v.startsWith('ilike.'))rows=rows.filter(p=>String(p[k]).toLocaleLowerCase('vi').includes(v.slice(7,-1).toLocaleLowerCase('vi')));if(v.startsWith('eq.'))rows=rows.filter(p=>String(p[k])===v.slice(3));if(v.startsWith('in.'))rows=rows.filter(p=>v.slice(4,-1).split(',').includes(String(p[k])));if(v.startsWith('not.in.'))rows=rows.filter(p=>!v.slice(8,-1).split(',').includes(String(p[k])));if(v.startsWith('gte.'))rows=rows.filter(p=>(mode==='ok' && p[k]===null) || p[k]>=Number(v.slice(4)));if(v.startsWith('lte.'))rows=rows.filter(p=>(mode==='ok' && p[k]===null) || p[k]<=Number(v.slice(4)));if(v.startsWith('lt.'))rows=rows.filter(p=>(mode==='ok' && p[k]===null) || p[k]<Number(v.slice(3)));}
+   for(const [k,v] of url.searchParams){
+    if(k==='or'){
+      if(/location\.ilike\.%[^,"]*[(),][^,"]*%/u.test(v)){rows=[];continue;}
+      const quoted=[...v.matchAll(/location\.ilike\.(?:\\)?["]((?:\\.|[^"])*)["]/gu)].map(match=>match[1].replace(/\\(["\\])/g,'$1').replace(/^\*|\*$/gu,'')).map(value=>value.toLocaleLowerCase('vi'));
+      const legacy=[...v.matchAll(/location\.ilike\.%([^,%]*)%/g)].map(match=>match[1].toLocaleLowerCase('vi'));
+      const locations=[...quoted,...legacy];
+      if(locations.length)rows=rows.filter(p=>locations.some(location=>String(p.location).toLocaleLowerCase('vi').includes(location)));
+    }
+    if(v.startsWith('ilike.'))rows=rows.filter(p=>String(p[k]).toLocaleLowerCase('vi').includes(v.slice(7,-1).toLocaleLowerCase('vi')));
+    if(v.startsWith('eq.'))rows=rows.filter(p=>String(p[k])===v.slice(3));
+    if(v.startsWith('in.'))rows=rows.filter(p=>v.slice(4,-1).split(',').includes(String(p[k])));
+    if(v.startsWith('not.in.'))rows=rows.filter(p=>!v.slice(8,-1).split(',').includes(String(p[k])));
+    if(v.startsWith('gte.'))rows=rows.filter(p=>(mode==='ok' && p[k]===null) || p[k]>=Number(v.slice(4)));
+    if(v.startsWith('lte.'))rows=rows.filter(p=>(mode==='ok' && p[k]===null) || p[k]<=Number(v.slice(4)));
+    if(v.startsWith('lt.'))rows=rows.filter(p=>(mode==='ok' && p[k]===null) || p[k]<Number(v.slice(3)));
+   }
     const bedroomQuery=[...url.searchParams.getAll('or')].map(value=>value.match(/bedrooms\.eq\.(\d+)/)).find(Boolean);
     if(bedroomQuery)rows=rows.filter(property=>bedroomMatches(property,Number(bedroomQuery[1])));
     rows.sort((a,b)=>String(b.updated_at).localeCompare(String(a.updated_at))||String(a.id).localeCompare(String(b.id)));
@@ -559,11 +574,12 @@ try{
    const firstHistory=[{role:'user',content:'Tôi muốn thuê nhà'},{role:'assistant',content:startData.reply}];
    const budget=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Dưới 10 triệu',history:firstHistory},flowCookie);const budgetData=await budget.json();
    const budgetHistory=[...firstHistory,{role:'user',content:'Dưới 10 triệu'},{role:'assistant',content:budgetData.reply}];
+   const badParenthesized=await fetch('http://localhost:3301/property_public_catalog?select=id&or=location.ilike.%Phường%20Long%20Bình%20(Quận%209%20cũ)%25',{headers:{authorization:'Bearer fixture-public'}});check((await badParenthesized.json()).length===0,'Fixture rejects an unquoted parenthesized PostgREST location operand');
    const area=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Ở Quận 9',history:budgetHistory},flowCookie);const areaData=await area.json();
    check(areaData.sources.length===5&&areaData.sources.every(p=>p.transaction_type==='Rent'&&p.property_type==='Apartment'&&p.price<10000000)&&!areaData.sources.some(p=>p.price>=10000000||p.location.includes('Bình Đông')),'Quận 9 under-10 search lists the first five strict rental apartments before out-of-budget and Quận 8 rows');
    check(!areaData.reply.includes('Nhà thuê'),'Generic thuê nhà criteria omit the House type');
    check(!/chưa có/iu.test(areaData.reply),'A non-empty structured criteria search does not say chưa có');
-   const areaFilters=catalogueRequests.slice().reverse().find(entries=>entries.some(([key,value])=>key==='transaction_type'&&value==='eq.Rent')&&entries.some(([key,value])=>key==='price'&&value==='lt.10000000'));check(areaFilters,'Structured criteria query applies the strict under-10-million budget');check(/^(?:Tôi là trợ lý AI của TERAVA\.\n)?Tiêu chí: Thuê, ở Quận 9 \(Thủ Đức\), dưới 10 triệu đồng\/tháng\./u.test(areaData.reply),'Search reply opens with generic-home criteria');
+   const areaFilters=catalogueRequests.slice().reverse().find(entries=>entries.some(([key,value])=>key==='transaction_type'&&value==='eq.Rent')&&entries.some(([key,value])=>key==='price'&&value==='lt.10000000'));check(areaFilters,'Structured criteria query applies the strict under-10-million budget');const areaOr=areaFilters?.find(([key])=>key==='or')?.[1] || '';check(areaOr.includes('Phường Long Bình (Quận 9 cũ)')&&!/location\.ilike\.%[^,"]*[(),][^,"]*%/u.test(areaOr),'Quận 9 parenthesized aliases are encoded as quoted PostgREST values');check(areaData.sources.length===5,'Quoted Quận 9 aliases survive a PostgREST-style fixture parser');check(/^(?:Tôi là trợ lý AI của TERAVA\.\n)?Tiêu chí: Thuê, ở Quận 9 \(Thủ Đức\), dưới 10 triệu đồng\/tháng\./u.test(areaData.reply),'Search reply opens with generic-home criteria');
    const refinementHistory=[...budgetHistory,{role:'user',content:'Ở Quận 9'},{role:'assistant',content:areaData.reply,sources:areaData.sources}];
    const more=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Có căn nào khác không',history:refinementHistory},flowCookie);const moreData=await more.json();
    const shownAreaIds=new Set(areaData.sources.map(p=>p.id));

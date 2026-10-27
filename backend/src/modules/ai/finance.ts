@@ -1,4 +1,4 @@
-import { moneyAmounts } from './money.js';
+import { moneyAmounts, replyPriceLabel } from './money.js';
 
 export type LoanPayment = {
   monthlyPayment: number;
@@ -101,7 +101,7 @@ function formatLoanScenario(text: string): string | null {
   const principal = moneyAmounts(text).find(value => value >= 1_000_000_000);
   if (!principal || rates.length < 2 || years.length < 1 || !change) return null;
   const result = rateChangePayment(principal, rates[0], rates[1], years[0], smallNumber(change[1]));
-  return `Tính theo dư nợ giảm dần, trả đều, khoản vay ${money(principal, 0)}, kỳ hạn ${years[0]} năm: mức trả ban đầu khoảng ${money(result.monthlyPayment)} mỗi tháng; sau ${change[1]} năm dư nợ còn khoảng ${money(result.balanceAfterChange)} và với lãi suất ${rates[1]}% mức trả mới khoảng ${money(result.newMonthlyPayment)}, chênh khoảng ${money(result.paymentDifference)} mỗi tháng. Đây là ước tính, giả định trả đúng hạn và lãi suất áp dụng cho phần thời hạn còn lại.`;
+  return `Tính theo dư nợ giảm dần, trả đều, khoản vay ${money(principal, 0)}, kỳ hạn ${years[0]} năm: mức trả ban đầu khoảng ${money(result.monthlyPayment)} mỗi tháng; sau ${change[1]} năm dư nợ còn khoảng ${replyPriceLabel(result.balanceAfterChange)} và với lãi suất ${rates[1]}% mức trả mới khoảng ${money(result.newMonthlyPayment)}, chênh khoảng ${money(result.paymentDifference)} mỗi tháng. Đây là ước tính, giả định trả đúng hạn và lãi suất áp dụng cho phần thời hạn còn lại.`;
 }
 
 function formatInstallment(text: string, listingPrice?: number): string | null {

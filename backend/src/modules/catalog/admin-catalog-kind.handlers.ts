@@ -1,5 +1,6 @@
 import { WebRequest } from '../../common/http.js';
 import { isCatalogKind, uuidPattern, validateCatalog } from '../../common/catalog.js';
+import { postgrestIlike } from '../../common/postgrest.js';
 import { catalogAdmin, catalogDatabaseError, catalogError, catalogInput, catalogJson, catalogTables } from './catalog.service.js';
 
 export async function GET(request: WebRequest, context: { params: Promise<{ kind: string }> }) {
@@ -21,7 +22,7 @@ export async function GET(request: WebRequest, context: { params: Promise<{ kind
     }
     // Escape PostgREST filter punctuation and LIKE wildcards before interpolation.
     const term = search.replace(/[(),.\\"']/g,' ').trim().replace(/[%_]/g,'\\$&');
-    if (term) query = query.or(`code.ilike.%${term}%,name.ilike.%${term}%`);
+    if (term) query = query.or(`${postgrestIlike('code',term)},${postgrestIlike('name',term)}`);
     const project = params.get('project');
     if (project && kind !== 'projects') { if (!uuidPattern.test(project)) return catalogError('INVALID_PARENT','Dự án không hợp lệ.',400); query = query.eq('project_id',project); }
     const status = params.get('status');

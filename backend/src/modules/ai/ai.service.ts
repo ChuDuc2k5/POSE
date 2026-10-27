@@ -32,6 +32,7 @@ import { answerCriteriaLine, showCriteriaLine } from './answer-rules.js';
 import { correctUnknownReply, removeReplyArtifacts } from './guard.js';
 import { nearestRelaxationStages } from './nearest.js';
 import { bedroomMatchesFilter, isStudioListing } from './bedroom-filter.js';
+import { postgrestIlike } from '../../common/postgrest.js';
 
 export const unavailable=()=>catalogJson({code:'AI_UNAVAILABLE',message:'Trợ lý AI tạm thời không khả dụng. Bạn có thể thử lại, xem danh sách bất động sản hoặc gửi yêu cầu tư vấn.',retry:true,search_url:'/properties',inquiry_url:'/customer/inquiries/new'},503);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -50,12 +51,11 @@ async function readSession(id:string, who:Awaited<ReturnType<typeof identity>>) 
 async function retrieve(filters:Record<string,unknown>,context:string|null):Promise<Evidence[]> {
   filters=withAreaAliases(filters);
   const scalar=(value:unknown)=>typeof value==='string'||typeof value==='number' ? value:'';
-  const params=new URLSearchParams();if(typeof filters.location==='string')params.set('location',`ilike.%${filters.location}%`);if(filters.transaction_type)params.set('transaction_type',`eq.${scalar(filters.transaction_type)}`);if(filters.type)params.set('property_type',`eq.${scalar(filters.type)}`);if(filters.minPrice!==undefined)params.set('price',`gte.${scalar(filters.minPrice)}`);if(filters.maxPrice!==undefined)params.set('price',filters.maxPriceExclusive ? `lt.${scalar(filters.maxPrice)}` : `lte.${scalar(filters.maxPrice)}`);
   const allowed=new Set(['location','locations','location_aliases','transaction_type','type','types','minPrice','maxPrice','maxPriceExclusive','minArea','maxArea','bedrooms','exclude_ids','keywords']);if(Object.keys(filters).some(k=>!allowed.has(k)))throw new Error('INVALID_FILTER');
   let query=authClient().from('property_public_catalog').select('id,code,name,description,cover_id,area,bedrooms,price,availability,updated_at,location,property_type,transaction_type,price_period');
   if(context)query=query.eq('id',context);
-  const locations=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations:[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases.filter(value=>!String(value).includes(',')):[])].map(value=>String(value).replace(/[%_\\]/g,'\\$&')).slice(0,100);
-  if(locations.length)query=query.or(locations.map(value=>`location.ilike.%${value}%`).join(','));
+  const locations=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations:[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases:[])].map(String).slice(0,100);
+  if(locations.length)query=query.or(locations.map(value=>postgrestIlike('location',value)).join(','));
   if(filters.transaction_type)query=query.eq('transaction_type',filters.transaction_type);
   if(filters.transaction_type==='Rent')query=query.gte('price',500_000);
   else if(filters.transaction_type==='Sale')query=query.gte('price',50_000_000);
@@ -78,8 +78,8 @@ async function retrieveStructured(filters:Record<string,unknown>,context:string|
   const select='id,code,name,description,cover_id,area,bedrooms,price,availability,updated_at,location,property_type,transaction_type,price_period';
   let query=authClient().from('property_public_catalog').select(select,{count:'exact'});
   if(context)query=query.eq('id',context);
-  const locations=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations:[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases.filter(value=>!String(value).includes(',')):[])].map(value=>String(value).replace(/[%_\\]/g,'\\$&')).slice(0,100);
-  if(locations.length)query=query.or(locations.map(value=>`location.ilike.%${value}%`).join(','));
+  const locations=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations:[]),...(Array.isArray(filters.location_aliases)?filters.location_aliases:[])].map(String).slice(0,100);
+  if(locations.length)query=query.or(locations.map(value=>postgrestIlike('location',value)).join(','));
   if(filters.transaction_type)query=query.eq('transaction_type',filters.transaction_type);
   if(filters.transaction_type==='Rent')query=query.gte('price',500_000);
   else if(filters.transaction_type==='Sale')query=query.gte('price',50_000_000);
@@ -121,6 +121,11 @@ async function retrieveSimilar(propertyId:string):Promise<Evidence[]> {
 // "Thành phố Hồ Chí Minh"…); a city-level location is not a filter and would only miss rows.
 const cityOnly=/^(?:tp\.?\s*|thành phố\s*)?(?:hcm|hồ chí minh|ho chi minh|sài gòn|saigon)$/i;
 export function locationFilter(value: unknown) { return typeof value==='string' && value.trim() && !cityOnly.test(value.trim().replace(/[.,]$/,'')) ? value.trim() : undefined; }
+function areaLabelForFilters(filters: Record<string, unknown>): string | undefined {
+  const locations=[...(typeof filters.location==='string'?[filters.location]:[]),...(Array.isArray(filters.locations)?filters.locations.map(String):[])];
+  if(locations.length>1 && locations.every(value=>centralFormerDistricts.includes(value)))return 'khu trung tâm';
+  return locations[0]?.trim() || undefined;
+}
 function relaxedLocation(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return undefined;
   const match=value.match(/(?:quận|huyện|thành phố|tp\.?|q\.?)[\s\d-]+/i);
@@ -302,7 +307,8 @@ export class AiService {
      const wantsOthers=/(?:căn|nhà|lô|chỗ|dự án)\s+(?:khác|tương tự)|rẻ hơn|cao hơn|gợi ý thêm|so sánh|còn căn nào/iu.test(source);
      const comparisonQuestion=priceComparisonQuestion(source);
      const similarQuestion=/(?:tương tự|căn khác|căn nào giống|giống căn)/iu.test(source);
-     const detailReference=Boolean(input.property_id && /(?:căn(?:\s+hộ)?|nhà|lô|đất)\s+này/iu.test(source) && !wantsOthers);
+     const viewedListingReference=/(?:căn(?:\s+hộ)?|nhà|lô|đất)\s+(?:này|đang\s+xem|trên\s+trang)|(?:hôm\s+nay|vừa\s+xem)/iu;
+     const detailReference=Boolean(input.property_id && viewedListingReference.test(source) && !wantsOthers);
     const extraCostsQuestion=/(?:giá bán cuối cùng|phát sinh thêm chi phí|ký hợp đồng)/iu.test(source);
     const viewedPropertyId=typeof input.property_id==='string' && (!wantsOthers || comparisonQuestion || similarQuestion) ? input.property_id : null;
     // "Nhân viên liên hệ lại cho mình" is a hand-off request, not a search with no criteria.
@@ -760,7 +766,7 @@ export class AiService {
     const pendingActions:unknown[]=[];
     let bookingAction:unknown;
     const execute=async(name:string,args:unknown)=>{
-       if(name==='search_properties') { const a=args as Record<string,unknown>; const raw=object(a.filters) ? a.filters as Record<string,unknown> : {}; const f=Object.fromEntries(Object.entries(raw).filter(([,v])=>v!==null&&v!==undefined)); const found=await search(f,input.property_id as string|null || null); return found.length ? found.map((p,i)=>{const rent=p.transaction_type==='Rent';const labels:Record<string,string>={Available:rent?'Đang cho thuê':'Đang mở bán',Sold:rent?'Đã cho thuê, không còn trống':'Đã bán, không còn mở bán',Reserved:rent?'Đã có người giữ, không còn trống':'Đã giữ chỗ, không còn mở bán',Unavailable:rent?'Chưa khả dụng, không còn trống':'Chưa khả dụng, không còn mở bán'};return `[${p.number || i+1}] ${p.code}: ${p.name}, giá ${priceLabel(p.price,p.price_period==='Month' || rent)}. ${labels[p.availability] || 'Chưa rõ khả dụng'}. Cập nhật ${formatReplyDate(p.updated_at) || p.updated_at}.`;}) : [`Chưa có kết quả phù hợp trong nguồn công bố. ${addressStart} có thể nói ngân sách hoặc khu vực tìm kiếm không?`]; }
+       if(name==='search_properties') { if(detailReference) { log(name,args,'VIEWED_LISTING_REFERENCE','flagged'); return {error:'VIEWED_LISTING_REFERENCE'}; } const a=args as Record<string,unknown>; const raw=object(a.filters) ? a.filters as Record<string,unknown> : {}; const f=Object.fromEntries(Object.entries(raw).filter(([,v])=>v!==null&&v!==undefined)); const found=await search(f,input.property_id as string|null || null); return found.length ? found.map((p,i)=>{const rent=p.transaction_type==='Rent';const labels:Record<string,string>={Available:rent?'Đang cho thuê':'Đang mở bán',Sold:rent?'Đã cho thuê, không còn trống':'Đã bán, không còn mở bán',Reserved:rent?'Đã có người giữ, không còn trống':'Đã giữ chỗ, không còn mở bán',Unavailable:rent?'Chưa khả dụng, không còn trống':'Chưa khả dụng, không còn mở bán'};return `[${p.number || i+1}] ${p.code}: ${p.name}, giá ${priceLabel(p.price,p.price_period==='Month' || rent)}. ${labels[p.availability] || 'Chưa rõ khả dụng'}. Cập nhật ${formatReplyDate(p.updated_at) || p.updated_at}.`;}) : [`Chưa có kết quả phù hợp trong nguồn công bố. ${addressStart} có thể nói ngân sách hoặc khu vực tìm kiếm không?`]; }
       if(name==='get_property_detail') { const code=(args as {code:string}).code; const result=await authClient().from('property_public_catalog').select('id,code,name,price,availability,updated_at,location,property_type,transaction_type,price_period').eq('code',code).maybeSingle(); return result.error || !result.data ? {found:false} : {found:true,property:result.data}; }
       if(name==='list_my_appointments') { if(guest) return {requires_sign_in:true}; const result=await who.client!.from('appointments').select('*').order('starts_at',{ascending:true}).limit(20); return result.error ? {error:'unavailable'} : {appointments:result.data || []}; }
       return {error:'unknown_read_tool'};
@@ -984,7 +990,7 @@ export class AiService {
     const genericClarification: { needed: boolean; question: string; options: string[] } | null=null;
     const hasDisclosure=sanitizedHistory.some(turn=>turn.role==='assistant' && turn.content.includes(disclosure));
     const nearbyFor=(location?:string)=>location ? areaAliases(location).slice(0,2) : [];
-    const area=String(budgetAdjustment?.filters.location || queryFilters.location || '') || undefined;
+    const area=areaLabelForFilters(budgetAdjustment?.filters || queryFilters);
     const replyCriteriaFilters={...rememberedCriteria,...queryFilters};
     const criteriaLabel=(value: unknown)=>typeof value==='string' && value.trim() ? value.trim() : '';
     const rememberedLocation=criteriaLabel(replyCriteriaFilters.location || (Array.isArray(replyCriteriaFilters.locations) ? replyCriteriaFilters.locations[0] : ''));
@@ -1009,7 +1015,7 @@ export class AiService {
       const structuredNoMatch=searchPerformed && structuredCatalogueSearch && !input.property_id && !contactOnly && !generalQuestion && !evidenceItems.length;
       const blockerLine=(()=>{
         if(!structuredNoMatch)return '';
-        const requestedArea=String(queryFilters.location || (Array.isArray(queryFilters.locations) ? queryFilters.locations[0] : ''));
+        const requestedArea=areaLabelForFilters(queryFilters) || '';
         const typeLabel=typeof queryFilters.type==='string' ? (typeLabels[queryFilters.type] || queryFilters.type).toLocaleLowerCase('vi') : 'bất động sản';
         const budget=typeof queryFilters.maxPrice==='number' ? `${queryFilters.maxPriceExclusive ? 'dưới' : 'tối đa'} ${priceLabel(queryFilters.maxPrice,queryFilters.transaction_type==='Rent')}` : '';
         const rooms=typeof queryFilters.bedrooms==='number' ? `${queryFilters.bedrooms} phòng ngủ` : '';
@@ -1019,7 +1025,7 @@ export class AiService {
         if(nearestReason)return `Ở ${requestedArea || 'khu vực bạn chọn'}, các tin gần nhất đang lệch tiêu chí: ${nearestReason.toLocaleLowerCase('vi')}.`;
         return '';
       })();
-      const deterministicNoMatch=structuredNoMatch ? deterministicNoMatchReply({criteria:criteriaLine,area:String(queryFilters.location || (Array.isArray(queryFilters.locations) ? queryFilters.locations[0] : '')) || undefined,blocker:blockerLine,related:related as unknown as {number?:number;name?:string;location?:string;price?:number|null;reason?:string;relaxed_reason?:string}[],nearby:`${availableAreasLine}${sameAreaTypesLine}`.trim()}) : '';
+      const deterministicNoMatch=structuredNoMatch ? deterministicNoMatchReply({criteria:criteriaLine,area:areaLabelForFilters(queryFilters),blocker:blockerLine,related:related as unknown as {number?:number;name?:string;location?:string;price?:number|null;reason?:string;relaxed_reason?:string}[],nearby:`${availableAreasLine}${sameAreaTypesLine}`.trim()}) : '';
       const modelAlreadyNoMatch=hasNoMatchReply(result.reply);
      const followUpQuestion=budgetQuestion;
      const financeResultPresent=financeNote && /(?:dư nợ|lợi suất|không an toàn|40%|16[,.]7|21[,.]6|4[,.]9|4,5%|5%)/iu.test(result.reply);

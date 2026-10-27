@@ -54,3 +54,12 @@ export function priceLabel(price: number | null | undefined, monthly = false) {
     : `${Number(price).toLocaleString('vi-VN')} đồng`;
   return monthly ? `${text}/tháng` : text;
 }
+
+/** Compact reply format for calculated amounts, including balances not aligned to a million. */
+export function replyPriceLabel(price: number | null | undefined, monthly = false) {
+  if (price === null || price === undefined) return 'chưa công bố';
+  const billions = price >= 1e9;
+  const value = price / (billions ? 1e9 : 1e6);
+  const text = `${value.toLocaleString('vi-VN', { maximumFractionDigits: billions ? 2 : 1 })} ${billions ? 'tỷ' : 'triệu'} đồng`;
+  return monthly ? `${text}/tháng` : text;
+}
