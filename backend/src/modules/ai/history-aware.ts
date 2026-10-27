@@ -66,7 +66,7 @@ export function outsideCataloguePlace(message: string) {
 }
 export function historyReferenceQuestion(message: string, history: { role: string; content: string }[]) {
   const text = fold(message);
-  const explicitListing = listingCodes(message).length > 0 || /(?:căn|can)(?:\s+hộ|\s+ho)?\s*(?:số|so)?\s*\d+|(?:căn|can)(?:\s+hộ|\s+ho)?\s+(?:này|nay|đó|do|kia|trên|vừa rồi|vua roi)|(?:căn|can)\s+(?:đầu tiên|dau tien|rẻ nhất|re nhat)/iu.test(message);
+  const explicitListing = listingCodes(message).length > 0 || /(?:căn|can)(?:\s+hộ|\s+ho)?\s*(?:số|so)?\s*\d+|(?:căn|can)(?:\s+hộ|\s+ho)?\s+(?:thứ\s+(?:nhất|hai|ba|tư|bốn|năm|sáu|bảy|tám|chín|mười)|này|nay|đó|do|kia|trên|vừa rồi|vua roi)|(?:căn|can)\s+(?:đầu tiên|dau tien|rẻ nhất|re nhat)/iu.test(message);
   if (areaName.test(message) && !explicitListing) return false;
   if (!history.some(turn => turn.role === 'assistant' && /(?:can|nha|lo|danh sach|gioi thieu|\[\d+\])/iu.test(fold(turn.content)))) return false;
   return /(?:can vua gioi thieu|ba can|bon can|cac can tren|nhung can tren|c[aă]n phia tren|nhung can vua)/iu.test(text);
@@ -145,6 +145,20 @@ export function textListingReferences(history: { role: string; content: string }
   return references.sort((left, right) => left.number - right.number);
 }
 
+export function renumberReferencedListings<T extends { code?: string; number?: number }>(items: T[], codes: string[], originalNumbers: ReadonlyMap<string, number> = new Map()) {
+  // Follow-up cards keep the labels from the list the customer saw. The old
+  // implementation used the selected subset's index, turning [2] into [1].
+  // `codes` remains part of the API for callers that already pass it; the
+  // original number map is authoritative when it is available.
+  void codes;
+  return items.map(item => {
+    const number = typeof item.code === 'string'
+      ? originalNumbers.get(item.code.toLocaleLowerCase()) ?? item.number
+      : item.number;
+    return number === undefined ? item : { ...item, number };
+  });
+}
+
 export function referencedListingCodes(message: string, history: { role: string; content: string }[]) {
   const direct = listingCodes(message);
   if (direct.length) return { codes: direct, ambiguous: false };
@@ -169,7 +183,13 @@ export function referencedListingCodes(message: string, history: { role: string;
   if (sourceCodes.length && historyReferenceQuestion(message, history)) {
     return { codes: [...new Set(sourceCodes)], ambiguous: false };
   }
-  const numbered = [...message.matchAll(/(?:căn|can)(?:\s+hộ|\s+ho)?\s*(?:số|so)?\s*(\d+)(?![\p{L}\d])/giu)].map(match => Number(match[1]) - 1).filter(index => index >= 0 && index < sourceCodes.length);
+  const ordinal = new Map([
+    ['nhất', 1], ['hai', 2], ['ba', 3], ['tư', 4], ['bốn', 4], ['năm', 5],
+    ['sáu', 6], ['bảy', 7], ['tám', 8], ['chín', 9], ['mười', 10],
+  ]);
+  const numbered = [...message.matchAll(/(?:căn|can)(?:\s+hộ|\s+ho)?\s*(?:(?:số|so)?\s*(\d+)|thứ\s+(nhất|hai|ba|tư|bốn|năm|sáu|bảy|tám|chín|mười))(?![\p{L}\d])/giu)]
+    .map(match => Number(match[1] || ordinal.get(match[2].toLocaleLowerCase('vi')) || 0) - 1)
+    .filter(index => index >= 0 && index < sourceCodes.length);
   const wantsFirst = /(?:căn|can)\s+(?:đầu\s+tiên|dau\s+tien)/iu.test(message);
   const wantsCheapest = /(?:căn|can)\s+(?:rẻ\s+nhất|re\s+nhat)(?:\s+vừa\s+rồi|\s+vua\s+roi)?/iu.test(message);
   if (sourceCodes.length && (numbered.length || wantsFirst || wantsCheapest)) {
@@ -287,6 +307,15 @@ export function searchCriteriaFromHistory(message: string, history: { role: stri
   }
   return criteria as ReturnType<typeof inferSearch> & { bedrooms?: number };
 }
+export function preserveAreaSwitchCriteria(current: Record<string, unknown>, remembered: Record<string, unknown>) {
+  const merged = { ...current };
+  const fields = ['type', 'types', 'transaction_type', 'minPrice', 'maxPrice', 'maxPriceExclusive', 'minArea', 'maxArea', 'bedrooms', 'keywords'];
+  for (const field of fields) if (remembered[field] !== undefined) merged[field] = remembered[field];
+  if (remembered.type !== undefined) delete merged.types;
+  if (remembered.types !== undefined) delete merged.type;
+  return merged;
+}
+
 export function isAreaOnlyRefinement(message: string, history: { role: string; content: string; sources?: HistorySource[] }[]) {
   const current = inferredCriteria(message);
   const hasLocation = current.location !== undefined || current.locations !== undefined;

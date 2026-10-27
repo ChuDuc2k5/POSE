@@ -78,7 +78,15 @@ export function sourcesFromCitations<T extends { number?: number; code?: string;
   if (refusal.test(reply)) return [];
   if (referencedListing) return sources;
   const cited=[...new Set([...reply.matchAll(/\[(\d{1,3})\]/g)].map(match=>Number(match[1])))];
-  if (cited.length) return cited.map(number=>sources.find(source=>source.number===number) || sources[number-1]).filter((source):source is T=>Boolean(source));
+  if (cited.length) {
+    const hasExplicitNumbers=sources.some(source=>typeof source.number==='number');
+    return cited.map(number=>{
+      const exact=sources.find(source=>source.number===number);
+      if(exact)return exact;
+      const positional=sources[number-1];
+      return !hasExplicitNumbers || typeof positional?.number!=='number' ? positional : undefined;
+    }).filter((source):source is T=>Boolean(source));
+  }
   // Some models list listings without [n]; keep the ones the reply names by code or by their exact catalogue
   // price (outputReason has already checked every price in the reply against the catalogue).
   const amounts=new Set(moneyAmounts(reply));
@@ -457,7 +465,7 @@ export function normalizeFinalReply<T extends { availability?: string }>(reply:s
   );
   const canonical=availabilityNoticeForReply(question,sources as AvailabilitySource[],specificListing);
   if(canonical) {
-    const availability=/(?:còn\s+(?:bán|trống|không|cho\s+thuê)|đang\s+(?:mở\s+bán|cho\s+thuê)|đã\s+(?:được\s+)?bán(?:\s+chưa)?|tin\s+đăng(?:\s+đang|\s+được)?\s+ghi\s+là\s+còn\s+bán|thời\s+gian\s+thực|kiểm\s+tra\s+tình\s+trạng)/iu;
+    const availability=/(?:còn\s+(?:bán|mở\s+bán|trống|không|cho\s+thuê)|đang\s+(?:mở\s+bán|cho\s+thuê)|đã\s+(?:được\s+)?bán(?:\s+chưa)?|tin\s+đăng(?:\s+đang|\s+được)?\s+ghi\s+là\s+còn\s+bán|thời\s+gian\s+thực|kiểm\s+tra\s+tình\s+trạng)/iu;
     // Protect the complete system notice before splitting into sentences. Its
     // first sentence intentionally contains availability wording and must not
     // be mistaken for model text.
@@ -479,6 +487,28 @@ export function normalizeFinalReply<T extends { availability?: string }>(reply:s
   if(legacyMissing)result=result.replace(legacyMissing[0],`Mình chưa có thông tin về ${legacyMissing[1]} trong dữ liệu tin đăng. Mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn.`);
   const missingData=result.match(/Tin đăng chưa có thông tin về ([^.!?\n]+)[.!?]\s*Mình (?:không tự ý đoán hay )?(?:nói(?: là)? )?không biết[^.!?\n]*[.!?]?/iu);
   if(missingData)result=result.replace(missingData[0],`Mình chưa có thông tin về ${missingData[1]} trong dữ liệu tin đăng. Mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn.`);
+  const priceIncludes = /(?:giá(?:\s+(?:này|đó|căn\s+này|căn\s+đó))?\s*)?(?:đã\s+)?(?:bao\s+gồm|gồm)\s+(?:nội\s+thất|(?:các\s+)?(?:khoản\s+)?phí(?:\s+\p{L}+){0,4}|thuế(?:\s+\p{L}+){0,3}|điện\s+nước|gửi\s+xe)/iu;
+  const citationSources=(sentence:string)=>{
+    const numbers=[...sentence.matchAll(/\[(\d{1,3})\]/gu)].map(match=>Number(match[1]));
+    return numbers.length ? sources.filter((source, index)=>numbers.includes(Number((source as T & { number?: number }).number ?? index + 1))) : sources;
+  };
+  const evidenceText=(source:T)=>`${String((source as T & { description?: unknown }).description || '')} ${String((source as T & { details?: unknown }).details || '')}`;
+  const furnitureGift=(text:string)=>/tặng\s+(?:đầy\s+đủ\s+)?nội\s+thất/iu.test(text);
+  const includesFurniture=(text:string)=>/(?:bao\s+gồm|gồm)\s+(?:đầy\s+đủ\s+)?nội\s+thất/iu.test(text);
+  const includesFee=(text:string)=>/(?:bao\s+gồm|gồm|đã\s+tính)[^.!?\n]*(?:phí|thuế|điện\s+nước|gửi\s+xe)/iu.test(text);
+  const furnitureClaim=/(?:giá(?:\s+(?:này|đó|căn\s+này|căn\s+đó))?\s*)?(?:đã\s+)?(?:bao\s+gồm|gồm)\s+(?:đầy\s+đủ\s+)?nội\s+thất/iu;
+  const feeClaim=/(?:giá(?:\s+(?:này|đó|căn\s+này|căn\s+đó))?\s*)?(?:đã\s+)?(?:bao\s+gồm|gồm)[^.!?\n]*(?:phí|thuế|điện\s+nước|gửi\s+xe)/iu;
+  result=result.split(/((?<=[.!?])\s+|\n+)/u).map((part,index)=>{
+    if(index%2===1 || !priceIncludes.test(part))return part;
+    const match=part.match(priceIncludes);
+    if(!match)return part;
+    const text=citationSources(part).map(evidenceText).join(' ');
+    const claimsFurniture=furnitureClaim.test(part);
+    const claimsFee=feeClaim.test(part);
+    if(claimsFurniture && !furnitureGift(text) && !includesFurniture(text) || claimsFee && !includesFee(text))return '';
+    if(claimsFurniture && furnitureGift(text))return part.replace(furnitureClaim,'Tin đăng ghi tặng nội thất');
+    return part;
+  }).join('');
   result=result.replace(/,\./gu,'.').replace(/\.,/gu,'.').replace(/\.{2,}/gu,'.').replace(/\s+\./gu,'.').trim();
   const normalizePromisedCards=(text:string)=>{
     const parts=text.split(/((?<=[.!?])\s+|\n+)/u),kept:string[]=[];
@@ -556,6 +586,9 @@ export function normalizeFinalReply<T extends { availability?: string }>(reply:s
   }
   const plainUnknown='Nếu dữ liệu không có, mình sẽ nói thẳng là mình chưa biết và nhờ chuyên viên kiểm tra giúp bạn.';
   result=result.replace(/(?:Tin đăng chưa có thông tin;\s*mình sẽ nhờ chuyên viên tư vấn kiểm tra giúp bạn\.?|[^.!?\n]*không(?:\s+\p{L}+){0,12}\s+nói(?:\s+là)?\s+không\s+biết[^.!?\n]*[.!?]?)/giu,plainUnknown);
+  if(sources.length) result=result
+    .replace(/(?<![\p{L}\d])(\d+)\.(\d+)(?=\s*m(?:²|2)(?![\p{L}\d]))/gu,'$1,$2')
+    .replace(/(?<![\p{L}\d])(\d+)\.(\d+)(?=\s*(?:tỷ|tỉ|ty|triệu|tr|nghìn|ngàn|đồng|VND)(?![\p{L}\d]))/giu,'$1,$2');
   result=formatReplyDates(result);
   return result;
 }

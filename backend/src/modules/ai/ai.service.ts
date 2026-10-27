@@ -17,7 +17,7 @@ import { runAgent } from './agent.ts';
 import { assistantPrompt, complete, querySearch, checkAnswer, extractNeedsAfterReply, streamAgentStep } from './llm.ts';
 import { setAiRequestSession, logAiRequest } from './request-log.js';
 import { questionPreview } from './privacy.js';
-import { adviceOrServiceQuestion, budgetFollowUp, catalogueOverviewIntent, clarificationFor, customerNameFromHistory, explicitRefilterRequest, genericSearchQuestion, historyReferenceQuestion, isAreaOnlyRefinement, isMoreRequest, listingCodes, missingBudgetQuestion, outsideCataloguePlace, referencedListingCodes, searchCriteriaFromHistory, textListingReferences } from './history-aware.js';
+import { adviceOrServiceQuestion, budgetFollowUp, catalogueOverviewIntent, clarificationFor, customerNameFromHistory, explicitRefilterRequest, genericSearchQuestion, historyReferenceQuestion, isAreaOnlyRefinement, isMoreRequest, listingCodes, missingBudgetQuestion, outsideCataloguePlace, preserveAreaSwitchCriteria, referencedListingCodes, renumberReferencedListings, searchCriteriaFromHistory, textListingReferences } from './history-aware.js';
 import { catalogueOverview, typeLabels } from './catalogue-overview.js';
 import { sanitizeReply, normalizeListedPrices } from './guard.js';
 import { withFormerDistrict } from './ward-label.js';
@@ -494,7 +494,8 @@ export class AiService {
         if(inferredFilters?.location===undefined && rememberedCriteria.location!==undefined)delete queryFilters.locations;
          if(inferredFilters?.locations===undefined && rememberedCriteria.locations!==undefined)delete queryFilters.location;
          if (/gần\s+(?:Quận\s*1|trung tâm)|đi\s+làm\s+(?:Quận\s*1|trung tâm)/iu.test(source)) { queryFilters.locations=centralFormerDistricts; delete queryFilters.location; }
-         if(!moneyAmounts(source).length && inferredFilters?.minPrice===undefined && rememberedCriteria.minPrice===undefined && rememberedCriteria.maxPrice!==undefined)delete queryFilters.minPrice;
+          if (areaOnlyRefinement) queryFilters = preserveAreaSwitchCriteria(queryFilters, rememberedCriteria);
+          if(!moneyAmounts(source).length && inferredFilters?.minPrice===undefined && rememberedCriteria.minPrice===undefined && rememberedCriteria.maxPrice!==undefined)delete queryFilters.minPrice;
          if(!moneyAmounts(source).length && rememberedCriteria.minPrice===undefined && rememberedCriteria.maxPrice===undefined){delete queryFilters.minPrice;delete queryFilters.maxPrice;delete queryFilters.maxPriceExclusive;}
         referenceIds=query.refers_to_previous.map(index=>interestIds[index-1]).filter((value):value is string=>typeof value==='string');
       } catch(error) { if(!(error instanceof Error && error.message==='NOT_A_PROPERTY_QUERY'))log('query_step',source,'invalid_query','flagged'); }
@@ -557,10 +558,10 @@ export class AiService {
          (turn.sources || []).forEach((source,index)=>{
            if(typeof source.code!=='string')return;
            const number=typeof (source as {number?:number}).number==='number' ? (source as {number:number}).number : cited[index] || index+1;
-           priorNumbers.set(source.code,number);
+            priorNumbers.set(source.code.toLowerCase(),number);
          });
        }
-       items=(await retrieveCodes(codeReference.codes)).map(item=>({...item,number:priorNumbers.get(item.code)}));
+        items=renumberReferencedListings(await retrieveCodes(codeReference.codes),codeReference.codes,priorNumbers);
        searchPerformed=false;
      }
     else if(pureReference) { items=await retrieveIds(referenceIds); searchPerformed=false; }
@@ -1091,7 +1092,7 @@ export class AiService {
     // "tầng 12 của tòa nhà có 12 tầng": the unit floor never tells how tall the building is, unless the listing says so.
     const floorsFixed=viewingFixed.replace(/\s*(?:của|trong)\s+tòa(?: nhà)?(?: có)?\s+(\d+)\s+tầng(?=[\s,.;])/giu,(match,floors)=>evidenceItems.some(item=>item.property_type==='Apartment') || !new RegExp(`${floors}\\s*tầng`,'iu').test(listingText.replace(/tầng\s*\d+/giu,'')) ? '' : match);
     // Imported apartment details write the unit floor as "12 tầng", so for apartments the clause is always dropped.
-      const finalSources=items.length ? items : evidenceItems;
+       const finalSources=(items.length ? items : evidenceItems).map(item=>({...item,details:details.get(item.id) || item.details}));
        const finalIntro=!hasDisclosure && count===0 ? disclosure : '';
         const finalNormalisedReply=normalizeFinalReply(viewedPropertyId ? floorsFixed : scrubOutsideDetailViewing(floorsFixed),source,finalSources,{specificListing:specificListingReply,includeAvailabilityNotice:false,relatedCount:related.length});
        const finalReply=finalNormalisedReply.trim()===finalIntro.trim() && modelBody.trim()
