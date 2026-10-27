@@ -12,14 +12,3 @@ describe('query location filter', () => {
     expect(locationFilter(null)).toBeUndefined();
   });
 });
-
-import { approximatePriceRange } from '../src/modules/ai/ai.service.js';
-describe('approximate price', () => {
-  it('widens an exact figure (min = max) to ±20%', () => {
-    expect(approximatePriceRange({ minPrice: 25_000_000, maxPrice: 25_000_000 })).toEqual({ minPrice: 20_000_000, maxPrice: 30_000_000 });
-  });
-  it('keeps real ranges and one-sided limits', () => {
-    expect(approximatePriceRange({ minPrice: 2e9, maxPrice: 3e9 })).toEqual({ minPrice: 2e9, maxPrice: 3e9 });
-    expect(approximatePriceRange({ maxPrice: 5e9 })).toEqual({ maxPrice: 5e9 });
-  });
-});

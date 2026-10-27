@@ -310,7 +310,7 @@ export function budgetFollowUp(message: string, history: HistoryTurn[]): BudgetF
   const shownPrices = previousSources.map(source => source.price).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
   if (cheaper && !cheaperKeepsCeiling) {
     const candidates = (shownPrices.length ? shownPrices : [prior.maxPrice]).filter((value): value is number => Number.isFinite(value));
-    if (candidates.length) filters.maxPrice = Math.max(0, Math.floor(Math.min(...candidates) * 0.9));
+     if (candidates.length) filters.maxPrice = Math.max(0, Math.min(...candidates) - 1);
     delete filters.minPrice;
   } else if (cheaper) {
     // "Rẻ hơn nữa" changes ordering, not the remembered ceiling. A page may

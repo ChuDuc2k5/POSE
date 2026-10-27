@@ -26,7 +26,7 @@ describe('M06 change 3 review fixes', () => {
       { role: 'user', content: 'Tôi muốn thuê chung cư ở Quận 7, khoảng 15 triệu' },
       { role: 'assistant', content: 'Mình thấy các căn khoảng 15 triệu phù hợp.', sources: [{ price: 12000000 }, { price: 12000000 }, { price: 11000000 }] },
     ];
-    expect(budgetFollowUp('Rẻ hơn được không', history)?.filters.maxPrice).toBe(9900000);
+    expect(budgetFollowUp('Rẻ hơn được không', history)?.filters.maxPrice).toBe(10999999);
     expect(budgetFollowUp('Cao cấp hơn chút', history)?.filters.minPrice).toBe(12000001);
   });
   it('keeps fallback cards aligned with citations and uses natural prices', () => {

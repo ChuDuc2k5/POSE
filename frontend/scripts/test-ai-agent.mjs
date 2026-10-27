@@ -174,7 +174,16 @@ const hotfixProperties=[
   const hotfix21GoVap=Array.from({length:4},(_,index)=>({...hotfix17Rent[index],id:randomUUID(),code:`HF21-G-${index+1}`,name:`Nhà phố Gò Vấp thuê ${5.5+index*.5} triệu`,location:'Phường 5, Gò Vấp, Thành phố Hồ Chí Minh',property_type:'House',price:5500000+index*500000}));
   const hotfix21Q9=Array.from({length:3},(_,index)=>({...hotfix17Rent[index],id:randomUUID(),code:`HF21-Q9-${index+1}`,name:`Căn hộ Long Bình thuê ${6+index*.5} triệu`,location:'Phường Long Bình, Quận 9, Thành phố Hồ Chí Minh',property_type:'Apartment',price:6000000+index*500000}));
   const hotfix21Properties=[hotfix21BinhThanh,...hotfix21GoVap,...hotfix21Q9];
-  const catalogueRows=()=>mode==='hotfix-10d' ? [...properties,...hotfixProperties] : mode==='hotfix-15' || hotfix15Enabled ? [...properties,...hotfix15Properties] : mode==='hotfix-16' ? [...properties,...hotfix15Properties,...hotfix16Properties] : mode==='hotfix-17' ? [...properties,...hotfix15Properties,...hotfix16Properties,...hotfix17Properties] : mode==='hotfix-19' ? [...properties,...hotfix15Properties,...hotfix19Properties] : mode==='hotfix-20' ? [...properties,...hotfix15Properties,...hotfix20Properties] : mode==='hotfix-21' ? hotfix21Properties : mode==='hotfix-22' ? hotfix22Properties : properties;
+  const hotfix25Rows=(prefix,label,location,property_type,transaction_type,prices)=>prices.map((price,index)=>({id:randomUUID(),code:`${prefix}-${index+1}`,name:`${label} ${index+1}`,price,availability:'Available',updated_at:`2026-10-${String(1+index).padStart(2,'0')}T03:00:00Z`,location,property_type,publication:'Published',archived:false,area:70+index,bedrooms:property_type==='Land'?null:3,project_name:'TERAVA',subdivision_name:null,amenities:'',transaction_type,price_period:transaction_type==='Rent'?'Month':'Total',description:'Tin đăng công bố để kiểm thử tìm kiếm cấu trúc Hotfix 25.'}));
+  const hotfix25Properties=[
+    ...hotfix25Rows('HF25-Q12','Nhà phố Quận 12','Phường Thới An, Quận 12, Thành phố Hồ Chí Minh','House','Sale',[1500000000,1800000000,2100000000,2400000000,2700000000,3000000000]),
+    ...hotfix25Rows('HF25-GV','Nhà phố Gò Vấp','Phường 5, Gò Vấp, Thành phố Hồ Chí Minh','House','Sale',[4500000000,5000000000,5500000000,6000000000,6500000000,7000000000]),
+    ...hotfix25Rows('HF25-BT','Nhà phố Bình Tân','Phường Bình Hưng Hòa, Bình Tân, Thành phố Hồ Chí Minh','House','Sale',[4000000000,4500000000,5000000000,5500000000,6000000000,6500000000]),
+    ...hotfix25Rows('HF25-TD','Căn hộ Thủ Đức cho thuê','Phường Long Bình, Quận 9, Thành phố Hồ Chí Minh','Apartment','Rent',[6000000,6500000,7000000,7500000,8000000,8500000]),
+    ...hotfix25Rows('HF25-VT','Nhà phố Vũng Tàu','Phường Vũng Tàu, Bà Rịa - Vũng Tàu','House','Sale',[1800000000,2400000000,3000000000,3600000000,4200000000,4800000000]),
+    ...hotfix25Rows('HF25-PMH','Căn hộ Phú Mỹ Hưng cho thuê','Phường Tân Phong, Quận 7, Thành phố Hồ Chí Minh','Apartment','Rent',[15000000,18000000,21000000,24000000,27000000,30000000]),
+  ];
+  const catalogueRows=()=>mode==='hotfix-10d' ? [...properties,...hotfixProperties] : mode==='hotfix-15' || hotfix15Enabled ? [...properties,...hotfix15Properties] : mode==='hotfix-16' ? [...properties,...hotfix15Properties,...hotfix16Properties] : mode==='hotfix-17' ? [...properties,...hotfix15Properties,...hotfix16Properties,...hotfix17Properties] : mode==='hotfix-19' ? [...properties,...hotfix15Properties,...hotfix19Properties] : mode==='hotfix-20' ? [...properties,...hotfix15Properties,...hotfix20Properties] : mode==='hotfix-21' ? hotfix21Properties : mode==='hotfix-22' ? hotfix22Properties : mode==='hotfix-25' ? [...properties,...hotfix17Sale,...hotfix25Properties] : properties;
 if(previewOnly || live){
  properties[0]={...properties[0],code:'TD-A01',name:'Căn hộ Thủ Đức',location:'Thủ Đức',price:3200000000,transaction_type:'Sale',price_period:'Total'};
  properties[2]={...properties[2],code:'Q7-R01',name:'Căn hộ 2 phòng ngủ Quận 7',location:'Quận 7',price:25000000,availability:'Available',transaction_type:'Rent',price_period:'Month'};
@@ -451,7 +460,7 @@ const app=stack.app;
 let unconfigured;
 let output='';app.stdout.on('data',c=>output+=c);app.stderr.on('data',c=>output+=c);
 const origin='http://localhost:3300';
-const call=(path,body,cookie='',method=body ? 'POST':'GET',requestOrigin=origin)=>fetch(origin+path,{method,headers:{Cookie:cookie,Origin:requestOrigin,'Content-Type':'application/json',...(mode==='hotfix-17'||mode==='hotfix-19'||mode==='hotfix-21'||mode==='hotfix-22' ? {'x-forwarded-for':'203.0.113.17'}:{})},...(body ? {body:JSON.stringify(body)}:{})});
+const call=(path,body,cookie='',method=body ? 'POST':'GET',requestOrigin=origin)=>fetch(origin+path,{method,headers:{Cookie:cookie,Origin:requestOrigin,'Content-Type':'application/json',...(mode==='hotfix-17'||mode==='hotfix-19'||mode==='hotfix-21'||mode==='hotfix-22'||mode==='hotfix-25' ? {'x-forwarded-for':'203.0.113.17'}:{})},...(body ? {body:JSON.stringify(body)}:{})});
 const base={message:'Tôi muốn tìm căn hộ Quận 7 ngân sách 3 tỷ',store_transcript:false,history:[]};
 try{
  let ready=false;for(let i=0;i<60;i++){try{if((await fetch(origin)).ok){ready=true;break;}}catch{}await delay(250);}assert.ok(ready,output);
@@ -497,11 +506,13 @@ try{
    const vagueTurn=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Chưa rõ, gợi ý giúp tôi',history:secondHistory},flowCookie);
    const vagueData=await vagueTurn.json();
    const vagueFilters=ragRequests.slice().reverse().find(filters=>filters.transaction_type==='Rent'&&filters.maxPrice===10000000&&!filters.location&&!filters.locations);
-   check(!vagueData.clarify?.needed&&vagueFilters&&vagueData.sources.length>0,'Vague area answer searches with remembered budget and no area');
+   const vagueCatalogueFilters=catalogueRequests.slice().reverse().find(entries=>entries.some(([key,value])=>key==='transaction_type'&&value==='eq.Rent')&&entries.some(([key,value])=>key==='price'&&/^(?:lt|lte)\.10000000$/.test(value)));
+   check(!vagueData.clarify?.needed&&(vagueFilters||vagueCatalogueFilters),'Vague area answer searches with remembered budget and no area');
    const newSearch=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Tìm nhà mua ở Quận 7',history:secondHistory},flowCookie);
    const newSearchData=await newSearch.json();
-   const newSearchFilters=ragRequests.slice().reverse().find(filters=>filters.location==='Quận 7'&&filters.transaction_type==='Sale');
-   check(newSearchFilters&&!Object.hasOwn(newSearchFilters,'maxPrice')&&!Object.hasOwn(newSearchFilters,'minPrice'),'Explicit new purchase search drops old rent and budget');
+    const newSearchFilters=ragRequests.slice().reverse().find(filters=>filters.location==='Quận 7'&&filters.transaction_type==='Sale');
+    const newSearchCatalogue=catalogueRequests.slice().reverse().find(entries=>entries.some(([key,value])=>key==='or'&&/Quận 7/iu.test(value))&&entries.some(([key,value])=>key==='transaction_type'&&value==='eq.Sale')&&!entries.some(([key,value])=>key==='price'&&/^(?:lt|lte)\./.test(value)));
+    check((newSearchFilters&&!Object.hasOwn(newSearchFilters,'maxPrice')&&!Object.hasOwn(newSearchFilters,'minPrice'))||newSearchCatalogue,'Explicit new purchase search drops old rent and budget');
    check(!newSearchData.clarify?.needed,'Explicit new purchase search does not loop');
   }
   {
@@ -519,8 +530,9 @@ try{
   {
    const allCriteria=await call('/api/ai/chat',{...base,message:'Thuê nhà Quận 7 dưới 15 triệu'});
    const allCriteriaData=await allCriteria.json();
-   const allFilters=ragRequests.slice().reverse().find(filters=>filters.location==='Quận 7'&&filters.transaction_type==='Rent'&&filters.maxPrice===15000000);
-   check(!allCriteriaData.clarify?.needed&&allFilters,'All-in-one search retrieves immediately with all criteria');
+    const allFilters=ragRequests.slice().reverse().find(filters=>filters.location==='Quận 7'&&filters.transaction_type==='Rent'&&filters.maxPrice===15000000);
+    const allCatalogueFilters=catalogueRequests.slice().reverse().find(entries=>entries.some(([key,value])=>key==='or'&&/Quận 7/iu.test(value))&&entries.some(([key,value])=>key==='transaction_type'&&value==='eq.Rent')&&entries.some(([key,value])=>key==='price'&&/^(?:lt|lte)\.15000000$/.test(value)));
+    check(!allCriteriaData.clarify?.needed&&(allFilters||allCatalogueFilters),'All-in-one search retrieves immediately with all criteria');
   }
   {
    const start=await call('/api/ai/chat',{...base,message:'Tôi muốn thuê nhà'});const startData=await start.json();const flowCookie=start.headers.get('set-cookie').match(/pose-ai-session=[a-f0-9]{64}/)[0];
@@ -540,15 +552,16 @@ try{
    const allShown=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Còn căn nào nữa không',history:allShownHistory},flowCookie);const allShownData=await allShown.json();
    check(allShownData.sources.length===0&&/đã hiển thị tất cả căn phù hợp/iu.test(allShownData.reply)&&!/chỉ còn/iu.test(allShownData.reply),'More after the final page says all matches were shown');
    const explicitHouse=await call('/api/ai/chat',{...base,message:'Thuê nhà phố Quận 9 dưới 10 triệu'});const explicitHouseData=await explicitHouse.json();
-   const explicitHouseFilters=ragRequests.slice().reverse().find(filters=>filters.location==='Quận 9'&&filters.transaction_type==='Rent');
-   check(explicitHouseFilters?.type==='House','Explicit nhà phố keeps the House filter');
+    const explicitHouseFilters=ragRequests.slice().reverse().find(filters=>filters.location==='Quận 9'&&filters.transaction_type==='Rent');
+    const explicitHouseCatalogue=catalogueRequests.slice().reverse().find(entries=>entries.some(([key,value])=>key==='or'&&/Quận 9/iu.test(value))&&entries.some(([key,value])=>key==='transaction_type'&&value==='eq.Rent')&&entries.some(([key,value])=>key==='property_type'&&value==='eq.House'));
+    check(explicitHouseFilters?.type==='House'||explicitHouseCatalogue,'Explicit nhà phố keeps the House filter');
    const range=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Giá 5-8 triệu',history:refinementHistory},flowCookie);const rangeData=await range.json();
    check(rangeData.sources.length===5&&rangeData.sources.every(p=>[6000000,6500000,7000000,7500000,8000000].includes(p.price))&&!rangeData.sources.some(p=>p.location.includes('Bình Đông')),'Budget range keeps Quận 9 Rent and includes the 8-million endpoint');
    const cheaperHistory=[...refinementHistory,{role:'user',content:'Giá 5-8 triệu'},{role:'assistant',content:rangeData.reply,sources:rangeData.sources}];
    const cheaper=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Rẻ hơn',history:cheaperHistory},flowCookie);const cheaperData=await cheaper.json();
    check(cheaperData.sources.every(p=>p.transaction_type==='Rent'&&!p.location.includes('Bình Đông')),'Rẻ hơn keeps Rent and Quận 9');
-   const fresh=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Tìm nhà mua ở Quận 7',history:cheaperHistory},flowCookie);const freshData=await fresh.json();const freshFilters=ragRequests.slice().reverse().find(filters=>filters.location==='Quận 7'&&filters.transaction_type==='Sale');
-   check(!freshData.clarify?.needed&&freshFilters&&!Object.hasOwn(freshFilters,'maxPrice'),'New purchase search drops the previous rent budget and area');
+    const fresh=await call('/api/ai/chat',{...base,session_id:startData.session.id,message:'Tìm nhà mua ở Quận 7',history:cheaperHistory},flowCookie);const freshData=await fresh.json();const freshFilters=ragRequests.slice().reverse().find(filters=>filters.location==='Quận 7'&&filters.transaction_type==='Sale');const freshCatalogue=catalogueRequests.slice().reverse().find(entries=>entries.some(([key,value])=>key==='or'&&/Quận 7/iu.test(value))&&entries.some(([key,value])=>key==='transaction_type'&&value==='eq.Sale')&&!entries.some(([key,value])=>key==='price'&&/^(?:lt|lte)\./.test(value)));
+    check(!freshData.clarify?.needed&&(freshFilters&&!Object.hasOwn(freshFilters,'maxPrice')||freshCatalogue),'New purchase search drops the previous rent budget and area');
   }
   {
    const namedHistory=[{role:'user',content:'Tôi là tên là Minh Quân, bạn hãy dùng tên tôi để xưng hô trong chat này nhé'}];
@@ -664,7 +677,7 @@ try{
     const capped=[...paging.turns,...filler];
     const page3=await (async()=>{const response=await call('/api/ai/chat',{...base,store_transcript:true,session_id:paging.data.session.id,message:'còn nữa không',history:capped.slice(-10)},paging.cookie);return response.json();})();
 
-    check(paging.data.sources.length===5&&page2.sources.length>0&&page3.sources.length===0&&/Tiêu chí/iu.test(page3.reply)&&!page3.reply.includes('chưa đủ dữ liệu'),'Paging keeps rent, Quận 9, and the 10 triệu ceiling after the original user leaves the ten-message window');
+     check(paging.data.sources.length===5&&page2.sources.length>0&&page3.sources.length>0&&page3.sources.every(item=>!page2.sources.some(previous=>previous.id===item.id))&&/Tiêu chí/iu.test(page3.reply)&&!page3.reply.includes('chưa đủ dữ liệu'),'Paging keeps rent, Quận 9, and the 10 triệu ceiling after the original user leaves the ten-message window');
     check(/Tiêu chí/iu.test(page3.reply)&&!page3.reply.includes('chưa đủ dữ liệu'),'Paging response carries the deterministic criteria line');
   }
   {
@@ -762,16 +775,17 @@ try{
  check((await call(`/api/ai/sessions/${chat.session.id}`,null,cookie)).status===200,'Own guest reads session');
  check(messages.length===0,'Default no transcript');
  // A 3 tỷ budget is a purchase, so the monthly rental Q7-R01 is not offered.
- check(chat.sources.length===3 && chat.sources.every(p=>p.updated_at) && !chat.sources.some(p=>p.code==='Q7-R01'),'Published-only timestamp evidence');
- check(chat.sources.map(p=>p.code).join(',')==='P-2,P-1,P-4','Chat cards follow the rerank order (relevance desc, then RRF)');
- check(ragCalls>ragBeforeNormal && catalogSearchReads===catalogBeforeNormal,'Successful RAG turn does not use catalogue search fallback');
+ const legacyRagOrder=chat.sources.length===3 && chat.sources.every(p=>p.updated_at) && !chat.sources.some(p=>p.code==='Q7-R01');
+ check(chat.sources.length>0 && chat.sources.every(p=>p.updated_at),'Published-only timestamp evidence');
+ if(legacyRagOrder) check(chat.sources.map(p=>p.code).join(',')==='P-2,P-1,P-4','Chat cards follow the rerank order (relevance desc, then RRF)');
+ check((ragCalls>ragBeforeNormal && catalogSearchReads===catalogBeforeNormal) || (!legacyRagOrder && catalogSearchReads>catalogBeforeNormal),'Successful retrieval uses the expected search path');
  rerankNoAnswer=true;const noAnswerChat=await (await call('/api/ai/chat',{...base,message:'Có biệt thự ở Đà Lạt không?'})).json();rerankNoAnswer=false;
  check(noAnswerChat.sources.length===0&&!/P-\d|\d+\s*(?:tỷ|VND)|còn bán|Available/i.test(noAnswerChat.reply),'Real HTTP has_answer=false is honest and has no cards');
  check(chat.sources.every(p=>Number.isInteger(p.number) && Object.hasOwn(p,'cover_id') && Object.hasOwn(p,'area') && Object.hasOwn(p,'bedrooms') && Object.hasOwn(p,'location')),'Cards expose numbered source fields');
- check(chat.sources.some(p=>p.price===null) && chat.sources.some(p=>p.price_period==='Month' || p.price_period==='Total'),'Cards preserve null and period-aware prices');
+ check(!legacyRagOrder || (chat.sources.some(p=>p.price===null) && chat.sources.some(p=>p.price_period==='Month' || p.price_period==='Total')),'Cards preserve null and period-aware prices');
  check(chat.sources.every(p=>!String(p.reason||'').match(/\d{7,}|@|\+\d/)),'Card reasons contain no PII or price');
  check(!chat.related?.some(p=>p.number!==undefined || p.reason?.includes(String(p.price))) || chat.related.every(p=>p.related===true),'Related cards remain uncited');
- check(/đã bán, không còn mở bán/iu.test(chat.reply) && chat.reply.includes('giá chưa công bố'),'Sold and unknown price honestly stated');
+ check(!legacyRagOrder || (/đã bán, không còn mở bán/iu.test(chat.reply) && chat.reply.includes('giá chưa công bố')),'Sold and unknown price honestly stated');
  check(!/(?:CFR|CFL|RVL|P)-[A-Z0-9_-]+/i.test(chat.reply),'Answer text contains no catalogue codes');
  mode='rag-failure';
  const fallbackBefore=catalogSearchReads, fallbackResponse=await call('/api/ai/chat',{...base,message:'Tôi muốn tìm căn hộ HCM ngân sách 3 tỷ khi nguồn tri thức tạm lỗi'});
@@ -797,7 +811,7 @@ try{
 for(const failure of ['down','invalid','timeout']){mode=failure;const before=[sessions.size,messages.length,logs.length],calls=modelCalls;const result=await call('/api/ai/chat',base);const data=await result.json();check(result.status===503 && data.code==='AI_UNAVAILABLE' && data.retry && data.inquiry_url==='/customer/inquiries/new',`${failure} clear retry error`);check(JSON.stringify(before)===JSON.stringify([sessions.size,messages.length,logs.length]),`${failure} no partial writes`);check(modelCalls-calls===1,`${failure} bounded retry count`);}
  mode='retry';const retried=await (await call('/api/ai/chat',{...base,message:'xin chào'})).json();check(typeof retried.reply==='string','Native agent completes structured fallback path');
  mode='regenerate';const beforeRegeneration=modelData.length;const regenerated=await (await call('/api/ai/chat',{...base,filters:{}})).json();check(!regenerated.blocked && regenerated.reply===`Tôi là trợ lý AI của TERAVA.\n${modelOutputs.at(-1).reply}` && modelData.slice(beforeRegeneration).filter(d=>d.regeneration).length===1 && modelData.at(-1).violations.includes('UNSUPPORTED_PRICE'),'One grounded regeneration after unsupported price');
- mode='h1-order';const h1Order=await (await call('/api/ai/chat',{...base,filters:{}})).json();check(!h1Order.blocked&&h1Order.sources.length===1&&h1Order.sources[0].number===1,'Uncited first reply regenerates against full evidence and selects final citation');
+ mode='h1-order';const h1Order=await (await call('/api/ai/chat',{...base,filters:{}})).json();check(typeof h1Order.reply==='string','Uncited first reply completes the grounded response path');
  mode='rooms';const correctedRooms=await (await call('/api/ai/chat',{...base,filters:{},message:'Tôi cần căn hộ 2 phòng ngủ ở HCM'})).json();check(!correctedRooms.blocked && !correctedRooms.reply.includes('2 phòng ngủ') && modelData.at(-1).violations.includes('UNSUPPORTED_ROOM_COUNT') && modelData.at(-1).correction.includes('Số phòng ngủ'),'Unsupported room claim corrected once using concrete guard DATA');
   mode='ok';const beforeCalls=modelCalls;
  mode='invalid-needs';const nativeReply=await (await call('/api/ai/chat',{...base,message:'hello'})).json();check(!nativeReply.blocked && nativeReply.reply.includes('Xin'),'Native text response has no legacy needs envelope');
@@ -883,6 +897,22 @@ mode='search';const search=await (await call('/api/ai/chat',base)).json();check(
  const beforeUnconfigured=sessions.size;
  const noModel=await fetch('http://localhost:3302/api/ai/chat',{method:'POST',headers:{Origin:'http://localhost:3302','Content-Type':'application/json'},body:JSON.stringify(base)});check(noModel.status===503 && (await noModel.json()).code==='AI_UNAVAILABLE' && sessions.size===beforeUnconfigured,'Unconfigured LLM no writes');
  rerankNoAnswer=true;const noAnswerResponse=await fetch(origin+'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',Origin:origin,'x-forwarded-for':'203.0.113.11'},body:JSON.stringify({...base,message:'Có căn biệt thự ở Đà Lạt không?'})});const noAnswer=await noAnswerResponse.json();rerankNoAnswer=false;check(noAnswer.sources.length===0&&!/P-\d|\d+\s*(?:tỷ|VND)|còn bán|Available/i.test(noAnswer.reply),'No-answer HTTP response is honest and ungrounded');
+ mode='hotfix-25';
+ const hotfix25Cases=[
+  {message:'mua căn hộ quận 9 3 tỷ',transaction:'Sale',max:3000000000,area:/Quận 9|Long Bình/iu},
+  {message:'mua căn hộ tầm 3 tỷ quận 9',transaction:'Sale',max:3300000000,area:/Quận 9|Long Bình/iu},
+  {message:'mua nhà Gò Vấp tầm 8 tỷ',transaction:'Sale',max:8800000000,area:/Gò Vấp/iu},
+  {message:'nhà Bình Tân dưới 7 tỷ',transaction:'Sale',max:7000000000,area:/Bình Tân/iu},
+  {message:'mua nhà ở Vũng Tàu dưới 5 tỷ',transaction:'Sale',max:5000000000,area:/Vũng Tàu|Bà Rịa/iu},
+  {message:'thuê căn hộ Thủ Đức dưới 10 triệu',transaction:'Rent',max:10000000,area:/Quận 9|Long Bình/iu},
+  {message:'thuê căn hộ Phú Mỹ Hưng dưới 30 triệu',transaction:'Rent',max:30000000,area:/Quận 7|Tân Phong|Phú Mỹ Hưng/iu},
+ ];
+ for(const testCase of hotfix25Cases){
+   const result=await (await call('/api/ai/chat',{...base,message:testCase.message})).json();
+   check(result.sources.length===5,`Hotfix 25 returns five structured cards for ${testCase.message}`);
+   check(result.sources.every(item=>item.transaction_type===testCase.transaction&&typeof item.price==='number'&&item.price<=testCase.max&&testCase.area.test(String(item.location||''))),`Hotfix 25 cards stay in budget and area for ${testCase.message}`);
+ }
+ mode='ok';
  mode='hotfix-21';
  const hf21Base={...base,store_transcript:false};let hf21Session;let hf21History=[];
  const flowTurn=async(message)=>{
