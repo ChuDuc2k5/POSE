@@ -3,21 +3,46 @@ import { explicitWriteIntent, outputReason, sanitizeReply, sourcesFromCitations 
 import { inferTransactionType } from '../src/modules/ai/infer-search.js';
 import { referencedListingCodes } from '../src/modules/ai/history-aware.js';
 
-const property = (number: number, code = `CFR-${number}ABC`) => ({ id: String(number), code, name: `Căn hộ ${number}`, price: 3000000000, availability: 'Available', updated_at: '2026-01-01', location: 'Quận 1', property_type: 'Apartment', number });
+const property = (number: number, code = `CFR-${number}ABC`) => ({
+  id: String(number),
+  code,
+  name: `Căn hộ ${number}`,
+  price: 3000000000,
+  availability: 'Available',
+  updated_at: '2026-01-01',
+  location: 'Quận 1',
+  property_type: 'Apartment',
+  number,
+});
 
 describe('M06 change 1', () => {
   it('resolves direct codes and back-references but ignores a new search', () => {
-    expect(referencedListingCodes('Chi tiết CFR-0FC7C10BB520419B', [])).toEqual({ codes: ['CFR-0FC7C10BB520419B'], ambiguous: false });
+    expect(referencedListingCodes('Chi tiết CFR-0FC7C10BB520419B', [])).toEqual({
+      codes: ['CFR-0FC7C10BB520419B'],
+      ambiguous: false,
+    });
     const history = [{ role: 'assistant', content: 'Mã: CFR-ONE1234, CFR-TWO1234' }];
-    expect(referencedListingCodes('Giá căn này thế nào?', history)).toEqual({ codes: ['CFR-ONE1234', 'CFR-TWO1234'], ambiguous: true });
+    expect(referencedListingCodes('Giá căn này thế nào?', history)).toEqual({
+      codes: ['CFR-ONE1234', 'CFR-TWO1234'],
+      ambiguous: true,
+    });
     expect(referencedListingCodes('Tìm căn hộ Quận 2 dưới 5 tỷ', history)).toEqual({ codes: [], ambiguous: false });
     const one = [{ role: 'user', content: 'Chi tiết căn CFR-0FC7C10BB520419B' }];
-    expect(referencedListingCodes('Từ căn hộ này đi đến trung tâm Quận 1 mất khoảng bao lâu?', one).codes).toEqual(['CFR-0FC7C10BB520419B']);
-    expect(referencedListingCodes('Dự án này do chủ đầu tư nào phát triển?', one).codes).toEqual(['CFR-0FC7C10BB520419B']);
+    expect(referencedListingCodes('Từ căn hộ này đi đến trung tâm Quận 1 mất khoảng bao lâu?', one).codes).toEqual([
+      'CFR-0FC7C10BB520419B',
+    ]);
+    expect(referencedListingCodes('Dự án này do chủ đầu tư nào phát triển?', one).codes).toEqual([
+      'CFR-0FC7C10BB520419B',
+    ]);
     expect(referencedListingCodes('Bên em còn căn nào khác ở Quận 7 không?', one).codes).toEqual([]);
     expect(referencedListingCodes('Ban công nhà này hướng nào?', one).codes).toEqual(['CFR-0FC7C10BB520419B']);
-    expect(referencedListingCodes('Tiền cọc mấy tháng và hợp đồng thuê tối thiểu bao lâu?', one).codes).toEqual(['CFR-0FC7C10BB520419B']);
-    expect(referencedListingCodes('Tiền cọc mấy tháng?', [...one, { role: 'assistant', content: 'Căn hộ 2PN ở Quận 7.' }]).codes).toEqual([]);
+    expect(referencedListingCodes('Tiền cọc mấy tháng và hợp đồng thuê tối thiểu bao lâu?', one).codes).toEqual([
+      'CFR-0FC7C10BB520419B',
+    ]);
+    expect(
+      referencedListingCodes('Tiền cọc mấy tháng?', [...one, { role: 'assistant', content: 'Căn hộ 2PN ở Quận 7.' }])
+        .codes,
+    ).toEqual([]);
     expect(referencedListingCodes('Tiền cọc mấy tháng?', history).codes).toEqual([]);
   });
 
@@ -44,7 +69,19 @@ describe('M06 change 1', () => {
 
   it('accepts catalogue-only referenced-listing answers with honest missing-data wording', () => {
     const source = [property(1, 'CFR-0FC7C10BB520419B')];
-    expect(outputReason('Căn này ở Quận 1. Thời gian di chuyển chưa có thông tin; bạn có thể trao đổi với chuyên viên tư vấn.', source, 'Từ căn hộ này đi đến trung tâm Quận 1 mất bao lâu?')).toBeNull();
-    expect(outputReason('Giá căn này chưa có dữ liệu. Chuyên viên tư vấn có thể hỗ trợ thêm.', source, 'Căn này giá bao nhiêu?')).toBeNull();
+    expect(
+      outputReason(
+        'Căn này ở Quận 1. Thời gian di chuyển chưa có thông tin; bạn có thể trao đổi với chuyên viên tư vấn.',
+        source,
+        'Từ căn hộ này đi đến trung tâm Quận 1 mất bao lâu?',
+      ),
+    ).toBeNull();
+    expect(
+      outputReason(
+        'Giá căn này chưa có dữ liệu. Chuyên viên tư vấn có thể hỗ trợ thêm.',
+        source,
+        'Căn này giá bao nhiêu?',
+      ),
+    ).toBeNull();
   });
 });

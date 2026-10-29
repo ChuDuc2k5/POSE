@@ -7,5 +7,16 @@ import { AiWorkspace } from '@/components/ai-workspace';
 export const metadata: Metadata = { title: 'Không gian Sales | TERAVA', robots: { index: false, follow: false } };
 export default async function SalesPage() {
   const identity = await requireCrmSession('/sales');
-  return <CrmPage {...identity}><SalesWorkspace extra={<section className="calls-sales-workspace crm-sales-calls" aria-label="Cuộc gọi và trợ lý AI"><CallsWorkspace sales/><AiWorkspace/></section>}/></CrmPage>;
+  return (
+    <CrmPage {...identity}>
+      <SalesWorkspace
+        extra={
+          <section className="calls-sales-workspace crm-sales-calls" aria-label="Cuộc gọi và trợ lý AI">
+            <CallsWorkspace sales />
+            <AiWorkspace />
+          </section>
+        }
+      />
+    </CrmPage>
+  );
 }

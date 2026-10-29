@@ -8,6 +8,7 @@ export default defineConfig({
   test: {
     globals: true,
     root: './',
+    maxWorkers: 4,
     include: ['**/*.spec.ts', '**/*.e2e-spec.ts'],
   },
 });

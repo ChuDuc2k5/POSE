@@ -11,7 +11,12 @@ import { authClient } from '../supabase/supabase.service.js';
 
 export async function saveSession(session: { access_token: string; refresh_token: string; expires_in: number }) {
   const jar = await cookies();
-  const options = { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' as const, path: '/' };
+  const options = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax' as const,
+    path: '/',
+  };
   jar.set(ACCESS_COOKIE, session.access_token, { ...options, maxAge: session.expires_in });
   jar.set(REFRESH_COOKIE, session.refresh_token, { ...options, maxAge: 60 * 60 * 24 * 7 });
 }
@@ -59,7 +64,10 @@ export async function authenticatedSession({ writable = true }: { writable?: boo
     const { data, error } = await client.auth.refreshSession({ refresh_token: refresh });
     if (!error && data.session && data.user?.email_confirmed_at) {
       const role = await accessContext(data.session.access_token, data.user.id);
-      if (!role) { await clearSession(); return null; }
+      if (!role) {
+        await clearSession();
+        return null;
+      }
       await saveSession(data.session);
       return { user: data.user, access: data.session.access_token, role };
     }

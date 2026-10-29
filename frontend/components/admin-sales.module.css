@@ -2,6 +2,9 @@
 .page .stats { grid-template-columns: repeat(3,minmax(0,1fr)); }
 .statusFilter select { min-height: 42px; padding: 10px 14px; border: 1px solid var(--nx-line); border-radius: 8px; background: var(--nx-surface); color: var(--nx-ink); font-size: 12px; }
 .contact { display: flex; flex-direction: column; gap: 5px; overflow-wrap: anywhere; }
+.territories { display: flex; flex-wrap: wrap; gap: 5px; min-width: 160px; }
+.territories span { border-radius: 999px; padding: 3px 8px; background: var(--nx-primary-soft); color: var(--nx-primary); font-size: 10px; white-space: nowrap; }
+.territories small { color: var(--nx-muted); font-size: 11px; }
 .contact strong { font-size: 12px; font-weight: 500; }
 .contact small { color: var(--nx-muted); font-size: 11px; }
 .dialog { max-width: 660px; width: calc(100% - 32px); }
@@ -17,6 +20,10 @@
 .check input { accent-color: var(--nx-primary); }
 .danger { color: var(--nx-danger); border-color: var(--nx-danger-line); background: var(--nx-danger-soft); }
 .historyDialog { max-width: 800px; }
+.territoryDialog { max-width: 760px; }
+.territoryList { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px 16px; margin: 18px 0; padding: 14px; border: 1px solid var(--nx-line); border-radius: 10px; }
+.territoryList legend { padding: 0 6px; font-size: 12px; font-weight: 600; }
+.territoryList label { display: flex; gap: 8px; align-items: center; color: var(--nx-text); font-size: 12px; }
 .history { display: flex; flex-direction: column; gap: 22px; list-style: none; margin: 0; padding: 0; }
 .history>li { border: 1px solid var(--nx-line); border-radius: 12px; padding: 20px; }
 .historyTop { display: flex; align-items: start; justify-content: space-between; gap: 16px; }

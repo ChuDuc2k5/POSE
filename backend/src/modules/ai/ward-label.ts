@@ -17,3 +17,20 @@ export function withFormerDistrict(location: string) {
   }
   return text;
 }
+
+/** Return the first former district represented by a listing/customer area. */
+export function formerDistrictFromLocation(location: string | null | undefined) {
+  const text = location?.normalize('NFC').trim() || '';
+  if (!text) return null;
+  const explicit = text.match(/(?:Quận|Huyện)\s+[A-Za-zÀ-ỹ0-9 .-]+/iu)?.[0]?.trim();
+  if (explicit) return explicit.replace(/\s+/g, ' ');
+  for (const row of hcmWards) {
+    const ward = row.ward.normalize('NFC').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`(?:phường|xã)\\s+${ward}(?=\\s*(?:,|$))`, 'iu').test(text)) return row.formerDistricts[0] || null;
+  }
+  return null;
+}
+
+export const formerDistricts = [
+  ...new Set(hcmWards.filter((row) => row.formerProvince === 'TP.HCM').flatMap((row) => row.formerDistricts)),
+].sort((a, b) => a.localeCompare(b, 'vi'));

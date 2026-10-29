@@ -11,8 +11,10 @@ export const metadata: Metadata = {
 export default async function AiChatPageRoute() {
   const session = await publicPageSession('/tro-ly-ai');
   const role = session?.role ?? null;
-  return <>
-    <SiteHeader role={role} />
-    <AiChatPage ownerKey={session?.user.id ?? 'guest'} signedIn={role === 'User'} />
-  </>;
+  return (
+    <>
+      <SiteHeader role={role} />
+      <AiChatPage ownerKey={session?.user.id ?? 'guest'} signedIn={role === 'User'} />
+    </>
+  );
 }

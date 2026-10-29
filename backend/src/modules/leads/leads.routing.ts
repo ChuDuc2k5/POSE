@@ -9,11 +9,18 @@ export class LeadRoutingWorker implements OnApplicationBootstrap, OnApplicationS
   private readonly logger = new Logger('LeadRouting');
 
   onApplicationBootstrap() {
-    if (process.env.NODE_ENV === 'test' || process.env.LEAD_ROUTING_ENABLED === 'false'
-      || !process.env.SUPABASE_URL || !process.env.SUPABASE_SECRET_KEY) return;
+    if (
+      process.env.NODE_ENV === 'test' ||
+      process.env.LEAD_ROUTING_ENABLED === 'false' ||
+      !process.env.SUPABASE_URL ||
+      !process.env.SUPABASE_SECRET_KEY
+    )
+      return;
     const configured = Number(process.env.LEAD_ROUTING_INTERVAL_MS || 15000);
     const interval = Number.isFinite(configured) ? Math.max(5000, configured) : 15000;
-    this.timer = setInterval(() => { void this.tick(); }, interval);
+    this.timer = setInterval(() => {
+      void this.tick();
+    }, interval);
     this.timer.unref();
     void this.tick();
   }
@@ -21,7 +28,8 @@ export class LeadRoutingWorker implements OnApplicationBootstrap, OnApplicationS
     if (this.busy) return;
     this.busy = true;
     try {
-      const { data, error } = await systemClient().rpc('pose_lead_route_batch', { p_limit: 25 })
+      const { data, error } = await systemClient()
+        .rpc('pose_lead_route_batch', { p_limit: 25 })
         .abortSignal(AbortSignal.timeout(10000));
       if (error) throw new Error(error.code || 'UNAVAILABLE');
       if (data?.failed && !this.warned) {
@@ -31,7 +39,11 @@ export class LeadRoutingWorker implements OnApplicationBootstrap, OnApplicationS
     } catch {
       if (!this.warned) this.logger.warn('Chưa thể xử lý hàng đợi phân công. Kiểm tra migration và kết nối Supabase.');
       this.warned = true;
-    } finally { this.busy = false; }
+    } finally {
+      this.busy = false;
+    }
   }
-  onApplicationShutdown() { if (this.timer) clearInterval(this.timer); }
+  onApplicationShutdown() {
+    if (this.timer) clearInterval(this.timer);
+  }
 }

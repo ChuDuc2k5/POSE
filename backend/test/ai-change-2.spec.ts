@@ -3,6 +3,16 @@ import { moneyAmounts } from '../src/modules/ai/money.js';
 import { explicitWriteIntent, outputReason } from '../src/modules/ai/guard.js';
 
 describe('M06 change 2', () => {
+  it('does not treat Vietnamese words beginning with tr as million units', () => {
+    expect(moneyAmounts('Nhà 75m2, 1 trệt 1 lầu')).toEqual([]);
+    expect(moneyAmounts('3 tầng 1 trệt')).toEqual([]);
+    expect(moneyAmounts('15tr')).toEqual([15000000]);
+    expect(moneyAmounts('15 tr/tháng')).toEqual([15000000]);
+    expect(moneyAmounts('7tr5')).toEqual([7500000]);
+    expect(moneyAmounts('trên 10 triệu')).toEqual([10000000]);
+    expect(moneyAmounts('5,100,000,000 VND')).toEqual([5100000000]);
+  });
+
   it('parses composite billion and million amounts', () => {
     expect(moneyAmounts('4 t\u1ef7 100 tri\u1ec7u')).toEqual([4100000000]);
     expect(moneyAmounts('4 t\u1ef7 1')).toEqual([4100000000]);
@@ -13,14 +23,44 @@ describe('M06 change 2', () => {
   });
 
   it('keeps invented prices blocked and customer budgets allowed', () => {
-    const evidence = [{ id: '1', code: 'CFR-1', name: 'C\u0103n h\u1ed9 2PN', price: 4100000000, availability: 'Available', updated_at: '2026-01-01', location: 'Qu\u1eadn 7', property_type: 'Apartment', bedrooms: null }];
+    const evidence = [
+      {
+        id: '1',
+        code: 'CFR-1',
+        name: 'C\u0103n h\u1ed9 2PN',
+        price: 4100000000,
+        availability: 'Available',
+        updated_at: '2026-01-01',
+        location: 'Qu\u1eadn 7',
+        property_type: 'Apartment',
+        bedrooms: null,
+      },
+    ];
     expect(outputReason('Gi\u00e1 4 t\u1ef7 100 tri\u1ec7u [1].', evidence)).toBeNull();
     expect(outputReason('Gi\u00e1 99 t\u1ef7 [1].', evidence)).toBe('UNSUPPORTED_PRICE');
-    expect(outputReason('Ng\u00e2n s\u00e1ch 3 t\u1ef7, c\u0103n n\u00e0y gi\u00e1 4 t\u1ef7 100 tri\u1ec7u [1].', evidence, 'Ng\u00e2n s\u00e1ch 3 t\u1ef7')).toBeNull();
+    expect(
+      outputReason(
+        'Ng\u00e2n s\u00e1ch 3 t\u1ef7, c\u0103n n\u00e0y gi\u00e1 4 t\u1ef7 100 tri\u1ec7u [1].',
+        evidence,
+        'Ng\u00e2n s\u00e1ch 3 t\u1ef7',
+      ),
+    ).toBeNull();
   });
 
   it('accepts bedroom counts from catalogue names when bedrooms is null', () => {
-    const evidence = [{ id: '1', code: 'CFR-1', name: 'C\u0103n h\u1ed9 2PN', price: 4100000000, availability: 'Available', updated_at: '2026-01-01', location: 'Qu\u1eadn 7', property_type: 'Apartment', bedrooms: null }];
+    const evidence = [
+      {
+        id: '1',
+        code: 'CFR-1',
+        name: 'C\u0103n h\u1ed9 2PN',
+        price: 4100000000,
+        availability: 'Available',
+        updated_at: '2026-01-01',
+        location: 'Qu\u1eadn 7',
+        property_type: 'Apartment',
+        bedrooms: null,
+      },
+    ];
     expect(outputReason('C\u0103n h\u1ed9 2 ph\u00f2ng ng\u1ee7 [1].', evidence)).toBeNull();
     expect(outputReason('C\u0103n h\u1ed9 3 ph\u00f2ng ng\u1ee7 [1].', evidence)).toBe('UNSUPPORTED_ROOM_COUNT');
   });

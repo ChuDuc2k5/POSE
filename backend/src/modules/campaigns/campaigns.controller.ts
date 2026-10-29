@@ -11,17 +11,29 @@ import { CampaignsScheduler } from './campaigns.scheduler.js';
 export class CampaignsController {
   constructor(private readonly scheduler: CampaignsScheduler) {}
   @Get()
-  list(@Req() req: Request, @Res() res: Response) { return this.handle(req, res); }
+  list(@Req() req: Request, @Res() res: Response) {
+    return this.handle(req, res);
+  }
   @Post()
-  create(@Req() req: Request, @Res() res: Response) { return this.handle(req, res); }
+  create(@Req() req: Request, @Res() res: Response) {
+    return this.handle(req, res);
+  }
   @Get('*path')
-  read(@Req() req: Request, @Res() res: Response) { return this.handle(req, res); }
+  read(@Req() req: Request, @Res() res: Response) {
+    return this.handle(req, res);
+  }
   @Post('*path')
-  mutate(@Req() req: Request, @Res() res: Response) { return this.handle(req, res); }
+  mutate(@Req() req: Request, @Res() res: Response) {
+    return this.handle(req, res);
+  }
   @Patch('*path')
-  edit(@Req() req: Request, @Res() res: Response) { return this.handle(req, res); }
+  edit(@Req() req: Request, @Res() res: Response) {
+    return this.handle(req, res);
+  }
   private handle(req: Request, res: Response) {
-    return dispatch(req, res, request => campaignRoute(request, request.nextUrl.pathname.split('/').slice(4), () => this.scheduler.status()));
+    return dispatch(req, res, (request) =>
+      campaignRoute(request, request.nextUrl.pathname.split('/').slice(4), () => this.scheduler.status()),
+    );
   }
 }
 
@@ -30,5 +42,7 @@ export class CampaignsController {
 export class CampaignsTickController {
   constructor(private readonly scheduler: CampaignsScheduler) {}
   @Post('tick')
-  tick(@Req() req: Request, @Res() res: Response) { return dispatch(req, res, request => this.scheduler.httpTick(request)); }
+  tick(@Req() req: Request, @Res() res: Response) {
+    return dispatch(req, res, (request) => this.scheduler.httpTick(request));
+  }
 }

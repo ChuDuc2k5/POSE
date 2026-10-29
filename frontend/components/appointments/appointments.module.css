@@ -41,6 +41,8 @@
 .customer span { color: #737f8c; margin-top: 5px; }
 .iconButton { display: inline-flex; justify-content: center; align-items: center; width: 32px; height: 32px; flex-shrink: 0; padding: 0; border: 1px solid #e7e9e1; border-radius: 8px; color: #7a8490; background: white; }
 .badge { display: inline-block; border-radius: 20px; background: #f1edfa; color: #81729e; padding: 5px 10px; font-size: 10px; white-space: nowrap; }
+.chat { margin-left: 6px; background: #e8f2ee; color: #3f7a63; }
+.needsDetails { display: block; color: #a8742c; font-weight: 600; }
 .completed { color: #3c7a61; background: #edf6ed; }
 .cancelled { color: #8a7773; background: #f3eeeb; }
 .overdue { display: inline-block; margin: 7px 6px 0; padding: 3px 7px; color: #a86b38; background: #fff5e6; border-radius: 5px; font-size: 9px; }
@@ -111,6 +113,11 @@
 .dialogHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 22px 24px; border-bottom: 1px solid #e8eae4; }
 .dialogHeader h2 { font-size: 19px; margin: 0; }
 .dialogHeader p { color: #858c91; font-size: 11px; margin: 6px 0 0; }
+.salesSuggestion { display: grid; gap: 5px; padding: 12px; border: 1px solid #e6e1f0; border-radius: 10px; background: #faf9fd; }
+.salesSuggestion label { margin: 0; }
+.salesSuggestion select { margin-top: 5px; }
+.suggestionReason { color: #77708d; font-size: 10px; }
+.notice { padding: 9px 11px; border-radius: 7px; background: #fff8e9; color: #8d6b32; font-size: 11px; }
 @media (max-width: 1100px) { .page { padding-inline: 24px; } .filters .search { flex-basis: 100%; } }
 @media (max-width: 700px) {
   .page { padding: 25px 16px; }

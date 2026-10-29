@@ -9,5 +9,7 @@ import * as workspace from './workspace-role.handlers.js';
 export class WorkspaceController {
   @Get('workspace/:role')
   @Public()
-  readWorkspace(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, workspace.GET); }
+  readWorkspace(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, workspace.GET);
+  }
 }

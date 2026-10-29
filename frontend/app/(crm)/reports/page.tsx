@@ -1,10 +1,7 @@
-import type { Metadata } from 'next';
+import { redirect } from 'next/navigation';
 import { requireCrmSession } from '@/lib/crm-session';
-import { vietnamToday } from '@/lib/reports';
-import { CrmPage } from '@/components/crm/crm-workspace';
-import { ReportWorkspace } from '@/components/reports/report-workspace';
-export const metadata: Metadata = { title: 'Báo cáo Lead | TERAVA', robots: { index: false, follow: false } };
-export default async function ReportsPage() {
+// Kept so old links keep working: Sales use /sales/reports, Admin uses /admin/reports.
+export default async function ReportsRedirectPage() {
   const identity = await requireCrmSession('/reports');
-  return <CrmPage {...identity}><ReportWorkspace today={vietnamToday()}/></CrmPage>;
+  redirect(identity.role === 'Admin' ? '/admin/reports' : '/sales/reports');
 }

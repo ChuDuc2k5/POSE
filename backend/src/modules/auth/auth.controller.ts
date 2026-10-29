@@ -13,32 +13,46 @@ import * as google from './google.handlers.js';
 export class AuthController {
   @Post('auth/google')
   @Public()
-  googleStart(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, google.START); }
+  googleStart(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, google.START);
+  }
   @Get('auth/google/callback')
   @Public()
-  googleCallback(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, google.CALLBACK); }
+  googleCallback(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, google.CALLBACK);
+  }
   @Get('auth/session')
   @Public()
   session(@Req() request: Request, @Res() response: Response) {
-    return dispatch(request, response, async req => {
+    return dispatch(request, response, async (req) => {
       const session = await authenticatedSession({ writable: req.nextUrl.searchParams.get('writable') !== 'false' });
-      return globalThis.Response.json(session ? { user: session.user, role: session.role } : null, { headers: { 'Cache-Control': 'no-store' } });
+      return globalThis.Response.json(session ? { user: session.user, role: session.role } : null, {
+        headers: { 'Cache-Control': 'no-store' },
+      });
     });
   }
   @Get('auth/:action')
   @Public()
-  readAuthAction(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, actions.GET); }
+  readAuthAction(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, actions.GET);
+  }
   @Post('auth/:action')
   @Public()
-  submitAuthAction(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, actions.POST); }
+  submitAuthAction(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, actions.POST);
+  }
 }
 
 @Controller()
 export class AuthCookieController {
   @Get('auth/confirm')
   @Public()
-  confirm(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, confirmation.GET); }
+  confirm(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, confirmation.GET);
+  }
   @Get('auth/refresh')
   @Public()
-  refresh(@Req() request: Request, @Res() response: Response) { return dispatch(request, response, refresh.GET); }
+  refresh(@Req() request: Request, @Res() response: Response) {
+    return dispatch(request, response, refresh.GET);
+  }
 }

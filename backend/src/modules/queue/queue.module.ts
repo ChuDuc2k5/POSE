@@ -3,22 +3,42 @@ import { Module, Logger, Injectable, type OnApplicationShutdown } from '@nestjs/
 import { BullModule } from '@nestjs/bullmq';
 import { Redis } from 'ioredis';
 
-export const queueConnection = { host: process.env.REDIS_HOST || '127.0.0.1', port: Number(process.env.REDIS_PORT || 6379) };
+export const queueConnection = {
+  host: process.env.REDIS_HOST || '127.0.0.1',
+  port: Number(process.env.REDIS_PORT || 6379),
+};
 let redisAvailable = false;
 if (process.env.NODE_ENV !== 'test') {
-  const probe = new Redis({ ...queueConnection, lazyConnect: true, retryStrategy: () => null, connectTimeout: 500, maxRetriesPerRequest: 0 });
+  const probe = new Redis({
+    ...queueConnection,
+    lazyConnect: true,
+    retryStrategy: () => null,
+    connectTimeout: 500,
+    maxRetriesPerRequest: 0,
+  });
   probe.on('error', () => {});
-  try { await probe.connect(); redisAvailable = (await probe.ping()) === 'PONG'; } catch { /* Redis is optional. */ }
-  finally { probe.disconnect(); }
+  try {
+    await probe.connect();
+    redisAvailable = (await probe.ping()) === 'PONG';
+  } catch {
+    /* Redis is optional. */
+  } finally {
+    probe.disconnect();
+  }
   if (!redisAvailable) new Logger('QueueModule').warn('Redis chưa khả dụng; hàng đợi đã tắt.');
 }
 @Injectable()
 export class QueueStatus implements OnApplicationShutdown {
   enabled = redisAvailable;
-  onApplicationShutdown() { redisAvailable = false; }
+  onApplicationShutdown() {
+    redisAvailable = false;
+  }
 }
 @Module({
-  imports: redisAvailable ? [BullModule.forRoot({ connection: queueConnection }), BullModule.registerQueue({ name: 'pose-jobs' })] : [],
-  providers: [QueueStatus], exports: [QueueStatus, ...(redisAvailable ? [BullModule] : [])],
+  imports: redisAvailable
+    ? [BullModule.forRoot({ connection: queueConnection }), BullModule.registerQueue({ name: 'pose-jobs' })]
+    : [],
+  providers: [QueueStatus],
+  exports: [QueueStatus, ...(redisAvailable ? [BullModule] : [])],
 })
 export class QueueModule {}

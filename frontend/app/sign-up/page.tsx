@@ -4,5 +4,5 @@ import { redirectSignedInUser } from '@/lib/page-session';
 export const metadata: Metadata = { title: 'Đăng ký | TERAVA' };
 export default async function SignUp() {
   await redirectSignedInUser('/sign-up');
-  return <AuthForm mode="signup"/>;
+  return <AuthForm mode="signup" />;
 }

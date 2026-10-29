@@ -42,27 +42,15 @@ export default function SocketTestPage() {
 
   return (
     <main className="p-10">
-      <h1 className="text-2xl font-bold">
-        Socket Test
-      </h1>
+      <h1 className="text-2xl font-bold">Socket Test</h1>
 
-      <p className="mt-4">
-        Status:{' '}
-        {connected ? 'Connected' : 'Disconnected'}
-      </p>
+      <p className="mt-4">Status: {connected ? 'Connected' : 'Disconnected'}</p>
 
-      <button
-        onClick={sendMessage}
-        className="mt-5 rounded bg-black px-4 py-2 text-white"
-      >
+      <button onClick={sendMessage} className="mt-5 rounded bg-black px-4 py-2 text-white">
         Send Message
       </button>
 
-      {message && (
-        <p className="mt-5">
-          Backend: {message}
-        </p>
-      )}
+      {message && <p className="mt-5">Backend: {message}</p>}
     </main>
   );
 }
