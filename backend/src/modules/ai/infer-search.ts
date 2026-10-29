@@ -13,6 +13,8 @@ export type InferredSearch = {
   minArea?: number;
   maxArea?: number;
   bedrooms?: number;
+  minBedrooms?: number;
+  maxBedrooms?: number;
   transaction_type?: 'Sale' | 'Rent';
   keywords?: string[];
 };
@@ -49,7 +51,8 @@ export function inferTransactionType(text: string): 'Sale' | 'Rent' | undefined 
     (word('thue').test(n) ||
       word('thuê').test(text) ||
       /rent|for\s+rent|\d[\d.,\s]*\s*trieu\s*\/\s*thang/.test(n) ||
-      /\/\s*thang|hang\s*thang|moi\s*thang/.test(n))
+      /\/\s*thang|hang\s*thang|moi\s*thang/.test(n) ||
+      /^\s*o\s+(?:quan|q\.?\s*\d|khu\s+vuc)\b/i.test(n))
   )
     return 'Rent';
   if (mua || /buy|for\s+sale|sale|\d[\d.,\s]*\s*ty\b/.test(n) || /\d[\d.,\s]*\s*(?:tỷ|tỉ)(?![\p{L}])/iu.test(text))
@@ -147,7 +150,7 @@ export function genericHome(text: string) {
 export type BudgetFilters = Pick<InferredSearch, 'minPrice' | 'maxPrice' | 'maxPriceExclusive'>;
 
 export function budgetFilters(text: string): BudgetFilters {
-  const amount = (raw: string) => moneyAmounts(raw.replace(/\btr\b/i, 'triệu'))[0];
+  const amount = (raw: string) => moneyAmounts(raw.replace(/(?<![\p{L}])tr(?![\p{L}])/iu, 'triệu'))[0];
   const filters: BudgetFilters = {};
   const range = text.match(
     /([\d.,]+)\s*(tỷ|tỉ|ty|billion|triệu|tr|million)?\s*(?:-|–|—|đến|tới)\s*([\d.,]+)\s*(tỷ|tỉ|ty|billion|triệu|tr|million)?/iu,
@@ -163,20 +166,21 @@ export function budgetFilters(text: string): BudgetFilters {
     if (first && second) {
       filters.minPrice = Math.min(first, second);
       filters.maxPrice = Math.max(first, second);
+      filters.maxPriceExclusive = false;
     }
     return filters;
   }
   const below = text.match(
-    /(?:dưới|tối đa|không quá|<=?|tầm|khoảng|budget|ngân sách|under|below)[^\d]{0,12}([\d.,]+\s*(?:tỷ|tỉ|triệu|tr|million|billion))/iu,
+    /(?:dưới|duoi|tối đa|toi da|không quá|khong qua|<=?|tầm|tam|khoảng|khoang|budget|ngân sách|ngan sach|under|below)[^\d]{0,12}([\d.,]+\s*(?:tỷ|tỉ|ty|triệu|trieu|tr|million|billion))/iu,
   );
   const above = text.match(
-    /(?:trên|từ|tối thiểu|>=?|over|above)[^\d]{0,12}([\d.,]+\s*(?:tỷ|tỉ|triệu|tr|million|billion))/iu,
+    /(?:trên|từ|tối thiểu|>=?|over|above)[^\d]{0,12}([\d.,]+\s*(?:tỷ|tỉ|ty|triệu|trieu|tr|million|billion))/iu,
   );
   if (below) {
     const value = amount(below[1]);
     if (value) {
       filters.maxPrice = /tầm|khoảng/i.test(below[0]) ? Math.round(value * 1.1) : value;
-      if (/dưới/i.test(below[0])) filters.maxPriceExclusive = true;
+      if (/(?:dưới|duoi)/i.test(below[0])) filters.maxPriceExclusive = true;
     }
   }
   if (above && above[0] !== below?.[0]) {
@@ -184,14 +188,14 @@ export function budgetFilters(text: string): BudgetFilters {
     if (value) filters.minPrice = value;
   }
   if (!below && !above) {
-    const bareAmount = text.match(/(?<![\p{L}\d])([\d.,]+\s*(?:tỷ|tỉ|ty|triệu|tr))(?![\p{L}])/iu);
+    const bareAmount = text.match(/(?<![\p{L}\d])([\d.,]+\s*(?:tỷ|tỉ|ty|triệu|trieu|tr))(?![\p{L}])/iu);
     if (bareAmount) {
       const value = amount(bareAmount[1]);
       if (value) filters.maxPrice = value;
     }
   }
   const statedBudget = text.match(
-    /(?:chỉ\s+có|có|trong\s+tay|vốn|tài\s+chính)[^\d]{0,40}([\d.,]+\s*(?:tỷ|tỉ|ty|triệu|tr))(?![\p{L}])/iu,
+    /(?:chỉ\s+có|có|trong\s+tay|vốn|tài\s+chính)[^\d]{0,40}([\d.,]+\s*(?:tỷ|tỉ|ty|triệu|trieu|tr))(?![\p{L}])/iu,
   );
   if (statedBudget) {
     const value = amount(statedBudget[1]);
@@ -201,7 +205,7 @@ export function budgetFilters(text: string): BudgetFilters {
       filters.maxPriceExclusive = false;
     }
   }
-  const moneyMentions = [...text.matchAll(/([\d.,]+)\s*(tỷ|tỉ|ty|triệu|tr)(?![\p{L}])/giu)];
+  const moneyMentions = [...text.matchAll(/([\d.,]+)\s*(tỷ|tỉ|ty|triệu|trieu|tr)(?![\p{L}])/giu)];
   const correction =
     /(?:nhầm|sửa\s*lại|thật\s*ra|thay\s*vào\s*đó|đổi\s+thành|chỉ\s+có|vẫn\s+muốn|à\s*(?:không|nhầm))|thôi\s*$/iu;
   for (const mention of moneyMentions) {
@@ -235,7 +239,8 @@ export function inferSearch(text: string): InferredSearch | null {
     if (Array.isArray(landmark[1])) filters.locations = landmark[1];
     else filters.location = landmark[1];
   }
-  if (word('thuê').test(text)) filters.transaction_type = 'Rent';
+  const transaction = inferTransactionType(text);
+  if (transaction) filters.transaction_type = transaction;
   else if (word('mua|bán').test(text)) filters.transaction_type = 'Sale';
   const district = [...text.matchAll(/(?:quận|quan|q\.?|district)\s*(\d{1,2})(?![\p{L}\d])/giu)].at(-1);
   const normalized = text.normalize('NFD').replace(/\p{M}/gu, '').replace(/đ/g, 'd').toLowerCase();
@@ -268,6 +273,12 @@ export function inferSearch(text: string): InferredSearch | null {
   if (unspecifiedPropertyType.test(text) && !explicitHouse.test(text)) delete filters.type;
   const bedrooms = text.match(/(?<!\d)(\d+)\s*(?:phòng\s*ngủ|pn|phòng)(?!\p{L})/iu);
   if (bedrooms) filters.bedrooms = Number(bedrooms[1]);
+  const bedroomRange = text.match(/(?<!\d)(\d+)\s*(?:-|–|—|đến)\s*(\d+)\s*(?:phòng\s*ngủ|pn|phòng)(?!\p{L})/iu);
+  if (bedroomRange) {
+    filters.minBedrooms = Math.min(Number(bedroomRange[1]), Number(bedroomRange[2]));
+    filters.maxBedrooms = Math.max(Number(bedroomRange[1]), Number(bedroomRange[2]));
+    delete filters.bedrooms;
+  }
   const keywords = searchKeywords(text);
   if (keywords.length) filters.keywords = keywords;
   Object.assign(filters, budgetFilters(text));
@@ -276,6 +287,7 @@ export function inferSearch(text: string): InferredSearch | null {
     filters.types = ['House', 'Apartment'];
   }
   const area = text.match(/(?:diện\s*tích\s*)?(?:khoảng|tầm)\s*([\d.,]+)\s*(?:m\s*[²2]|mét\s*vuông)/i);
+  const areaRange = text.match(/(?<![\d])([\d.,]+)\s*(?:-|–|—|đến)\s*([\d.,]+)\s*(?:m\s*[²2]|mét\s*vuông)/iu);
   const areaAbove = [
     ...text.matchAll(/(?:trên|từ|tối\s*thiểu|ít\s*nhất|>=?)\s*([\d.,]+)\s*(?:m\s*[²2]|mét\s*vuông)/giu),
   ].at(-1);
@@ -297,6 +309,14 @@ export function inferSearch(text: string): InferredSearch | null {
   if (areaBelow) {
     const value = areaValue(areaBelow[1]);
     if (Number.isFinite(value)) filters.maxArea = value;
+  }
+  if (areaRange) {
+    const first = areaValue(areaRange[1]);
+    const second = areaValue(areaRange[2]);
+    if (Number.isFinite(first) && Number.isFinite(second)) {
+      filters.minArea = Math.min(first, second);
+      filters.maxArea = Math.max(first, second);
+    }
   }
   // No buy/rent word: a price in tỷ is a purchase, a price per month is a rent ("nhà ở Quận 7 giá dưới 5 tỷ").
   if (!filters.transaction_type) {

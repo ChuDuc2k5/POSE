@@ -1,7 +1,7 @@
 import { stripPhones } from './privacy.ts';
 
 // `tr` is shorthand for triệu only at a word boundary; do not parse words such as "trệt".
-const unitPattern = '(?:tỷ|tỉ|ty|billion|triệu|tr(?![\\p{L}_])|million|nghìn|ngàn|k|vnd|đồng)';
+const unitPattern = '(?:tỷ|tỉ|ty|billion|triệu|trieu|tr(?![\\p{L}_])|million|nghìn|ngàn|k|vnd|đồng)';
 const numberPattern = '(\\d{1,3}(?:[., ]\\d{3})+(?:[,.]\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?)';
 const words: Record<string, number> = {
   một: 1,
@@ -33,7 +33,7 @@ function unitNumeric(raw: string) {
 }
 function multiplier(unit: string) {
   if (/^(tỷ|tỉ|ty|billion)$/i.test(unit)) return 1e9;
-  if (/^(triệu|tr|million)$/i.test(unit)) return 1e6;
+  if (/^(triệu|trieu|tr|million)$/i.test(unit)) return 1e6;
   if (/^(nghìn|ngàn|k)$/i.test(unit)) return 1e3;
   return 1;
 }
@@ -72,7 +72,7 @@ export function moneyAmounts(text: string): number[] {
   const million = new RegExp(
     '(?<![\\p{L}\\p{N}_])(' +
       numberPattern +
-      ')\\s*(triệu|tr(?![\\p{L}_]))\\s*(' +
+      ')\\s*(triệu|trieu|tr(?![\\p{L}_]))\\s*(' +
       numberPattern +
       ')\\s*(nghìn|ngàn|k)?(?![\\p{L}\\p{N}_])',
     'giu',

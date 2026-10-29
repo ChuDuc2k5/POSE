@@ -19,6 +19,7 @@ await cp(join(repoRoot, 'backend', 'src', 'modules', 'ai', 'prompts'), join(temp
 for (const name of [
   'privacy',
   'money',
+  'finance',
   'extraction',
   'lead-scoring',
   'hcm-wards',
@@ -1026,6 +1027,70 @@ const hotfix27Properties = [
     [6000000, 6500000, 7000000, 7500000, 8000000, 8500000, 9000000, 9500000],
   ),
 ];
+const hotfix33Properties = [
+  ...hotfix25Rows(
+    'HF33-Q12',
+    'Nhà phố Quận 12 criteria',
+    'Phường Thới An, Quận 12, Thành phố Hồ Chí Minh',
+    'House',
+    'Sale',
+    [1500000000, 1800000000, 3500000000],
+  ).map((item, index) => ({ ...item, bedrooms: index === 0 ? null : 3 })),
+  ...hotfix25Rows(
+    'HF33-TD-A',
+    'Căn hộ Thủ Đức criteria',
+    'Phường Long Bình, Quận 9, Thành phố Hồ Chí Minh',
+    'Apartment',
+    'Sale',
+    [2200000000, 2800000000],
+  ).map((item) => ({ ...item, bedrooms: 2 })),
+  ...hotfix25Rows(
+    'HF33-TD-H',
+    'Nhà phố Thủ Đức criteria',
+    'Phường Long Bình, Quận 9, Thành phố Hồ Chí Minh',
+    'House',
+    'Sale',
+    [2500000000, 3200000000],
+  ).map((item) => ({ ...item, bedrooms: 3 })),
+  ...hotfix25Rows(
+    'HF33-VT',
+    'Nhà phố Vũng Tàu criteria',
+    'Phường Vũng Tàu, Bà Rịa - Vũng Tàu',
+    'House',
+    'Sale',
+    [1800000000, 2400000000, 2900000000],
+  ).map((item) => ({ ...item, bedrooms: 3 })),
+  {
+    ...hotfix25Rows(
+      'HF33-Q7-WRONG',
+      'Nhà phố Quận 7 title only',
+      'Phường Phú Nhuận, Thành phố Hồ Chí Minh',
+      'House',
+      'Sale',
+      [1800000000],
+    )[0],
+    bedrooms: 3,
+  },
+  {
+    ...hotfix25Rows(
+      'HF33-Q7',
+      'Căn hộ Quận 7 location',
+      'Phường Tân Phong, Quận 7, Thành phố Hồ Chí Minh',
+      'Apartment',
+      'Sale',
+      [2200000000],
+    )[0],
+    bedrooms: 2,
+  },
+  ...hotfix25Rows(
+    'HF33-Q9-R',
+    'Căn hộ Quận 9 cho thuê criteria',
+    'Phường Long Bình, Quận 9, Thành phố Hồ Chí Minh',
+    'Apartment',
+    'Rent',
+    [6000000, 8000000, 10000000],
+  ),
+];
 const catalogueRows = () =>
   mode === 'hotfix-10d'
     ? [...properties, ...hotfixProperties]
@@ -1049,7 +1114,9 @@ const catalogueRows = () =>
                       ? [...properties, ...hotfix17Sale, ...hotfix25Properties]
                       : mode === 'hotfix-27'
                         ? hotfix27Properties
-                        : properties;
+                        : mode === 'hotfix-33'
+                          ? hotfix33Properties
+                          : properties;
 const hcm = 'Th\u00e0nh ph\u1ed1 H\u1ed3 Ch\u00ed Minh';
 const hotfix29Thuduc = hotfix25Rows(
   'HF29-TD',
@@ -2511,12 +2578,13 @@ const call = (path, body, cookie = '', method = body ? 'POST' : 'GET', requestOr
       Origin: requestOrigin,
       'Content-Type': 'application/json',
       ...(mode === 'hotfix-17' ||
+      mode === 'hotfix-33' ||
       mode === 'hotfix-19' ||
       mode === 'hotfix-21' ||
       mode === 'hotfix-22' ||
       mode === 'hotfix-25' ||
       mode === 'hotfix-27'
-        ? { 'x-forwarded-for': '203.0.113.27' }
+        ? { 'x-forwarded-for': mode === 'hotfix-33' ? '203.0.113.33' : '203.0.113.27' }
         : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -2707,13 +2775,15 @@ try {
             !entries.some(([key, value]) => key === 'price' && /^(?:lt|lte)\./.test(value)),
         );
       check(
-        (newSearchFilters &&
-          !Object.hasOwn(newSearchFilters, 'maxPrice') &&
-          !Object.hasOwn(newSearchFilters, 'minPrice')) ||
-          newSearchCatalogue,
-        'Explicit new purchase search drops old rent and budget',
+        newSearchData.clarify?.needed &&
+          newSearchData.sources.length === 0 &&
+          newSearchData.criteria?.transaction_type === 'Sale' &&
+          newSearchData.criteria?.location === 'Quận 7' &&
+          !Object.hasOwn(newSearchData.criteria, 'maxPrice') &&
+          !Object.hasOwn(newSearchData.criteria, 'minPrice'),
+        'Explicit new purchase search replaces old rent and budget, then asks for the missing budget',
       );
-      check(!newSearchData.clarify?.needed, 'Explicit new purchase search does not loop');
+      check(!newSearchFilters && !newSearchCatalogue, 'Explicit new purchase search does not query with old budget');
     }
     {
       const start = await call('/api/ai/chat', base);
@@ -2939,8 +3009,13 @@ try {
             !entries.some(([key, value]) => key === 'price' && /^(?:lt|lte)\./.test(value)),
         );
       check(
-        !freshData.clarify?.needed && ((freshFilters && !Object.hasOwn(freshFilters, 'maxPrice')) || freshCatalogue),
-        'New purchase search drops the previous rent budget and area',
+        freshData.clarify?.needed &&
+          freshData.sources.length === 0 &&
+          freshData.criteria?.transaction_type === 'Sale' &&
+          freshData.criteria?.location === 'Quận 7' &&
+          !Object.hasOwn(freshData.criteria, 'maxPrice') &&
+          !Object.hasOwn(freshData.criteria, 'minPrice'),
+        'New purchase search drops the previous rent budget and area, then asks for the missing budget',
       );
     }
     {
@@ -3205,6 +3280,10 @@ try {
         /Tiêu chí:[\s\S]*Quận 9[\s\S]*3 tỷ/iu.test(saleQ9.reply),
       'One-message Quận 9 sale criteria uses structured catalogue evidence',
     );
+    check(
+      /Mình tìm thấy\s+\d+\s+căn/iu.test(saleQ9.reply) && !/Hiện chưa có|không có căn nào đáp ứng/iu.test(saleQ9.reply),
+      'Exact catalogue sources use an exact-match introduction, never a no-match sentence',
+    );
     const saleThuDuc = await hf17Search('mua căn hộ thủ đức 3 tỷ');
     check(
       saleThuDuc.sources.length === 5 &&
@@ -3241,8 +3320,29 @@ try {
     check(
       compare.sources.length === 2 &&
         compare.sources[0].code === underTen.sources[0].code &&
-        compare.sources[1].code === underTen.sources[1].code,
+        compare.sources[1].code === underTen.sources[1].code &&
+        /\[1\][\s\S]*Giá[\s\S]*Diện tích[\s\S]*Phòng ngủ[\s\S]*Giá\/m²[\s\S]*Vị trí[\s\S]*Pháp lý[\s\S]*Điểm nổi bật[\s\S]*\[2\]/iu.test(
+          compare.reply,
+        ) &&
+        !/Mình tìm thấy/iu.test(compare.reply),
       'Ordinal comparison resolves the previous source cards and preserves numbering',
+    );
+    const noMatchArea = await hf17Search('mua căn hộ biên hòa 3 tỷ');
+    const relatedCompare = await (
+      await call('/api/ai/chat', {
+        ...base,
+        message: 'so sánh căn 1 và căn 2',
+        history: [
+          { role: 'user', content: 'mua căn hộ biên hòa 3 tỷ' },
+          { role: 'assistant', content: noMatchArea.reply, sources: noMatchArea.related },
+        ],
+      })
+    ).json();
+    check(
+      relatedCompare.sources.length === 2 &&
+        /\[1\][\s\S]*\[2\]/u.test(relatedCompare.reply) &&
+        !/Mình tìm thấy/iu.test(relatedCompare.reply),
+      'Ordinal comparison also works from related near-match cards',
     );
     const legal = await (
       await call('/api/ai/chat', {
@@ -3326,7 +3426,6 @@ try {
         /Tiêu chí:[\s\S]*8 triệu/iu.test(goVap.reply),
       'Area-only follow-up runs the remembered rent search and shows every Gò Vấp card',
     );
-    const noMatchArea = await hf17Search('mua căn hộ biên hòa 3 tỷ');
     check(
       noMatchArea.sources.length === 0 &&
         noMatchArea.related.length > 0 &&
@@ -3361,6 +3460,9 @@ try {
     check(
       finance.sources.length === 1 &&
         finance.sources[0].code === saleQ9.sources[0].code &&
+        finance.criteria?.transaction_type === 'Sale' &&
+        finance.criteria?.maxPrice === 3_000_000_000 &&
+        finance.criteria?.maxPriceExclusive !== true &&
         /70%|khoản vay|triệu đồng|8–10%/iu.test(finance.reply),
       'Finance follow-up resolves the first card and includes computed loan evidence',
     );
@@ -5063,6 +5165,238 @@ try {
       noTypeSearch.sources.some((item) => item.property_type === 'Land') &&
         noTypeSearch.sources.some((item) => item.property_type === 'House' || item.property_type === 'Apartment'),
       'Hotfix 27b nhà đất leaves the type filter unset',
+    );
+    mode = 'hotfix-33';
+    const hf33Base = { ...base, store_transcript: false, history: [] };
+    for (const criteria of [{ unknown: 'Quận 9' }, { location: 9 }, { locations: ['Quận 9', 9] }])
+      check(
+        (await call('/api/ai/chat', { ...hf33Base, message: 'mua nhà', criteria })).status === 400,
+        'Hotfix 33 invalid criteria returns 400',
+      );
+    const asciiRent = await (await call('/api/ai/chat', { ...hf33Base, message: 'o quan 9 duoi 9 trieu' })).json();
+    check(
+      !asciiRent.clarify?.needed &&
+        asciiRent.criteria?.transaction_type === 'Rent' &&
+        asciiRent.criteria?.location === 'Quận 9' &&
+        asciiRent.criteria?.maxPrice === 9000000 &&
+        asciiRent.criteria?.maxPriceExclusive === true,
+      'Hotfix 33 ASCII rent query parses Rent, Quận 9, and the 9 triệu ceiling',
+    );
+    const tdStart = await (await call('/api/ai/chat', { ...hf33Base, message: 'mua căn hộ Thủ Đức dưới 3 tỷ' })).json();
+    const tdSwitch = await (
+      await call('/api/ai/chat', {
+        ...hf33Base,
+        session_id: tdStart.session.id,
+        message: 'thôi tôi muốn mua nhà phố, tầm 5 tỷ',
+        criteria: tdStart.criteria,
+        history: [
+          { role: 'user', content: 'mua căn hộ Thủ Đức dưới 3 tỷ' },
+          { role: 'assistant', content: tdStart.reply, sources: tdStart.sources },
+        ],
+      })
+    ).json();
+    check(
+      tdSwitch.criteria?.location === 'Thủ Đức' &&
+        tdSwitch.criteria?.type === 'House' &&
+        tdSwitch.sources.every((item) => /Quận 9|Thủ Đức/iu.test(item.location)),
+      'Hotfix 33 type switch keeps the Thủ Đức area',
+    );
+    let longSession;
+    let longCriteria = {};
+    let longHistory = [];
+    let lastHistoryLength = 0;
+    let longData;
+    for (let turn = 1; turn <= 12; turn++) {
+      const message =
+        turn === 1 ? 'mua nhà phố Quận 12 dưới 4 tỷ' : turn === 12 ? 'dưới 3 tỷ' : 'có căn nào khác không';
+      const requestHistory = longHistory.slice(-10);
+      lastHistoryLength = requestHistory.length;
+      const response = await call('/api/ai/chat', {
+        ...hf33Base,
+        session_id: longSession,
+        message,
+        criteria: longCriteria,
+        history: requestHistory,
+      });
+      longData = await response.json();
+      check(response.status === 200 && longData.criteria, `Hotfix 33 criteria echo turn ${turn}`);
+      longSession ||= longData.session.id;
+      longCriteria = longData.criteria;
+      longHistory = [
+        ...longHistory,
+        { role: 'user', content: message },
+        { role: 'assistant', content: longData.reply, sources: longData.sources },
+      ];
+    }
+    check(
+      lastHistoryLength === 10 &&
+        longData.criteria.location === 'Quận 12' &&
+        longData.sources.every((item) => /Quận 12/iu.test(item.location)),
+      'Hotfix 33 twelve-turn flow keeps turn-1 area with only ten history messages',
+    );
+    const hf33BudgetStart = await (
+      await call('/api/ai/chat', { ...hf33Base, message: 'mua nhà phố Quận 12 dưới 2 tỷ 3 phòng ngủ' })
+    ).json();
+    const budgetRaised = await (
+      await call('/api/ai/chat', {
+        ...hf33Base,
+        session_id: hf33BudgetStart.session.id,
+        message: 'dưới 4 tỷ',
+        criteria: hf33BudgetStart.criteria,
+        history: [
+          { role: 'user', content: 'mua nhà phố Quận 12 dưới 2 tỷ 3 phòng ngủ' },
+          { role: 'assistant', content: hf33BudgetStart.reply, sources: hf33BudgetStart.sources },
+        ],
+      })
+    ).json();
+    check(
+      hf33BudgetStart.sources.some((item) => item.bedrooms === null) &&
+        hf33BudgetStart.sources.some((item) => item.bedrooms === 3) &&
+        budgetRaised.sources.length >= hf33BudgetStart.sources.length &&
+        budgetRaised.sources.some((item) => item.code === 'HF33-Q12-3'),
+      'Hotfix 33 budget raise never returns fewer bedroom-unknown matches',
+    );
+    const nearStart = await (
+      await call('/api/ai/chat', { ...hf33Base, message: 'mua nhà phố Vũng Tàu dưới 4 tỷ 3 phòng ngủ' })
+    ).json();
+    const nearRaised = await (
+      await call('/api/ai/chat', {
+        ...hf33Base,
+        session_id: nearStart.session.id,
+        message: 'dưới 3 tỷ 4 phòng ngủ',
+        criteria: nearStart.criteria,
+        history: [
+          { role: 'user', content: 'mua nhà phố Vũng Tàu dưới 4 tỷ 3 phòng ngủ' },
+          { role: 'assistant', content: nearStart.reply, sources: nearStart.sources },
+        ],
+      })
+    ).json();
+    check(
+      nearRaised.sources.length === 0 &&
+        nearRaised.related.length > 0 &&
+        nearRaised.related.every((item) => /phòng ngủ/iu.test(String(item.relaxed_reason))),
+      'Hotfix 33 budget-and-bedroom zero match returns labelled near cards',
+    );
+    const q7Area = await (
+      await call('/api/ai/chat', { ...hf33Base, message: 'mua bất động sản Quận 7 dưới 3 tỷ' })
+    ).json();
+    check(
+      q7Area.sources.length > 0 &&
+        q7Area.sources.every((item) => /Quận 7/iu.test(String(item.location))) &&
+        !q7Area.sources.some((item) => /Phú Nhuận/iu.test(String(item.location))),
+      'Hotfix 33 area filtering checks every card location',
+    );
+    const cheapestThuDuc = await (
+      await call('/api/ai/chat', {
+        ...hf33Base,
+        message: 'căn hộ rẻ nhất ở Thủ Đức đang bán là căn nào',
+      })
+    ).json();
+    check(
+      !cheapestThuDuc.clarify?.needed &&
+        cheapestThuDuc.sources.length === 1 &&
+        cheapestThuDuc.sources[0].code === 'HF33-TD-A-1',
+      'Hotfix 33g Thủ Đức cheapest search skips the budget question',
+    );
+    const mostExpensiveQ7 = await (await call('/api/ai/chat', { ...hf33Base, message: 'căn đắt nhất Quận 7' })).json();
+    check(
+      !mostExpensiveQ7.clarify?.needed &&
+        mostExpensiveQ7.sources.length === 1 &&
+        mostExpensiveQ7.sources[0].code === 'HF33-Q7-1',
+      'Hotfix 33g Quận 7 most-expensive search skips the budget question',
+    );
+    const cheapestRentQ9 = await (
+      await call('/api/ai/chat', { ...hf33Base, message: 'thuê căn hộ Quận 9 rẻ nhất' })
+    ).json();
+    check(
+      !cheapestRentQ9.clarify?.needed &&
+        cheapestRentQ9.sources.length === 1 &&
+        cheapestRentQ9.sources[0].code === 'HF33-Q9-R-1',
+      'Hotfix 33g Quận 9 cheapest-rent search skips the budget question',
+    );
+    mode = 'hotfix-17';
+    const stagedBase = { ...base, store_transcript: false, history: [] };
+    const stagedArea = await (await call('/api/ai/chat', { ...stagedBase, message: 'thuê căn hộ ở quận 9' })).json();
+    check(
+      stagedArea.clarify?.needed &&
+        stagedArea.sources.length === 0 &&
+        stagedArea.clarify.options.includes('Dưới 10 triệu'),
+      'Hotfix 33e area-only rental stages budget chips without cards',
+    );
+    const stagedBudget = await (
+      await call('/api/ai/chat', { ...stagedBase, message: 'thuê căn hộ dưới 10 triệu' })
+    ).json();
+    check(
+      stagedBudget.clarify?.needed &&
+        stagedBudget.sources.length === 0 &&
+        stagedBudget.clarify.options.includes('Quận 7'),
+      'Hotfix 33e budget-only rental stages area chips without cards',
+    );
+    const stagedBoth = await (
+      await call('/api/ai/chat', { ...stagedBase, message: 'thuê căn hộ quận 9 dưới 10 triệu' })
+    ).json();
+    check(
+      !stagedBoth.clarify?.needed &&
+        stagedBoth.sources.length > 0 &&
+        stagedBoth.clarify?.refine?.options.includes('1 PN') &&
+        stagedBoth.clarify.refine.options.includes('Dưới 50 m²'),
+      'Hotfix 33e both primary criteria show cards and secondary chips',
+    );
+    const stagedBedrooms = await (
+      await call('/api/ai/chat', {
+        ...stagedBase,
+        session_id: stagedBoth.session.id,
+        message: '2 phòng ngủ',
+        criteria: stagedBoth.criteria,
+        history: [
+          { role: 'user', content: 'thuê căn hộ quận 9 dưới 10 triệu' },
+          { role: 'assistant', content: stagedBoth.reply, sources: stagedBoth.sources },
+        ],
+      })
+    ).json();
+    check(
+      !stagedBedrooms.clarify?.needed &&
+        stagedBedrooms.sources.length > 0 &&
+        !stagedBedrooms.clarify?.refine?.options.includes('1 PN') &&
+        stagedBedrooms.clarify?.refine?.options.includes('Dưới 50 m²'),
+      'Hotfix 33e bedroom refinement leaves only area chips',
+    );
+    let rememberedCriteria = stagedBoth.criteria;
+    let rememberedHistory = [
+      { role: 'user', content: 'thuê căn hộ quận 9 dưới 10 triệu' },
+      { role: 'assistant', content: stagedBoth.reply, sources: stagedBoth.sources },
+    ];
+    for (let turn = 0; turn < 5; turn++) {
+      const response = await call('/api/ai/chat', {
+        ...stagedBase,
+        session_id: stagedBoth.session.id,
+        message: 'có căn nào khác không',
+        criteria: rememberedCriteria,
+        history: rememberedHistory.slice(-10),
+      });
+      const data = await response.json();
+      rememberedCriteria = data.criteria;
+      rememberedHistory = [
+        ...rememberedHistory,
+        { role: 'user', content: 'có căn nào khác không' },
+        { role: 'assistant', content: data.reply, sources: data.sources },
+      ];
+    }
+    const remembered = await (
+      await call('/api/ai/chat', {
+        ...stagedBase,
+        session_id: stagedBoth.session.id,
+        message: 'có căn nào khác không',
+        criteria: rememberedCriteria,
+        history: rememberedHistory.slice(-10),
+      })
+    ).json();
+    check(
+      !remembered.clarify?.needed &&
+        !/ngân sách.*bao nhiêu|khu vực nào/iu.test(remembered.reply) &&
+        remembered.criteria?.location === 'Quận 9' &&
+        remembered.criteria?.maxPrice === 10000000,
+      'Hotfix 33e remembered criteria does not re-ask old area or budget',
     );
     mode = 'ok';
     mode = 'hotfix-21';

@@ -15,7 +15,7 @@ import { catalogDatabaseError, catalogError, catalogInput, catalogJson } from '.
 import { uuidPattern } from '../../common/catalog.js';
 import { normalizePhone } from '../../common/profile-validation.js';
 import { object } from './extraction.js';
-import { inferSearch, inferTransactionType, centralFormerDistricts } from './infer-search.js';
+import { budgetFilters, inferSearch, inferTransactionType, centralFormerDistricts } from './infer-search.js';
 import { type ScoreResult, type Dimension } from './lead-scoring.js';
 import {
   correctionData,
@@ -48,6 +48,7 @@ import {
   removeUnpromptedOwnerTemplate,
   formatReplyDate,
   repairUnsupportedRoomClaims,
+  removeFutureListingPromise,
   type Evidence,
 } from './guard.js';
 import {
@@ -80,6 +81,7 @@ import {
   renumberReferencedListings,
   searchCriteriaFromHistory,
   textListingReferences,
+  isPureClosing,
 } from './history-aware.js';
 import { catalogueOverview, typeLabels } from './catalogue-overview.js';
 import { sanitizeReply, normalizeListedPrices } from './guard.js';
@@ -94,6 +96,7 @@ import {
   noLoanWords,
   noMatchReply,
   hasNoMatchReply,
+  hasCatalogueNoMatchReply,
   dedupeNoMatchReply,
   cheaperFallbackReply,
   listingFollowUpFallback,
@@ -102,6 +105,7 @@ import {
   unsupportedCriteria,
   unsupportedLine,
   deterministicNoMatchReply,
+  genericQuestionFallback,
 } from './unsupported.js';
 import { inquiryEvents } from '../../common/inquiry-events.js';
 import { displayListingName, shortListingName } from './display.js';
@@ -121,9 +125,29 @@ import {
 } from './finance.js';
 import { answerCriteriaLine, showCriteriaLine } from './answer-rules.js';
 import { correctUnknownReply, removeReplyArtifacts } from './guard.js';
-import { nearestRelaxationStages } from './nearest.js';
+import { nearestReasonForReply, nearestRelaxationStages } from './nearest.js';
+import { cardComparisonReply } from './comparison.js';
 import { bedroomMatchesFilter, isStudioListing } from './bedroom-filter.js';
 import { postgrestIlike } from '../../common/postgrest.js';
+import {
+  isListedCardFollowUp,
+  mergeCriteria,
+  nextCriteriaQuestion,
+  normalizeCriteria,
+  retainUserCriteria,
+  validCriteria,
+  type Criteria,
+} from './criteria-memory.js';
+
+function bedroomRangeMatches(item: Evidence, filters: Record<string, unknown>) {
+  if (typeof filters.minBedrooms !== 'number' && typeof filters.maxBedrooms !== 'number')
+    return typeof filters.bedrooms !== 'number' || bedroomMatchesFilter(item, Number(filters.bedrooms));
+  if (typeof item.bedrooms !== 'number') return true;
+  return (
+    item.bedrooms >= (typeof filters.minBedrooms === 'number' ? filters.minBedrooms : 0) &&
+    item.bedrooms <= (typeof filters.maxBedrooms === 'number' ? filters.maxBedrooms : 100)
+  );
+}
 
 export const unavailable = () =>
   catalogJson(
@@ -177,6 +201,8 @@ async function retrieve(filters: Record<string, unknown>, context: string | null
     'minArea',
     'maxArea',
     'bedrooms',
+    'minBedrooms',
+    'maxBedrooms',
     'exclude_ids',
     'keywords',
   ]);
@@ -219,8 +245,11 @@ async function retrieve(filters: Record<string, unknown>, context: string | null
   return (result.data || [])
     .map((p) => ({ ...p, price: p.price === null ? null : Number(p.price) }))
     .filter(isValidListingPrice)
-    .filter(
-      (item) => typeof filters.bedrooms !== 'number' || bedroomMatchesFilter(item, Number(filters.bedrooms)),
+    .filter((item) =>
+      typeof filters.minBedrooms !== 'number' && typeof filters.maxBedrooms !== 'number'
+        ? typeof filters.bedrooms !== 'number' || bedroomMatchesFilter(item, Number(filters.bedrooms))
+        : typeof item.bedrooms !== 'number' ||
+          (item.bedrooms >= (filters.minBedrooms as number) && item.bedrooms <= (filters.maxBedrooms as number)),
     ) as Evidence[];
 }
 type StructuredCatalogueResult = { items: Evidence[]; count: number };
@@ -265,8 +294,11 @@ async function retrieveStructured(
   const items = (result.data || [])
     .map((p) => ({ ...p, price: p.price === null ? null : Number(p.price) }))
     .filter(isValidListingPrice)
-    .filter(
-      (item) => typeof filters.bedrooms !== 'number' || bedroomMatchesFilter(item, Number(filters.bedrooms)),
+    .filter((item) =>
+      typeof filters.minBedrooms !== 'number' && typeof filters.maxBedrooms !== 'number'
+        ? typeof filters.bedrooms !== 'number' || bedroomMatchesFilter(item, Number(filters.bedrooms))
+        : typeof item.bedrooms !== 'number' ||
+          (item.bedrooms >= (filters.minBedrooms as number) && item.bedrooms <= (filters.maxBedrooms as number)),
     ) as Evidence[];
   return { items, count: items.length < 1000 ? items.length : Number(result.count ?? 0) };
 }
@@ -391,7 +423,8 @@ export class AiService {
       const input = parsed.input;
       if (
         Object.keys(input).some(
-          (k) => !['session_id', 'message', 'history', 'store_transcript', 'property_id', 'filters'].includes(k),
+          (k) =>
+            !['session_id', 'message', 'history', 'store_transcript', 'property_id', 'filters', 'criteria'].includes(k),
         ) ||
         typeof input.message !== 'string' ||
         !input.message.trim() ||
@@ -429,12 +462,28 @@ export class AiService {
         return catalogError('INVALID_HISTORY', 'Chỉ gửi tối đa 10 lượt hội thoại.', 400);
       const filters = input.filters ?? {};
       const inputFilters = filters as Record<string, unknown>;
+      if (
+        input.criteria !== undefined &&
+        (!validCriteria(input.criteria) ||
+          !this.guard.toolAllowed({ name: 'search_properties', arguments: input.criteria }))
+      )
+        return catalogError('INVALID_FILTER', 'Tiêu chí không hợp lệ.', 400);
       const hasStructuredInputFilters =
         input.filters !== undefined &&
         inputFilters.transaction_type !== undefined &&
-        ['location', 'locations', 'type', 'types', 'minPrice', 'maxPrice', 'minArea', 'maxArea', 'bedrooms'].some(
-          (key) => inputFilters[key] !== undefined,
-        );
+        [
+          'location',
+          'locations',
+          'type',
+          'types',
+          'minPrice',
+          'maxPrice',
+          'minArea',
+          'maxArea',
+          'bedrooms',
+          'minBedrooms',
+          'maxBedrooms',
+        ].some((key) => inputFilters[key] !== undefined);
       if (!object(filters) || !this.guard.toolAllowed({ name: 'search_properties', arguments: filters }))
         return catalogError('INVALID_FILTER', 'Bộ lọc không hợp lệ.', 400);
       const who = await identity();
@@ -477,6 +526,8 @@ export class AiService {
         return catalogError('RATE_LIMIT', 'Bạn đã gửi nhiều tin nhắn. Vui lòng thử lại sau.', 429);
       const guest = !who.session,
         source = guest ? this.privacy.stripPhones(input.message) : input.message;
+      const pureClosing = isPureClosing(source);
+      const closingReply = 'Rất vui được hỗ trợ bạn! Khi cần tìm căn phù hợp, bạn cứ nhắn mình nhé.';
       const setGuestSessionCookie = async () => {
         if (guest)
           (await cookies()).set('pose-ai-session', who.token, {
@@ -487,9 +538,10 @@ export class AiService {
             maxAge: 86400 * 7,
           });
       };
+      let responseCriteria: Criteria = {};
       const guestCatalog = async (payload: object, status = 200) => {
         await setGuestSessionCookie();
-        return catalogJson(payload, status);
+        return catalogJson({ criteria: responseCriteria, ...payload }, status);
       };
       const discountSignal = /(?:giảm giá|hạ giá|ngộp|cắt lỗ|giá tốt|chỉ còn)/iu;
       const discountQuestion =
@@ -517,10 +569,10 @@ export class AiService {
         content: guest ? this.privacy.stripPhones(turn.content) : turn.content,
         sources: Array.isArray(turn.sources) ? turn.sources : undefined,
       }));
-      const criteriaSource = history.length
-        ? sanitizedHistory
-        : prior?.data?.messages?.length
-          ? prior.data.messages
+      const criteriaSource = prior?.data?.messages?.length
+        ? prior.data.messages
+        : history.length
+          ? sanitizedHistory
           : sanitizedHistory;
       const criteriaHistory = criteriaSource.map(
         (turn: {
@@ -533,6 +585,18 @@ export class AiService {
           sources: Array.isArray(turn.sources) ? turn.sources : undefined,
         }),
       );
+      const listedCardFollowUp = isListedCardFollowUp(source, criteriaHistory);
+      responseCriteria = listedCardFollowUp
+        ? normalizeCriteria(
+            input.criteria !== undefined
+              ? (input.criteria as Criteria)
+              : searchCriteriaFromHistory('', criteriaHistory),
+          )
+        : input.criteria !== undefined
+          ? mergeCriteria(input.criteria as Criteria, source)
+          : normalizeCriteria(searchCriteriaFromHistory(source, criteriaHistory));
+      const rememberedCriteria = normalizeCriteria({ ...responseCriteria, ...inputFilters } as Criteria);
+      const explicitInputCriteria = input.filters !== undefined ? normalizeCriteria(inputFilters as Criteria) : {};
       const customerName = customerNameFromHistory(source, sanitizedHistory);
       const address = customerName || 'bạn',
         addressStart = customerName || 'Bạn';
@@ -626,12 +690,18 @@ export class AiService {
           source,
         ) ||
         (!financeIntentNote && /(?:muốn|muon)\s+(?:mua|thuê|thue)\s+(?:căn|nhà|lô|đất)/iu.test(source));
-      const budgetAdjustment = budgetFollowUp(source, criteriaHistory);
+      const historyBudgetAdjustment = budgetFollowUp(source, criteriaHistory);
+      const budgetAdjustment = historyBudgetAdjustment
+        ? {
+            ...historyBudgetAdjustment,
+            filters: { ...responseCriteria, ...historyBudgetAdjustment.filters },
+          }
+        : null;
       const moreRequest = isMoreRequest(source);
       const filterAgainRequest = explicitRefilterRequest(source);
       const explicitPriceRange =
         typeof inferSearch(source)?.minPrice === 'number' && typeof inferSearch(source)?.maxPrice === 'number';
-      const excludePrevious = moreRequest || (!!budgetAdjustment && !explicitPriceRange);
+      const excludePrevious = moreRequest || (budgetAdjustment?.direction === 'cheaper' && !explicitPriceRange);
       const shownHistory = criteriaHistory as {
         role: string;
         content: string;
@@ -709,6 +779,17 @@ export class AiService {
           inquiry_url: '/customer/inquiries/new',
         });
       }
+      const extremePriceRequest = /(?:đắt|cao|rẻ|thấp)\s+nhất/iu.test(source);
+      const criteriaQuestion =
+        input.filters === undefined &&
+        !extremePriceRequest &&
+        (responseCriteria.transaction_type === 'Rent' ||
+          (responseCriteria.transaction_type === 'Sale' && responseCriteria.type !== 'House')) &&
+        !/(?:nhà\s+phố|nhà\s+đất)/iu.test(source) &&
+        (typeof responseCriteria.location === 'string' ||
+          (Array.isArray(responseCriteria.locations) && responseCriteria.locations.length > 0))
+          ? nextCriteriaQuestion(responseCriteria, addressStart)
+          : null;
       const clarification =
         input.property_id ||
         overviewKind ||
@@ -716,7 +797,7 @@ export class AiService {
         hasStructuredInputFilters ||
         (financeIntentNote && !listingRequestIntent)
           ? { needed: false, question: null, options: [] }
-          : clarificationFor(source, criteriaHistory);
+          : criteriaQuestion || clarificationFor(source, criteriaHistory);
       timing.clarify = performance.now() - clarifyStarted;
       if (clarification.needed) {
         const committed = await systemClient().rpc('pose_system_ai_commit_chat', {
@@ -901,6 +982,7 @@ export class AiService {
       const wantsOthers =
         /(?:căn|nhà|lô|chỗ|dự án)\s+(?:khác|tương tự)|rẻ hơn|cao hơn|gợi ý thêm|so sánh|còn căn nào/iu.test(source);
       const comparisonQuestion = priceComparisonQuestion(source);
+      const cardComparisonQuestion = /(?:so\s+s.{0,4}nh|compare)/iu.test(source) && /\d/.test(source);
       const similarQuestion = /(?:tương tự|căn khác|căn nào giống|giống căn)/iu.test(source);
       const viewedListingReference =
         /(?:căn(?:\s+hộ)?|nhà|lô|đất)\s+(?:này|đang\s+xem|trên\s+trang)|(?:hôm\s+nay|vừa\s+xem)/iu;
@@ -925,6 +1007,8 @@ export class AiService {
           'minArea',
           'maxArea',
           'bedrooms',
+          'minBedrooms',
+          'maxBedrooms',
           'transaction_type',
         ].some((key) => explicitSearch[key as keyof typeof explicitSearch] !== undefined),
       );
@@ -945,6 +1029,7 @@ export class AiService {
       let searchPerformed = (input.filters !== undefined || !!input.property_id) && !adviceOnly && !detailReference,
         rag: RetrievalResult | null = null;
       let structuredRemainingCount: number | null = null;
+      let exactMatchesExhausted = false;
       const filterAmounts: number[] = [];
       let items: Evidence[] = [],
         related: Record<string, unknown>[] = [];
@@ -965,8 +1050,8 @@ export class AiService {
         const aliases = Array.isArray(filters.location_aliases) ? filters.location_aliases.map(String) : [];
         if (
           wanted.length &&
-          !wanted.some((value) => place.includes(value.toLocaleLowerCase('vi')) || inName(value)) &&
-          !aliases.some((value) => place.includes(value.toLocaleLowerCase('vi')) || inName(value))
+          !wanted.some((value) => place.includes(value.toLocaleLowerCase('vi'))) &&
+          !aliases.some((value) => place.includes(value.toLocaleLowerCase('vi')))
         )
           return false;
         if (filters.transaction_type && item.transaction_type && item.transaction_type !== filters.transaction_type)
@@ -1003,7 +1088,7 @@ export class AiService {
           (item.area === null || item.area === undefined || item.area > filters.maxArea)
         )
           return false;
-        if (typeof filters.bedrooms === 'number' && !bedroomMatchesFilter(item, filters.bedrooms)) return false;
+        if (!bedroomRangeMatches(item, filters)) return false;
         return true;
       };
       const criteriaOnlyFollowUp =
@@ -1012,7 +1097,6 @@ export class AiService {
         !!inferSearch(source) &&
         !moneyAmounts(source).length &&
         !/(?:tìm|kiếm|muốn|cần|gợi ý|có\s+căn|căn\s+hộ|nhà|đất|phòng|thuê|mua|bán|bất động sản)/iu.test(source);
-      const extremePriceRequest = /(?:đắt|cao|rẻ|thấp)\s+nhất/iu.test(source);
       let structuredCatalogueSearch =
         hasStructuredInputFilters ||
         moreRequest ||
@@ -1028,6 +1112,8 @@ export class AiService {
         propertyId: string | null = null,
         referenceIds: string[] = [],
         searchQuery = source,
+        rememberCriteria = true,
+        ignoreShown = false,
       ) => {
         const aliases: Record<string, string> = {
           min_price_vnd: 'minPrice',
@@ -1040,8 +1126,8 @@ export class AiService {
         searchFilters = Object.fromEntries(
           Object.entries(searchFilters).map(([key, value]) => [aliases[key] || key, value]),
         );
-        if (structuredCatalogueSearch) {
-          const remembered = searchCriteriaFromHistory(source, criteriaHistory);
+        if (rememberCriteria && (structuredCatalogueSearch || Object.keys(explicitInputCriteria).length)) {
+          const remembered = rememberedCriteria;
           for (const key of [
             'location',
             'locations',
@@ -1055,6 +1141,8 @@ export class AiService {
             'minArea',
             'maxArea',
             'bedrooms',
+            'minBedrooms',
+            'maxBedrooms',
           ] as const)
             if (searchFilters[key] === undefined && remembered[key] !== undefined) searchFilters[key] = remembered[key];
         }
@@ -1065,7 +1153,7 @@ export class AiService {
           if (typeof stated.minArea === 'number') effective.minArea = Math.floor(stated.minArea * 0.85);
           if (typeof stated.maxArea === 'number') effective.maxArea = Math.ceil(stated.maxArea * 1.15);
         }
-        if (excludePrevious && shownIds.size) effective.exclude_ids = [...shownIds];
+        if (excludePrevious && shownIds.size && !ignoreShown) effective.exclude_ids = [...shownIds];
         const searchStarted = performance.now();
         if (structuredCatalogueSearch && !propertyId) {
           try {
@@ -1238,7 +1326,6 @@ export class AiService {
       }
       // Small models rarely ask for a search on their own; search the catalogue from the
       // question itself, and if nothing matches widen once so the answer can compare.
-      const rememberedCriteria = searchCriteriaFromHistory(source, criteriaHistory);
       const inferred = searchPerformed ? null : { ...rememberedCriteria, ...(budgetAdjustment?.filters || {}) };
       // `inferSearch` is only an input to the validated query step below.
       const actions: { tool: string; args_hash: string; decision: string; reason: string; rule_version: string }[] = [];
@@ -1279,7 +1366,7 @@ export class AiService {
         : {};
       let standalone = source,
         queryKeywords: string[] = inferred?.keywords ? [...new Set(inferred.keywords)].slice(0, 8) : [],
-        queryFilters: Record<string, unknown> = inferredFilterValues;
+        queryFilters: Record<string, unknown> = { ...explicitInputCriteria, ...inferredFilterValues };
       const realEstateIntent =
         !!budgetAdjustment ||
         Object.keys(queryFilters).length > 0 ||
@@ -1318,6 +1405,8 @@ export class AiService {
           queryFilters = Object.fromEntries(
             Object.entries(queryFilters).filter(([, v]) => v !== null && v !== undefined),
           );
+          queryFilters = { ...explicitInputCriteria, ...queryFilters };
+          queryFilters = retainUserCriteria(queryFilters, rememberedCriteria);
           const inferredTransaction = inferTransactionType(source);
           if (inferredTransaction) queryFilters.transaction_type = inferredTransaction;
           // The model rarely fills area bounds and reads "có 2 tỷ… vay" as a 2 tỷ ceiling; the deterministic parse wins there.
@@ -1369,6 +1458,8 @@ export class AiService {
               'minArea',
               'maxArea',
               'bedrooms',
+              'minBedrooms',
+              'maxBedrooms',
             ] as const)
               if (inferredFilters[key] !== undefined) queryFilters[key] = inferredFilters[key];
             if (inferredFilters.location) delete queryFilters.locations;
@@ -1389,6 +1480,8 @@ export class AiService {
             'minArea',
             'maxArea',
             'bedrooms',
+            'minBedrooms',
+            'maxBedrooms',
           ] as const) {
             if (inferredFilters?.[key] === undefined && rememberedCriteria[key] !== undefined)
               queryFilters[key] = rememberedCriteria[key];
@@ -1399,7 +1492,7 @@ export class AiService {
             inferredFilters?.maxPrice !== undefined &&
             inferredFilters.maxPriceExclusive === undefined
           )
-            delete queryFilters.maxPriceExclusive;
+            queryFilters.maxPriceExclusive = false;
           if (inferredFilters?.location === undefined && rememberedCriteria.location !== undefined)
             delete queryFilters.locations;
           if (inferredFilters?.locations === undefined && rememberedCriteria.locations !== undefined)
@@ -1407,6 +1500,19 @@ export class AiService {
           if (/gần\s+(?:Quận\s*1|trung tâm)|đi\s+làm\s+(?:Quận\s*1|trung tâm)/iu.test(source)) {
             queryFilters.locations = centralFormerDistricts;
             delete queryFilters.location;
+          }
+          const startsFreshSearchWithoutBudget =
+            !moneyAmounts(source).length &&
+            inferredFilters?.minPrice === undefined &&
+            inferredFilters?.maxPrice === undefined &&
+            (inferredFilters?.transaction_type !== undefined ||
+              inferredFilters?.type !== undefined ||
+              inferredFilters?.types !== undefined) &&
+            /(?:tìm|kiếm|muốn|cần|gợi ý|tư vấn)\s+/iu.test(source);
+          if (startsFreshSearchWithoutBudget) {
+            delete queryFilters.minPrice;
+            delete queryFilters.maxPrice;
+            delete queryFilters.maxPriceExclusive;
           }
           if (areaOnlyRefinement) queryFilters = preserveAreaSwitchCriteria(queryFilters, rememberedCriteria);
           if (
@@ -1450,13 +1556,20 @@ export class AiService {
           delete queryFilters.maxPrice;
         standalone = source;
       }
-      const directBudget = inferSearch(source);
+      const directCriteria = { ...(inferSearch(source) || {}), ...budgetFilters(source) };
+      const directBudget = directCriteria;
       if (directBudget?.minPrice !== undefined || directBudget?.maxPrice !== undefined) {
         for (const key of ['minPrice', 'maxPrice', 'maxPriceExclusive'] as const) {
           if (directBudget[key] === undefined) delete queryFilters[key];
           else queryFilters[key] = directBudget[key];
         }
+        if (directBudget.minPrice !== undefined && directBudget.maxPrice !== undefined)
+          queryFilters.maxPriceExclusive = false;
       }
+      if (directCriteria?.types?.length) delete queryFilters.type;
+      else if (directCriteria?.type) delete queryFilters.types;
+      if (Array.isArray(queryFilters.types) && queryFilters.types.length) delete queryFilters.type;
+      else if (typeof queryFilters.type === 'string') delete queryFilters.types;
       if (
         typeof queryFilters.minPrice === 'number' &&
         typeof queryFilters.maxPrice === 'number' &&
@@ -1464,7 +1577,6 @@ export class AiService {
       )
         delete queryFilters.minPrice;
       if (extremePriceRequest && !queryFilters.transaction_type) queryFilters.transaction_type = 'Sale';
-      const directCriteria = inferSearch(source);
       if (
         directCriteria?.transaction_type &&
         directCriteria.minPrice === undefined &&
@@ -1485,6 +1597,8 @@ export class AiService {
         'minArea',
         'maxArea',
         'bedrooms',
+        'minBedrooms',
+        'maxBedrooms',
       ].some((key) => queryFilters[key] !== undefined);
       structuredCatalogueSearch =
         structuredCatalogueSearch || extremePriceRequest || Boolean(structuredTransaction && hasStructuredCriteria);
@@ -1685,7 +1799,7 @@ export class AiService {
       if (
         searchPerformed &&
         !items.length &&
-        !budgetAdjustment &&
+        structuredCatalogueSearch &&
         !contactOnly &&
         !input.property_id &&
         strictCashBudget === null &&
@@ -1693,14 +1807,14 @@ export class AiService {
       ) {
         const query = [standalone, ...queryKeywords].join(' ');
         const nearestSearch = async (filters: Record<string, unknown>) => {
-          const found = await search(filters, null, referenceIds, query);
+          const found = await search(filters, null, referenceIds, query, false);
           const fallback = found.length ? found : await retrieve(filters, null).catch(() => [] as Evidence[]);
           return fallback
             .filter(isValidListingPrice)
             .filter((item) => typeof item.price === 'number' && Number.isFinite(item.price) && item.price > 0);
         };
         let near: Evidence[] = [];
-        for (const stage of nearestRelaxationStages(queryFilters)) {
+        for (const stage of nearestRelaxationStages(queryFilters, true)) {
           near = await nearestSearch(stage.filters);
           if (near.length) {
             nearestReason = stage.reason;
@@ -1728,7 +1842,7 @@ export class AiService {
             if (leftIn !== rightIn) return leftIn ? -1 : 1;
             return Math.abs(queryFilters.maxPrice - left.price!) - Math.abs(queryFilters.maxPrice - right.price!);
           })
-          .slice(0, 3)
+          .slice(0, 5)
           .map((item) => ({
             ...item,
             number: undefined,
@@ -1799,6 +1913,17 @@ export class AiService {
             }),
           );
         }
+      }
+      if (moreRequest && !items.length && structuredCatalogueSearch && !input.property_id) {
+        const exact = await search(
+          queryFilters,
+          null,
+          referenceIds,
+          [standalone, ...queryKeywords].join(' '),
+          true,
+          true,
+        );
+        exactMatchesExhausted = exact.length > 0 && exact.every((item) => shownIds.has(item.id));
       }
       if (
         searchPerformed &&
@@ -2036,6 +2161,12 @@ export class AiService {
       related = related
         .filter(locationTextIsConsistent)
         .filter((item) => typeof item.price === 'number' && Number.isFinite(item.price) && item.price > 0);
+      const finalLocationFilters = withAreaAliases({
+        location: queryFilters.location,
+        locations: queryFilters.locations,
+        location_aliases: queryFilters.location_aliases,
+      });
+      if (!codeReference.codes.length) items = items.filter((item) => matchesFilters(item, finalLocationFilters));
       if (!searchPerformed && !similarQuestion && !comparisonQuestion) related = [];
       if (
         extraCostsQuestion &&
@@ -2107,7 +2238,10 @@ export class AiService {
           }
           const a = args as Record<string, unknown>;
           const raw = object(a.filters) ? (a.filters as Record<string, unknown>) : {};
-          const f = Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== null && v !== undefined));
+          const f = retainUserCriteria(
+            Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== null && v !== undefined)),
+            rememberedCriteria,
+          );
           const found = await search(f, (input.property_id as string | null) || null);
           return found.length
             ? found.map((p, i) => {
@@ -2372,7 +2506,8 @@ export class AiService {
       const historicalQuestion =
         evidenceItems.length >= 2 && /(?:tổng\s+chi\s+phí|sở\s+hữu|5\s+năm|phí\s+quản\s+lý|bảo\s+trì)/iu.test(source);
       const historicalReply = historicalQuestion ? historicalOwnershipReply(evidenceItems, source) : null;
-      if (historicalReply) result.reply = historicalReply;
+      const deterministicComparison = cardComparisonQuestion ? cardComparisonReply(evidenceItems) : null;
+      if (deterministicComparison || historicalReply) result.reply = deterministicComparison || historicalReply!;
       const historicalFinanceAmounts = historicalQuestion
         ? evidenceItems.flatMap((item) => {
             if (typeof item.price !== 'number' || item.price <= 0) return [];
@@ -2398,6 +2533,19 @@ export class AiService {
       const currentBudgetAmounts = ['minPrice', 'maxPrice']
         .map((key) => queryFilters[key])
         .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+      const latestShownIds = new Set(
+        (
+          [...sanitizedHistory].reverse().find((turn) => turn.role === 'assistant' && Array.isArray(turn.sources))
+            ?.sources || []
+        )
+          .map((item) => item.id)
+          .filter((value): value is string => typeof value === 'string'),
+      );
+      const unchangedBudgetResults =
+        budgetAdjustment?.direction === 'higher' &&
+        latestShownIds.size === evidenceItems.length &&
+        evidenceItems.length > 0 &&
+        evidenceItems.every((item) => latestShownIds.has(item.id));
       // Listing titles and detail text are source evidence too. This covers
       // importer titles whose displayed price differs from the numeric field.
       const listingTextForGuard = [
@@ -2416,6 +2564,14 @@ export class AiService {
         listingText: listingTextForGuard,
         practice: generalKnowledge.length > 0,
         nearbyAreaCriteria,
+        criteriaBedrooms: [
+          rememberedCriteria.bedrooms,
+          rememberedCriteria.minBedrooms,
+          rememberedCriteria.maxBedrooms,
+          queryFilters.bedrooms,
+          queryFilters.minBedrooms,
+          queryFilters.maxBedrooms,
+        ].filter((value): value is number => typeof value === 'number'),
       };
       const derivedFinance = derivedFinanceAmounts(
         source,
@@ -2488,10 +2644,13 @@ export class AiService {
       };
       const groundedLegalDetail = legalFactFromText(legalDetail || JSON.stringify(evidenceItems[0] || {}));
       const legalFactReply = (item: Evidence, fact: string) => {
+        // The card may be renumbered as source [1]; name it by the number the customer asked about.
+        const askedNumber = Number(source.match(/căn\s+(?:số\s+)?(\d+)/iu)?.[1]) || undefined;
         const number = item.number ?? 1;
+        const label = askedNumber ?? number;
         return legalContradiction
-          ? `Theo tin đăng, căn số ${number} [${number}] ${fact}. Tin đăng ghi căn này đã có sổ hồng, khác với thông tin bạn được nghe; mình không thể xác nhận lời hứa của nhân viên về thời hạn ra sổ. Bạn nên xem bản gốc giấy chứng nhận và kiểm tra tại cơ quan đăng ký đất đai.`
-          : `Theo tin đăng, căn số ${number} [${number}] ${fact}. Mình không thể xác nhận pháp lý thay cho giấy tờ gốc; bạn nên kiểm tra bản gốc và cơ quan đăng ký đất đai.`;
+          ? `Theo tin đăng, căn số ${label} [${number}] ${fact}. Tin đăng ghi căn này đã có sổ hồng, khác với thông tin bạn được nghe; mình không thể xác nhận lời hứa của nhân viên về thời hạn ra sổ. Bạn nên xem bản gốc giấy chứng nhận và kiểm tra tại cơ quan đăng ký đất đai.`
+          : `Theo tin đăng, căn số ${label} [${number}] ${fact}. Mình không thể xác nhận pháp lý thay cho giấy tờ gốc; bạn nên kiểm tra bản gốc và cơ quan đăng ký đất đai.`;
       };
       const legalTarget = evidenceItems.find((item, index) => (item.number ?? index + 1) === 2) || evidenceItems[0];
       const legalQuestionDirect =
@@ -2504,8 +2663,9 @@ export class AiService {
         result.reply = legalFactReply(legalTarget, groundedLegalDetail);
       }
       const guardStarted = performance.now();
-      if (!violation && evidenceItems.length && !/\[\d{1,3}\]/.test(result.reply)) violation = 'MISSING_CITATION';
-      if (!violation) {
+      if (!violation && !cardComparisonQuestion && evidenceItems.length && !/\[\d{1,3}\]/.test(result.reply))
+        violation = 'MISSING_CITATION';
+      if (!violation && !cardComparisonQuestion) {
         violation = this.guard.outputReason(result.reply, evidenceItems, source, guardContext);
         if (violation) {
           const diagnostic = this.guard.outputDiagnostic(result.reply, evidenceItems, source, guardContext);
@@ -2622,7 +2782,11 @@ export class AiService {
       else items = sourcesFromCitations(result.reply, evidenceItems, referencedAnswer);
       items = items.map((item) => ({ ...item, name: shortListingName(item.name) }));
       related = related
-        .map((item) => ({ ...item, name: shortListingName(String(item.name || '')) }))
+        .map((item, index) => ({
+          ...item,
+          number: item.number ?? index + 1,
+          name: shortListingName(String(item.name || '')),
+        }))
         .filter((item) => isValidListingPrice(item as { price?: number | null; transaction_type?: string }));
       const turnTransaction =
         queryFilters.transaction_type === 'Sale' || queryFilters.transaction_type === 'Rent'
@@ -2672,6 +2836,10 @@ export class AiService {
         generalKnowledge.length > 0 &&
         ((!queryFilters.location && !queryFilters.locations) ||
           /(?:giữa|so sánh|phương án|nên (?:mua|chọn|đầu tư))/iu.test(source));
+      const questionTurn =
+        /\?|(?:chịu\s+trách\s+nhiệm|tại\s+sao|vì\s+sao|thế\s+nào|chính\s+sách|cam\s+kết|bảo\s+đảm|có\s+được\s+không)/iu.test(
+          source,
+        ) && !listingRequestIntent;
       const noMatch =
         searchPerformed &&
         !input.property_id &&
@@ -2740,9 +2908,7 @@ export class AiService {
       // Generic property requests are clarified before retrieval by clarificationFor. The old
       // post-search genericClarification path could leak random listings before asking for criteria.
       const genericClarification: { needed: boolean; question: string; options: string[] } | null = null;
-      const hasDisclosure = sanitizedHistory.some(
-        (turn) => turn.role === 'assistant' && turn.content.includes(disclosure),
-      );
+      const hasAssistantTurn = sanitizedHistory.some((turn) => turn.role === 'assistant');
       const nearbyFor = (location?: string) => (location ? areaAliases(location).slice(0, 2) : []);
       const area = areaLabelForFilters(budgetAdjustment?.filters || queryFilters);
       const replyCriteriaFilters = { ...rememberedCriteria, ...queryFilters };
@@ -2802,7 +2968,13 @@ export class AiService {
               ? `dưới ${Math.round(replyCriteriaFilters.maxArea)} m²`
               : '';
       const roomsForReply =
-        typeof replyCriteriaFilters.bedrooms === 'number' ? `${replyCriteriaFilters.bedrooms} phòng ngủ` : '';
+        typeof replyCriteriaFilters.minBedrooms === 'number' || typeof replyCriteriaFilters.maxBedrooms === 'number'
+          ? `${replyCriteriaFilters.minBedrooms ?? 0}–${replyCriteriaFilters.maxBedrooms ?? 100} phòng ngủ`
+          : typeof replyCriteriaFilters.bedrooms === 'number'
+            ? replyCriteriaFilters.bedrooms === 0
+              ? 'studio'
+              : `${replyCriteriaFilters.bedrooms} phòng ngủ`
+            : '';
       const centralLocation =
         Array.isArray(replyCriteriaFilters.locations) &&
         replyCriteriaFilters.locations.some((value) => centralFormerDistricts.includes(String(value)));
@@ -2837,6 +3009,23 @@ export class AiService {
         !contactOnly &&
         !generalQuestion &&
         !evidenceItems.length;
+      const blockerCandidates =
+        structuredNoMatch &&
+        typeof queryFilters.maxPrice === 'number' &&
+        (typeof queryFilters.bedrooms === 'number' ||
+          typeof queryFilters.minBedrooms === 'number' ||
+          typeof queryFilters.maxBedrooms === 'number' ||
+          typeof queryFilters.minArea === 'number' ||
+          typeof queryFilters.maxArea === 'number')
+          ? await retrieve(
+              Object.fromEntries(
+                Object.entries(queryFilters).filter(
+                  ([key]) => !['minPrice', 'maxPrice', 'maxPriceExclusive'].includes(key),
+                ),
+              ),
+              null,
+            ).catch(() => [] as Evidence[])
+          : [];
       const blockerLine = (() => {
         if (!structuredNoMatch) return '';
         const requestedArea = areaLabelForFilters(queryFilters) || '';
@@ -2848,19 +3037,38 @@ export class AiService {
           typeof queryFilters.maxPrice === 'number'
             ? `${queryFilters.maxPriceExclusive ? 'dưới' : 'tối đa'} ${priceLabel(queryFilters.maxPrice, queryFilters.transaction_type === 'Rent')}`
             : '';
-        const rooms = typeof queryFilters.bedrooms === 'number' ? `${queryFilters.bedrooms} phòng ngủ` : '';
+        const rooms =
+          typeof queryFilters.minBedrooms === 'number' || typeof queryFilters.maxBedrooms === 'number'
+            ? `${queryFilters.minBedrooms ?? 0}–${queryFilters.maxBedrooms ?? 100} phòng ngủ`
+            : typeof queryFilters.bedrooms === 'number'
+              ? queryFilters.bedrooms === 0
+                ? 'studio'
+                : `${queryFilters.bedrooms} phòng ngủ`
+              : '';
         const areaFilter =
           typeof queryFilters.minArea === 'number'
             ? `từ ${Math.round(queryFilters.minArea)} m²`
             : typeof queryFilters.maxArea === 'number'
               ? `dưới ${Math.round(queryFilters.maxArea)} m²`
               : '';
+        const minimumComparablePrice = blockerCandidates
+          .map((item) => item.price)
+          .filter((price): price is number => typeof price === 'number' && Number.isFinite(price))
+          .sort((left, right) => left - right)[0];
+        const priceIsActuallyHigher =
+          typeof queryFilters.maxPrice === 'number' &&
+          minimumComparablePrice !== undefined &&
+          minimumComparablePrice > queryFilters.maxPrice;
         if (requestedArea && budget && rooms)
-          return `Ở ${requestedArea}, ${typeLabel} ${budget} chưa có tin đủ ${rooms}; ${typeLabel} có ${rooms} thường có giá cao hơn nhiều.`;
+          return priceIsActuallyHigher
+            ? `Ở ${requestedArea}, ${typeLabel} ${budget} chưa có tin đủ ${rooms}; các tin ${rooms} trong khu vực này có giá từ ${priceLabel(minimumComparablePrice, queryFilters.transaction_type === 'Rent')}.`
+            : `Ở ${requestedArea}, hiện chưa có ${typeLabel} phù hợp với ${budget} và tiêu chí ${rooms}.`;
         if (requestedArea && budget && areaFilter)
-          return `Ở ${requestedArea}, ${typeLabel} ${budget} chưa có tin ${areaFilter}; ${typeLabel} ${areaFilter} thường có giá cao hơn nhiều.`;
+          return priceIsActuallyHigher
+            ? `Ở ${requestedArea}, ${typeLabel} ${budget} chưa có tin ${areaFilter}; các tin ${areaFilter} trong khu vực này có giá từ ${priceLabel(minimumComparablePrice, queryFilters.transaction_type === 'Rent')}.`
+            : `Ở ${requestedArea}, hiện chưa có ${typeLabel} phù hợp với ${budget} và tiêu chí ${areaFilter}.`;
         if (nearestReason)
-          return `Ở ${requestedArea || 'khu vực bạn chọn'}, các tin gần nhất đang lệch tiêu chí: ${nearestReason.toLocaleLowerCase('vi')}.`;
+          return `Ở ${requestedArea || 'khu vực bạn chọn'}, các tin gần nhất đang lệch tiêu chí: ${nearestReasonForReply(nearestReason)}.`;
         return '';
       })();
       const deterministicNoMatch = structuredNoMatch
@@ -2877,6 +3085,7 @@ export class AiService {
               relaxed_reason?: string;
             }[],
             nearby: `${availableAreasLine}${sameAreaTypesLine}`.trim(),
+            exactMatchesExhausted,
           })
         : '';
       const modelAlreadyNoMatch = hasNoMatchReply(result.reply);
@@ -2917,7 +3126,7 @@ export class AiService {
           : '';
       const nearestLine =
         nearestReason && related.length && !items.length
-          ? `\nMình gửi bên dưới ${related.length} căn gần tiêu chí nhất (${nearestReason.toLocaleLowerCase('vi')}) để ${address} tham khảo nhé.${handoffLine}`
+          ? `\nMình gửi bên dưới ${related.length} căn gần tiêu chí nhất (${nearestReasonForReply(nearestReason)}) để ${address} tham khảo nhé.${handoffLine}`
           : handoffLine
             ? `\n${handoffLine.trim()}`
             : '';
@@ -2937,9 +3146,11 @@ export class AiService {
           ? legalFactReply(evidenceItems[0], groundedLegalDetail)
           : '';
       const deterministicListingReply = blocked
-        ? evidenceItems.length
-          ? groundedSummary(evidenceItems)
-          : safeReply
+        ? questionTurn
+          ? genericQuestionFallback()
+          : evidenceItems.length
+            ? deterministicComparison || groundedSummary(evidenceItems)
+            : safeReply
         : result.reply;
       const specificListingReply = Boolean(viewedPropertyId || codeReference.codes.length === 1);
       const availabilityNotice = availabilityNoticeForReply(source, evidenceItems, specificListingReply);
@@ -2954,10 +3165,14 @@ export class AiService {
         : moreNoNew || cheaperNoMatch || (blocked && !items.length && noMatch && !modelAlreadyNoMatch)
           ? ''
           : postLegalReply || finalLegalReply || (blocked ? deterministicListingReply : result.reply);
+      const exactMatchBody =
+        structuredSearchCards && items.length && hasCatalogueNoMatchReply(result.reply)
+          ? `Mình tìm thấy ${items.length} căn phù hợp với tiêu chí đã nêu.`
+          : '';
       const reply = assembleFinalReply({
-        intro: !hasDisclosure && count === 0 ? disclosure : '',
+        intro: !hasAssistantTurn ? disclosure : '',
         notices: [availabilityNotice, investmentRiskLine, structuredNoMatch ? '' : criteriaLine, systemBodyPrefix],
-        body: modelBody,
+        body: exactMatchBody || modelBody,
         trailing: [
           areaToleranceSuffix,
           moreStatus,
@@ -3090,23 +3305,54 @@ export class AiService {
         ...item,
         details: details.get(item.id) || item.details,
       }));
-      const finalIntro = !hasDisclosure && count === 0 ? disclosure : '';
+      const finalIntro = !hasAssistantTurn && !pureClosing ? disclosure : '';
       const finalNormalisedReply = normalizeFinalReply(
         viewedPropertyId ? floorsFixed : scrubOutsideDetailViewing(floorsFixed),
         source,
         finalSources,
-        { specificListing: specificListingReply, includeAvailabilityNotice: false, relatedCount: related.length },
+        {
+          specificListing: specificListingReply,
+          includeAvailabilityNotice: false,
+          relatedCount: related.length,
+          nonFirstTurn: hasAssistantTurn,
+        },
       );
-      const finalReply =
-        finalNormalisedReply.trim() === finalIntro.trim() && modelBody.trim()
+      const finalWithExactMatchIntro =
+        structuredSearchCards && history.length === 0 && items.length
+          ? hasCatalogueNoMatchReply(finalNormalisedReply)
+            ? `Mình tìm thấy ${items.length} căn phù hợp với tiêu chí đã nêu.`
+            : hasNoMatchReply(finalNormalisedReply)
+              ? finalNormalisedReply
+              : /Mình tìm thấy\s+\d+\s+căn/iu.test(finalNormalisedReply)
+                ? finalNormalisedReply
+                : `${finalNormalisedReply}\nMình tìm thấy ${items.length} căn phù hợp với tiêu chí đã nêu.`
+          : finalNormalisedReply;
+      const finalReply = pureClosing
+        ? closingReply
+        : finalWithExactMatchIntro.trim() === finalIntro.trim() && modelBody.trim()
           ? assembleFinalReply({
               intro: finalIntro,
               body: '',
               originalBody: modelBody,
               fallbackNotice: availabilityNotice,
             })
-          : finalNormalisedReply;
-      const replyWithoutListingCodes = redactListingCodesSafe(finalReply, evidenceItems).trimStart();
+          : finalWithExactMatchIntro;
+      const stableBudgetReply = unchangedBudgetResults
+        ? `${removeFutureListingPromise(finalReply)}
+Với ngân sách mới, đây vẫn là các căn duy nhất khớp tiêu chí hiện có.`
+        : finalReply;
+      const refinement =
+        !pureClosing && items.length && structuredCatalogueSearch && clarification.refine
+          ? clarification.refine
+          : undefined;
+      // The model may already end with the same refining question; ask it once.
+      const replyWithRefinement = refinement
+        ? `${stableBudgetReply
+            .split('\n')
+            .filter((line) => line.trim() !== refinement.question.trim())
+            .join('\n')}\n${refinement.question}`
+        : stableBudgetReply;
+      const replyWithoutListingCodes = redactListingCodesSafe(replyWithRefinement, evidenceItems).trimStart();
       // needs_v1 is deliberately not on the response path. The deterministic
       // extraction below remains available for the commit, while the richer LLM
       // extraction runs after the reply has been sent and can never fail the turn.
@@ -3248,22 +3494,26 @@ export class AiService {
       const cheaperOptions = cheaperNoMatch
         ? ['Quận 8 hoặc Nhà Bè', `Giữ ${area || 'khu vực này'}, nới diện tích`, 'Gặp chuyên viên']
         : undefined;
+      const outgoingClarify = pureClosing
+        ? undefined
+        : refinement
+          ? { needed: false, question: null, options: [], refine: refinement }
+          : cheaperOptions
+            ? { needed: true, question: 'Bạn muốn thử hướng nào tiếp theo?', options: cheaperOptions }
+            : genericClarification || undefined;
       const payload = {
+        criteria: responseCriteria,
         session: committed.data,
         reply: replyWithoutListingCodes,
         scope,
-        sources: items,
-        related,
+        sources: pureClosing ? [] : items,
+        related: pureClosing ? [] : related,
         blocked,
         proposals,
         pending_actions: pendingActions,
         action: bookingAction || action,
         inquiry_url: '/customer/inquiries/new',
-        ...(cheaperOptions
-          ? { clarify: { needed: true, question: 'Bạn muốn thử hướng nào tiếp theo?', options: cheaperOptions } }
-          : genericClarification
-            ? { clarify: genericClarification }
-            : {}),
+        ...(outgoingClarify ? { clarify: outgoingClarify } : {}),
       };
       if (request.headers.get('accept')?.includes('text/event-stream')) {
         const encoder = new TextEncoder();
@@ -3271,7 +3521,14 @@ export class AiService {
           start(controller) {
             const send = (type: string, value: unknown) =>
               controller.enqueue(encoder.encode(`event: ${type}\ndata: ${JSON.stringify(value)}\n\n`));
-            send('meta', { session_id: committed.data.id, scope, sources: items, related });
+            send('meta', {
+              session_id: committed.data.id,
+              scope,
+              sources: items,
+              related,
+              criteria: responseCriteria,
+              clarify: outgoingClarify,
+            });
             // The stream is sent after the guarded answer is final, so only the final reply is streamed
             // (never a draft that a guard later replaced).
             const deltas = Array.from({ length: Math.ceil(replyWithoutListingCodes.length / 48) }, (_, i) =>
@@ -3280,7 +3537,14 @@ export class AiService {
             for (const text of deltas) send('delta', { text });
             for (const pending of pendingActions) send('action', { action: pending });
             if (bookingAction) send('action', { action: bookingAction });
-            send('done', { message: replyWithoutListingCodes, scope, blocked, guard: violation });
+            send('done', {
+              message: replyWithoutListingCodes,
+              scope,
+              blocked,
+              guard: violation,
+              criteria: responseCriteria,
+              clarify: outgoingClarify,
+            });
             controller.close();
           },
         });

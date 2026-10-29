@@ -166,10 +166,11 @@ try {
  window.SpeechSynthesisUtterance=class{constructor(text){this.text=text;}};
  Object.defineProperty(window,'speechSynthesis',{value:{getVoices:()=>[{lang:'vi-VN'}],cancel(){window.cancelCount++;},speak(u){window.spoken.push(u);}}});
  const originalFetch=window.fetch.bind(window);window.fetch=async(url,options)=>{
-  if(url==='/api/ai/chat'){const body=JSON.parse(options.body);window.chatRequests.push(body);if(body.message.startsWith('BG_')){await window.__releasePromise;if(body.message==='BG_FAIL')throw new Error('background failure');}else await new Promise(r=>setTimeout(r,500));const result={session:{id:'f6300000-0000-4000-8000-000000000009'},reply:'Tôi là trợ lý AI của TERAVA. Q7-R01 giá thuê 25.000.000 VND/tháng, còn cho thuê.',sources:[{id:'f6300000-0000-4000-8000-000000000003',code:'Q7-R01',name:'Căn hộ 2 phòng ngủ Quận 7',number:1,cover_id:null,area:80,bedrooms:2,location:'Quận 7',reason:'Gần chợ và trường học.',price:25000000,transaction_type:'Rent',price_period:'Month',availability:'Available',updated_at:'2026-10-15T00:00:00Z'}]};
+  if(url==='/api/ai/chat'){const body=JSON.parse(options.body);window.chatRequests.push(body);if(body.message.startsWith('BG_')){await window.__releasePromise;if(body.message==='BG_FAIL')throw new Error('background failure');}else await new Promise(r=>setTimeout(r,500));const result={session:{id:'f6300000-0000-4000-8000-000000000009'},reply:'Tôi là trợ lý AI của TERAVA. Q7-R01 giá thuê 25.000.000 VND/tháng, còn cho thuê.',criteria:{transaction_type:'Rent',location:'Quận 7',maxPrice:30000000},sources:[{id:'f6300000-0000-4000-8000-000000000003',code:'Q7-R01',name:'Căn hộ 2 phòng ngủ Quận 7',number:1,cover_id:null,area:80,bedrooms:2,location:'Quận 7',reason:'Gần chợ và trường học.',price:25000000,transaction_type:'Rent',price_period:'Month',availability:'Available',updated_at:'2026-10-15T00:00:00Z'}]};
+ result.clarify={needed:false,question:null,options:[],refine:{question:'Bạn ưu tiên thêm tiêu chí nào?',options:['2 PN','Dưới 50 m²']}};
  window.chatSequence=(window.chatSequence||0)+(body.session_id?0:1);result.session.id=body.session_id||(window.chatSequence===1?'f6300000-0000-4000-8000-000000000009':'f6300000-0000-4000-8000-0000000001'+String(window.chatSequence).padStart(2,'0'));if(body.message==='FORMAT_TEST')result.reply='**đậm** *nghiêng*\\n- một\\n- hai\\n1. một\\n2. hai\\n[1] <img src=x onerror="window.__xss=1">';
  // Same SSE wire format as the backend (event name on its own line, no type in data): the widget always asks for text/event-stream.
- const sse=[['meta',{session_id:result.session.id,scope:'in_scope',sources:result.sources,related:[]}],...result.reply.match(/.{1,48}/gs).map(text=>['delta',{text}]),['done',{message:result.reply,scope:'in_scope',blocked:false,guard:null}]].map(([event,data])=>'event: '+event+'\\ndata: '+JSON.stringify(data)+'\\n\\n').join('');
+ const sse=[['meta',{session_id:result.session.id,scope:'in_scope',sources:result.sources,related:[],criteria:result.criteria,clarify:result.clarify}],...result.reply.match(/.{1,48}/gs).map(text=>['delta',{text}]),['done',{message:result.reply,scope:'in_scope',blocked:false,guard:null,criteria:result.criteria,clarify:result.clarify}]].map(([event,data])=>'event: '+event+'\\ndata: '+JSON.stringify(data)+'\\n\\n').join('');
  return new Response(sse,{status:200,headers:{'Content-Type':'text/event-stream; charset=utf-8'}});}
   if(typeof url==='string'&&url.startsWith('/api/customer/favorites/status'))return new Response(JSON.stringify({ids:window.favoriteIds}),{status:200,headers:{'Content-Type':'application/json'}});
   if(typeof url==='string'&&url.startsWith('/api/customer/favorites/')){const method=options?.method||'GET';window.favoriteRequests.push({url,method});if(method==='PUT'&&window.failFavoritePut)throw new Error('favorite failure');const id=url.split('/').at(-1);if(method==='PUT'&&!window.favoriteIds.includes(id))window.favoriteIds.push(id);if(method==='DELETE')window.favoriteIds=window.favoriteIds.filter(value=>value!==id);return new Response('{}',{status:200,headers:{'Content-Type':'application/json'}});}
@@ -201,6 +202,12 @@ try {
     await wait("!!document.querySelector('.ai-property-card')");
     check(
       await evaluate(
+        "!!document.querySelector('.ai-refine-question') && document.querySelectorAll('.ai-refine-options button').length===2 && !!document.querySelector('.ai-property-list + .ai-refine-question')",
+      ),
+      width + ' refining chips render below cards',
+    );
+    check(
+      await evaluate(
         "!document.querySelector('.ai-source') && document.querySelector('.ai-property-card') && document.querySelector('.ai-switch input').disabled",
       ),
       'rental card, card evidence, consent lock',
@@ -223,19 +230,32 @@ try {
       ),
       'guest card action requests sign-in with return path',
     );
+    await wait("!document.querySelector('.ai-typing')");
+    await evaluate(
+      "[...document.querySelectorAll('.ai-refine-options button')].find(button=>button.textContent==='2 PN').click()",
+    );
+    await wait('chatRequests.length===2');
+    await wait("!document.querySelector('.ai-typing')");
+    check(await evaluate("chatRequests.at(-1).message==='2 PN'"), 'refining chip sends its text');
     await type('Dòng một');
     await evaluate("document.querySelector('#ai-message').focus()");
     await key(true);
     await wait("document.querySelector('#ai-message').value.includes('\\n')");
-    check(await evaluate('chatRequests.length===1'), 'Shift Enter does not send');
+    check(await evaluate('chatRequests.length===2'), 'Shift Enter does not send');
     await key();
-    await wait('chatRequests.length===2');
+    await wait('chatRequests.length===3');
     await wait("!document.querySelector('.ai-typing')");
+    check(
+      await evaluate(
+        "chatRequests.at(-1).criteria?.location==='Quận 7' && chatRequests.at(-1).criteria?.transaction_type==='Rent'",
+      ),
+      'second request sends criteria from the first reply',
+    );
     await click('Nói thay vì gõ');
     await evaluate("recognitions.at(-1).emit('Tôi cần căn hộ',true)");
     await wait("document.querySelector('#ai-message').value==='Tôi cần căn hộ'");
     check(
-      await evaluate("recognitions.at(-1).lang==='vi-VN' && chatRequests.length===2"),
+      await evaluate("recognitions.at(-1).lang==='vi-VN' && chatRequests.length===3"),
       'dictation only edits textarea',
     );
     await click('Trò chuyện bằng giọng nói');
@@ -249,7 +269,7 @@ try {
     await evaluate("recognitions.at(-1).emit('Tôi muốn đổi khu vực')");
     check(await evaluate('cancelCount>beforeEcho'), 'interim barge-in cancels speech');
     await evaluate("recognitions.at(-1).emit('Tôi muốn đổi khu vực',true)");
-    await wait('chatRequests.length===4');
+    await wait('chatRequests.length===5');
     await wait("document.querySelector('.ai-voice').dataset.state==='speaking'");
     await screenshot('voice-' + width);
     await evaluate('spoken.at(-1).onend()');

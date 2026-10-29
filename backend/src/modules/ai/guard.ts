@@ -1,5 +1,6 @@
 import { object, propertyTypes } from './extraction.ts';
 import { moneyAmounts, priceLabel } from './money.ts';
+import { derivedFinanceAmounts } from './finance.js';
 export function sanitizeReply(reply: string) {
   return reply
     .replace(/\[n\]/gi, '')
@@ -160,6 +161,37 @@ export const GUARD_VERSION = 'guard.v3';
 export const safeReply =
   'Mình chưa đủ dữ liệu để trả lời chắc chắn câu này. Bạn muốn mình nhờ chuyên viên tư vấn kiểm tra và báo lại cho bạn không?';
 export const disclosure = 'Tôi là trợ lý AI của TERAVA.';
+export function stripLeadingGreeting(reply: string) {
+  // A customer's own name stays ("Chào bạn Lan,"); a place word taken for a name ("Chào Quận,") goes.
+  return reply.replace(
+    /(^|\n)\s*(?:Chào|Xin chào)\s+(?:bạn|(?:Quận|Huyện|Phường|Xã|Thành phố|TP\.?|Thủ Đức|Q\.?\s*\d)[^,\n]{0,40}),\s*/giu,
+    '$1',
+  );
+}
+
+export function dedupeCriteriaLines(reply: string) {
+  let seen = false;
+  return reply
+    .split(/(\r?\n)/u)
+    .filter((part) => {
+      if (/^\s*Tiêu chí\s*:/iu.test(part)) {
+        if (seen) return false;
+        seen = true;
+      }
+      return true;
+    })
+    .join('')
+    .replace(/\n{2,}/gu, '\n')
+    .trim();
+}
+
+export function removeFutureListingPromise(reply: string) {
+  return reply
+    .split(/(?<=[.!?])\s+|\n/gu)
+    .filter((sentence) => !/sẽ\s+(?:cập nhật|gửi|tìm thêm|tìm)\b[\s\S]*(?:căn|danh sách)/iu.test(sentence))
+    .join('\n')
+    .trim();
+}
 export type FinalReplyParts = {
   intro?: string;
   notices?: string[];
@@ -374,12 +406,22 @@ function commitment(text: string, grounded: { legal?: boolean; practice?: boolea
   const generalPractice = !/(?:căn|nhà|lô|đất) này|ngay|hôm nay/iu.test(text);
   // "Chưa có căn … đã có sổ hồng" restates a search criterion, not a claim about a listing.
   const noListing = /(?:chưa|không) (?:có|tìm thấy) (?:căn|nhà|lô|bất động sản)/iu.test(text);
+  const negatedCommitment = (index: number) => {
+    const prefix = text.slice(Math.max(0, index - 120), index);
+    // Only the words right before this match count: "không (có) cam kết", "kiểm tra … cam kết".
+    return (
+      /(?:không|chưa|chẳng)\s+(?:hề\s+)?(?:có\s+)?(?:(?:cam kết|chịu trách nhiệm|đảm bảo)\s+)?$/iu.test(prefix) ||
+      /(?:kiểm tra|xem xét|xác minh)[^.!?\n]{0,40}$/iu.test(prefix)
+    );
+  };
   return patterns.some(
     ([p, kind]) =>
       (kind === 'strict' ||
         (kind === 'legal' && !grounded.legal && !noListing) ||
         (kind === 'practice' && !(grounded.practice && generalPractice))) &&
-      [...text.matchAll(p)].some((m) => !negated(text, m.index!) && !/không|chưa|chẳng|\bnot\b/i.test(m[0])),
+      [...text.matchAll(p)].some(
+        (m) => !negatedCommitment(m.index || 0) && !negated(text, m.index!) && !/không|chưa|chẳng|\bnot\b/i.test(m[0]),
+      ),
   );
 }
 export function evidenceReason(item: Evidence) {
@@ -399,7 +441,22 @@ export function toolAllowed(tool: unknown): tool is { name: string; arguments: R
   if (tool.name === 'search_properties')
     return (
       Object.keys(args).every((k) =>
-        ['location', 'type', 'types', 'minPrice', 'maxPrice', 'bedrooms', 'transaction_type'].includes(k),
+        [
+          'location',
+          'locations',
+          'location_aliases',
+          'type',
+          'types',
+          'minPrice',
+          'maxPrice',
+          'maxPriceExclusive',
+          'minArea',
+          'maxArea',
+          'bedrooms',
+          'minBedrooms',
+          'maxBedrooms',
+          'transaction_type',
+        ].includes(k),
       ) &&
       Object.entries(args).every(([k, v]) =>
         k === 'transaction_type'
@@ -413,9 +470,20 @@ export function toolAllowed(tool: unknown): tool is { name: string; arguments: R
                 v.every((value) => propertyTypes.includes(value as string))
               : k === 'location'
                 ? typeof v === 'string' && v.length > 0 && v.length <= 120
-                : typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1e15,
+                : k === 'locations' || k === 'location_aliases'
+                  ? Array.isArray(v) && v.length > 0 && v.length <= 100 && v.every((value) => typeof value === 'string')
+                  : k === 'maxPriceExclusive'
+                    ? typeof v === 'boolean'
+                    : k === 'bedrooms' || k === 'minBedrooms' || k === 'maxBedrooms'
+                      ? typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 100
+                      : typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1e15,
       ) &&
-      !(typeof args.minPrice === 'number' && typeof args.maxPrice === 'number' && args.minPrice > args.maxPrice)
+      !(typeof args.minPrice === 'number' && typeof args.maxPrice === 'number' && args.minPrice > args.maxPrice) &&
+      !(
+        typeof args.minBedrooms === 'number' &&
+        typeof args.maxBedrooms === 'number' &&
+        args.minBedrooms > args.maxBedrooms
+      )
     );
   if (tool.name === 'get_property_detail')
     return (
@@ -498,6 +566,7 @@ export type GuardContext = {
   financeRanges?: [number, number][];
   financePresent?: boolean;
   faqEvidence?: boolean;
+  criteriaBedrooms?: number[];
   sourceText?: string;
   listingText?: string;
   practice?: boolean;
@@ -516,12 +585,23 @@ export function outputReason(reply: string, evidence: Evidence[], customerText =
   const effectiveLimits = new Set([...(context?.filterAmounts || []), ...(context?.previousPrices || [])]);
   const onlyLimits = ungroundedReplyAmounts.every((amount) => effectiveLimits.has(amount));
   const financeTolerance = (value: number) => Math.max(value * 0.01, 100_000);
+  // Loan examples such as "vay 70% của 1,85 tỷ" are percentages of a price the customer already saw.
+  const knownPrices = [
+    ...(context?.previousPrices || []),
+    ...evidence.map((item) => item.price).filter((price): price is number => typeof price === 'number'),
+  ];
+  const replyFinanceAmounts = /(?:vay|thu nhập|trả góp)/iu.test(`${customerText}\n${reply}`)
+    ? derivedFinanceAmounts(reply, knownPrices)
+    : [];
+  const financeAmounts = [...(context?.financeAmounts || []), ...replyFinanceAmounts];
   const financeAmountGrounded = (amount: number) =>
-    (context?.financeAmounts || []).some((value) => Math.abs(value - amount) <= financeTolerance(value)) ||
+    financeAmounts.some((value) => Math.abs(value - amount) <= financeTolerance(value)) ||
     (context?.financeRanges || []).some(
       ([low, high]) => amount >= low - financeTolerance(low) && amount <= high + financeTolerance(high),
     );
-  const financeGroundedAnswer = Boolean(context?.financePresent) && ungroundedReplyAmounts.every(financeAmountGrounded);
+  const financeGroundedAnswer =
+    Boolean(context?.financePresent || replyFinanceAmounts.length) &&
+    ungroundedReplyAmounts.every(financeAmountGrounded);
   if (
     context?.retrievalFound === false &&
     !evidence.length &&
@@ -677,7 +757,8 @@ export function outputReason(reply: string, evidence: Evidence[], customerText =
         negated(clause, room.index!) ||
         uncertain ||
         /(?:chưa biết|chưa rõ|chưa xác nhận)/i.test(prefix) ||
-        (/(?:bạn cần|bạn muốn|bạn tìm|nhu cầu|tiêu chí|yêu cầu)/i.test(prefix) && customerText.includes(room[0]))
+        (/(?:bạn cần|bạn muốn|bạn tìm|nhu cầu|tiêu chí|yêu cầu)/i.test(prefix) && customerText.includes(room[0])) ||
+        (context?.criteriaBedrooms || []).includes(count)
       )
         continue;
       return 'UNSUPPORTED_ROOM_COUNT';
@@ -913,6 +994,7 @@ export type NormalizeFinalReplyOptions = {
   specificListing?: boolean;
   includeAvailabilityNotice?: boolean;
   relatedCount?: number;
+  nonFirstTurn?: boolean;
 };
 export function normalizeFinalReply<T extends { availability?: string }>(
   reply: string,
@@ -925,6 +1007,7 @@ export function normalizeFinalReply<T extends { availability?: string }>(
     sources.some((source) => Boolean((source as T & { property_id?: string | null }).property_id));
   const includeAvailabilityNotice = options.includeAvailabilityNotice ?? true;
   let prepared = repairUnsupportedRoomClaims(sanitizeReply(reply), sources as unknown as Evidence[]);
+  if (options.nonFirstTurn) prepared = stripLeadingGreeting(prepared);
   const originalMissing = prepared.match(
     /Tin đăng chưa có thông tin về ([^.!?\n]+)[.!?]\s*Mình (?:không tự ý đoán hay )?(?:nói(?: là)? )?không biết[^.!?\n]*[.!?]?/iu,
   );
@@ -1159,7 +1242,7 @@ export function normalizeFinalReply<T extends { availability?: string }>(
       .replace(/(?<![\p{L}\d])(\d+)\.(\d+)(?=\s*m(?:²|2)(?![\p{L}\d]))/gu, '$1,$2')
       .replace(/(?<![\p{L}\d])(\d+)\.(\d+)(?=\s*(?:tỷ|tỉ|ty|triệu|tr|nghìn|ngàn|đồng|VND)(?![\p{L}\d]))/giu, '$1,$2');
   result = formatReplyDates(result);
-  return result;
+  return dedupeCriteriaLines(result);
 }
 
 export function isRawListingDump(reply: string) {

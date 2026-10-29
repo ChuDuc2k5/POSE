@@ -2,9 +2,15 @@ import { hcmWards } from './hcm-wards.js';
 import { inferSearch } from './infer-search.js';
 import { moneyAmounts } from './money.js';
 
-export type Clarification = { needed: boolean; question: string | null; options: string[] };
+export type Clarification = {
+  needed: boolean;
+  question: string | null;
+  options: string[];
+  refine?: { question: string; options: string[] };
+};
 const listingCodePattern = /(?<![\p{L}\d])[A-Z][A-Z\d]{0,7}-[A-Z\d]{4,40}(?![\p{L}\d])/gu;
-const searchIntent = /(?:căn|nhà|đất|phòng|mua|thuê|tìm|bất động sản|giá|chung cư|villa|shop|office)/iu;
+const searchIntent =
+  /(?:căn|can|nhà|nha|đất|dat|phòng|phong|mua|thuê|thue|tìm|tim|bất động sản|bat dong san|giá|gia|chung cư|chung cu|villa|shop|office)/iu;
 const locationPattern =
   /(?:quận|q\.?\s*\d{1,2}|huyện|thủ\s*đức|phường|xã|thành phố|tp\.?\s*hồ\s*chí\s*minh|hcm|sài\s*gòn)/iu;
 const fold = (value: string) =>
@@ -249,10 +255,16 @@ export function referencedListingCodes(message: string, history: { role: string;
       message,
     );
   const explicitListingReference =
-    /(?:căn|can|nhà|nha)\s+(?:này|nay|đó|do|vừa\s+rồi|vua\s+roi|bạn\s+đang\s+xem|ban\s+dang\s+xem|đang\s+xem|dang\s+xem)/iu.test(
+    /(?:căn|can|nhà|nha)\s+(?:này|nay|đó|do|vừa\s+rồi|vua\s+roi|bạn\s+đang\s+xem|ban\s+dang\s+xem|đang\s+xem|dang\s+xem)|(?:căn|can)\s*(?:(?:số|so)\s*)?\d+(?!\s*(?:phòng|pn))/iu.test(
       message,
     );
-  if (hasNewCriteria && refinementSignal && !backReference.test(message) && !historyReferenceQuestion(message, history))
+  if (
+    hasNewCriteria &&
+    refinementSignal &&
+    !backReference.test(message) &&
+    !explicitListingReference &&
+    !historyReferenceQuestion(message, history)
+  )
     return { codes: [] as string[], ambiguous: false };
   const turns = history as HistoryTurn[];
   const listed =
@@ -409,6 +421,15 @@ export function customerNameFromHistory(message: string, history: { role: string
     if (turn.role === 'user') name = statedName(turn.content) || name;
   return name;
 }
+
+export function isPureClosing(message: string) {
+  const normalized = fold(message).trim();
+  return (
+    /^(?:cam on|thanks?|thank you)(?:\s+(?:ban|nhe|nha|a|nhieu|rat nhieu))*\s*(?:[,;.!?-]\s*(?:tam biet|bye|hen gap lai|hen(?:\s+ban)?\s+sau|chao(?:\s+ban)?|minh se lien he sau|de minh suy nghi them))?[.!?\s]*$/iu.test(
+      normalized,
+    ) || /^(?:tam biet|bye|hen gap lai|chao(?:\s+ban)?)[.!?\s]*$/iu.test(normalized)
+  );
+}
 const vagueCriteriaAnswer = /^(?:chưa rõ|không rõ|chưa biết|tùy|gợi ý|không giới hạn)(?:[\s,.:;-].*)?$/iu;
 const explicitNewSearch =
   /(?:tìm|kiếm)\s+(?:[^\n]{0,40}\s+)?(?:mua|thuê|nhà|căn|đất|phòng)|(?:muốn|cần|thuê|mua)\s+(?:mua|thuê|nhà|căn|đất|phòng)|(?:gợi ý|tư vấn)\s+(?:mua|thuê|nhà|căn)|khác\s+hoàn\s+toàn/iu;
@@ -433,18 +454,15 @@ export function searchCriteriaFromHistory(message: string, history: { role: stri
   )
     return current as ReturnType<typeof inferSearch> & { bedrooms?: number };
   for (const turn of [...history, { role: 'user', content: message }]) {
-    if (turn.role === 'assistant') {
-      const deterministic = turn.content.match(/(?:^|\n)Tiêu chí:\s*([^\n]+)/iu)?.[1];
-      if (deterministic) Object.assign(criteria, inferredCriteria(deterministic));
-      continue;
-    }
+    if (turn.role === 'assistant') continue;
     if (explicitNewSearch.test(turn.content) && Object.keys(criteria).length) {
       for (const key of Object.keys(criteria)) delete criteria[key];
     }
     const turnCriteria = inferredCriteria(turn.content);
+    const explicitTransaction = /(?:mua|bán|thuê|cho\s+thuê|buy|sale|rent)/iu.test(turn.content);
     const areaOnly =
       (turnCriteria.location !== undefined || turnCriteria.locations !== undefined) &&
-      turnCriteria.transaction_type === undefined &&
+      (turnCriteria.transaction_type === undefined || !explicitTransaction) &&
       turnCriteria.type === undefined &&
       turnCriteria.types === undefined &&
       turnCriteria.minPrice === undefined &&
@@ -455,6 +473,7 @@ export function searchCriteriaFromHistory(message: string, history: { role: stri
     if (areaOnly) {
       // An area-only refinement replaces location while preserving the active
       // transaction, type, budget, area and room criteria.
+      delete turnCriteria.transaction_type;
       delete criteria.location;
       delete criteria.locations;
       delete criteria.location_aliases;
@@ -640,7 +659,7 @@ export function clarificationFor(message: string, history: { role: string; conte
       ? 'thuê'
       : criteria.transaction_type === 'Sale'
         ? 'mua'
-        : /thuê/iu.test(message)
+        : /thuê|thue/iu.test(message)
           ? 'thuê'
           : 'tìm';
   if (criteriaReply && vagueCriteriaAnswer.test(message)) return { needed: false, question: null, options: [] };
@@ -669,10 +688,10 @@ export function clarificationFor(message: string, history: { role: string; conte
   if (!location && !hasBudget && !concrete && !extremePriceRequest && (!history.length || !previousWasClarification))
     return {
       needed: true,
-      question: /thuê/iu.test(message)
+      question: /thuê|thue/iu.test(message)
         ? `${addressStart} đang tìm ${kind} thuê ở khu vực nào (quận, phường hay tuyến đường) và ngân sách khoảng bao nhiêu mỗi tháng ạ? Nếu chưa chắc, mình gợi ý vài khu phù hợp nhé.`
         : `${addressStart} đang tìm mua ${kind} ở khu vực nào (quận, phường hay tuyến đường) và ngân sách khoảng bao nhiêu ạ? Nếu chưa chắc, mình gợi ý vài khu phù hợp nhé.`,
-      options: /thuê/iu.test(message)
+      options: /thuê|thue/iu.test(message)
         ? ['Dưới 10 triệu', '10–20 triệu', 'Chưa rõ, gợi ý giúp tôi']
         : ['Dưới 3 tỷ', '3–6 tỷ', '6–10 tỷ', 'Trên 10 tỷ', 'Chưa rõ, gợi ý giúp tôi'],
     };

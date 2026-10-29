@@ -69,7 +69,9 @@ type Message = {
   action?: PendingAction;
   booking?: BookingAction;
   options?: string[];
+  refine?: { question: string; options: string[] };
 };
+type Criteria = Record<string, unknown>;
 type HistoryItem = {
   id: string;
   title: string;
@@ -77,10 +79,12 @@ type HistoryItem = {
   updated_at?: string;
   message_count?: number;
   messages?: Message[];
+  criteria?: Criteria;
   store_transcript?: boolean;
 };
 type ConversationState = {
   messages: Message[];
+  criteria?: Criteria;
   sessionId?: string;
   pending: boolean;
   controller?: AbortController;
@@ -99,6 +103,11 @@ function validMessage(message: Message) {
       (Array.isArray(message.options) &&
         message.options.length <= 6 &&
         message.options.every((option) => typeof option === 'string'))) &&
+    (!message.refine ||
+      (typeof message.refine.question === 'string' &&
+        Array.isArray(message.refine.options) &&
+        message.refine.options.length <= 6 &&
+        message.refine.options.every((option) => typeof option === 'string'))) &&
     (!message.sources ||
       (Array.isArray(message.sources) &&
         message.sources.every(
@@ -311,6 +320,7 @@ export function AiChatWidget({
         activeConversation.current = restoredSession;
         conversations.current.set(restoredSession, {
           messages: restoredMessages,
+          criteria: saved.criteria && typeof saved.criteria === 'object' ? saved.criteria : undefined,
           sessionId: sessionRef.current,
           pending: false,
           error: '',
@@ -406,6 +416,7 @@ export function AiChatWidget({
       time: new Date().toISOString(),
       message_count: messages.length,
       messages,
+      criteria: conversations.current.get(activeConversation.current || session)?.criteria,
     };
     try {
       const current = JSON.parse(window.localStorage.getItem(localHistoryKey) || '[]');
@@ -419,7 +430,19 @@ export function AiChatWidget({
     try {
       window.sessionStorage.setItem(
         chatStorageKey,
-        JSON.stringify({ ownerKey, messages: messages.slice(-30), session_id: session, store, open, draft: text }),
+        JSON.stringify({
+          ownerKey,
+          messages: messages.slice(-30),
+          criteria: activeConversation.current
+            ? conversations.current.get(activeConversation.current)?.criteria
+            : session
+              ? conversations.current.get(session)?.criteria
+              : undefined,
+          session_id: session,
+          store,
+          open,
+          draft: text,
+        }),
       );
     } catch {}
   }, [restored, ownerKey, messages, session, store, open, text]);
@@ -579,13 +602,16 @@ export function AiChatWidget({
         const requestHistory = state.messages
           .slice(0, -1)
           .slice(-10)
-          .map(({ role, content, sources }) => ({
-            role,
-            content: content.slice(0, 8000),
-            ...(role === 'assistant' && sources?.length
-              ? { sources: sources.map((source) => ({ id: source.id, price: source.price, code: source.code })) }
-              : {}),
-          }));
+          .map(({ role, content, sources, related }) => {
+            const cards = sources?.length ? sources : related;
+            return {
+              role,
+              content: content.slice(0, 8000),
+              ...(role === 'assistant' && cards?.length
+                ? { sources: cards.map((source) => ({ id: source.id, price: source.price, code: source.code })) }
+                : {}),
+            };
+          });
         const response = await fetch('/api/ai/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
@@ -594,6 +620,7 @@ export function AiChatWidget({
             session_id: requestSession,
             message: content,
             history: requestHistory,
+            ...(state.criteria ? { criteria: state.criteria } : {}),
             store_transcript: store,
             property_id: propertyId || null,
           }),
@@ -603,6 +630,7 @@ export function AiChatWidget({
         if (!response.headers.get('content-type')?.includes('text/event-stream')) {
           const result = await response.json();
           state.sessionId = result.session.id;
+          if (result.criteria && typeof result.criteria === 'object') state.criteria = result.criteria;
           state.messages = [
             ...state.messages,
             {
@@ -613,6 +641,7 @@ export function AiChatWidget({
               action: result.action?.tool ? result.action : undefined,
               booking: result.action?.type === 'booking_form' ? result.action : undefined,
               options: result.clarify?.needed ? result.clarify.options : undefined,
+              refine: result.clarify?.refine,
             },
           ];
           persistLocalHistory(key, state.messages);
@@ -627,17 +656,18 @@ export function AiChatWidget({
           reply = '',
           sources: Source[] = [],
           related: Source[] = [],
+          refine: Message['refine'],
           action: PendingAction | undefined,
           booking: BookingAction | undefined;
         state.messages = [...state.messages, { role: 'assistant', content: '' }];
         const update = () => {
           const last = state.messages.length - 1;
           if (last >= 0 && state.messages[last].role === 'assistant')
-            state.messages[last] = { role: 'assistant', content: reply, sources, related, action, booking };
+            state.messages[last] = { role: 'assistant', content: reply, sources, related, refine, action, booking };
           else
             state.messages = [
               ...state.messages,
-              { role: 'assistant', content: reply, sources, related, action, booking },
+              { role: 'assistant', content: reply, sources, related, refine, action, booking },
             ];
           persistLocalHistory(key, state.messages);
           if (activeConversation.current === key) setMessages(state.messages);
@@ -660,8 +690,10 @@ export function AiChatWidget({
               ...JSON.parse(line.slice(5)),
             };
             if (event.related) related = event.related;
+            if (event.clarify?.refine) refine = event.clarify.refine;
             if (event.type === 'meta') {
               state.sessionId = event.session_id;
+              if (event.criteria && typeof event.criteria === 'object') state.criteria = event.criteria;
               if (activeConversation.current === key) {
                 sessionRef.current = state.sessionId;
                 setSession(state.sessionId);
@@ -673,7 +705,11 @@ export function AiChatWidget({
                 booking = event.action;
                 setBookingProperty(event.action.property);
               } else action = event.action;
-            } else if (event.type === 'done') reply = event.message || reply;
+            } else if (event.type === 'done') {
+              reply = event.message || reply;
+              if (event.criteria && typeof event.criteria === 'object') state.criteria = event.criteria;
+              if (event.clarify?.refine) refine = event.clarify.refine;
+            }
             update();
           }
           if (chunk.done) break;
@@ -1077,6 +1113,7 @@ export function AiChatWidget({
       setStore(true);
       conversations.current.set(item.id, {
         messages: restored,
+        criteria: item.criteria,
         sessionId: item.id,
         pending: false,
         error: '',
@@ -1663,6 +1700,22 @@ export function AiChatWidget({
                             </div>
                           ))}
                         </div>
+                      )}
+                      {m.refine && (
+                        <>
+                          <div className="ai-refine-question">{m.refine.question}</div>
+                          <div
+                            className="ai-clarify-options ai-refine-options"
+                            role="group"
+                            aria-label="Tiêu chí bổ sung"
+                          >
+                            {m.refine.options.map((option) => (
+                              <button type="button" key={option} disabled={busy} onClick={() => void ask(option)}>
+                                {option}
+                              </button>
+                            ))}
+                          </div>
+                        </>
                       )}
                       {!!m.related?.length && (
                         <section className="ai-related">

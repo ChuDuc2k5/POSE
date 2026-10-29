@@ -139,6 +139,7 @@ export function deterministicNoMatchReply(input: {
   related?: DeterministicNoMatchCard[];
   nearby?: string;
   consultant?: string;
+  exactMatchesExhausted?: boolean;
 }) {
   const cards = (input.related || []).slice(0, 3).map((item, index) => {
     const number = item.number ?? index + 1;
@@ -148,8 +149,10 @@ export function deterministicNoMatchReply(input: {
   });
   return [
     input.criteria?.trim(),
-    `Hiện chưa có căn nào đáp ứng đủ tất cả tiêu chí của bạn${input.area ? ` ở ${input.area}` : ''}.`,
-    input.blocker?.trim(),
+    input.exactMatchesExhausted
+      ? `Mình đã gửi hết các căn khớp đủ tiêu chí hiện có${input.area ? ` ở ${input.area}` : ''}.`
+      : `Hiện chưa có căn nào đáp ứng đủ tất cả tiêu chí của bạn${input.area ? ` ở ${input.area}` : ''}.`,
+    input.exactMatchesExhausted ? '' : input.blocker?.trim(),
     cards.length ? `Các lựa chọn gần tiêu chí nhất:\n${cards.join('\n')}` : '',
     input.nearby?.trim(),
     input.consultant || 'Mình có thể nhờ chuyên viên tư vấn tìm thêm giúp bạn.',
@@ -158,8 +161,18 @@ export function deterministicNoMatchReply(input: {
     .join('\n');
 }
 
+export function genericQuestionFallback() {
+  return 'TERAVA là nền tảng đăng tin, không cam kết hay bảo đảm giá trong tương lai. Bạn nên kiểm tra chính sách và hợp đồng cụ thể với bên bán trước khi quyết định.';
+}
+
 export function hasNoMatchReply(text: string): boolean {
-  return /(?:chưa\s+(?:tìm\s+(?:thấy|được)|có)|không\s+có\s+(?:căn|bất động sản)|không\s+tìm\s+(?:thấy|được)|no\s+match)/iu.test(
+  return /(?:chưa\s+(?:tìm\s+(?:thấy|được)|có\s+(?:(?:căn|bất động sản)(?:\s+(?:nào|phù hợp|đáp ứng|thỏa mãn))?|đủ\s+thông\s+tin|kết quả|tin đăng))|không\s+có\s+(?:căn|bất động sản|kết quả|tin đăng)|không\s+tìm\s+(?:thấy|được)|no\s+match)/iu.test(
+    text,
+  );
+}
+
+export function hasCatalogueNoMatchReply(text: string): boolean {
+  return /(?:chưa\s+(?:tìm\s+(?:thấy|được)|có\s+(?:(?:căn|bất động sản)(?:\s+(?:nào|phù hợp|đáp ứng|thỏa mãn))?|kết quả|tin đăng))|không\s+có\s+(?:căn|bất động sản|kết quả|tin đăng)|không\s+tìm\s+(?:thấy|được)|no\s+match)/iu.test(
     text,
   );
 }

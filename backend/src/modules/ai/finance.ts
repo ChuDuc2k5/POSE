@@ -22,12 +22,26 @@ export type FinanceEvidence = {
 
 /** Amounts derived from a customer's stated loan percentage and a cited listing price. */
 export function derivedFinanceAmounts(text: string, listingPrices: number[]): number[] {
-  const ratios = [...text.matchAll(/(?:vay|borrow)\s*(?:khoảng\s*)?(\d+(?:[.,]\d+)?)\s*%/giu)]
-    .map((match) => Number(match[1].replace(',', '.')) / 100)
-    .filter((ratio) => ratio > 0 && ratio <= 1);
+  const financeContext = /(?:vay|borrow|thu nhập|thu nhap|income)/iu.test(text);
+  const ratios = financeContext
+    ? [...text.matchAll(/(?:vay|borrow|dùng|dung|thu nhập|income)?\s*(?:khoảng\s*)?(\d+(?:[.,]\d+)?)\s*%/giu)]
+        .map((match) => Number(match[1].replace(',', '.')) / 100)
+        .filter((ratio) => ratio > 0 && ratio <= 1)
+    : [];
   const amounts = ratios.flatMap((ratio) =>
     listingPrices.filter((price) => price > 0).map((price) => Math.round(price * ratio)),
   );
+  const income = text.match(/thu\s*nhập[^\d]{0,20}([\d.,]+\s*(?:triệu|tr|tỷ|tỉ|ty))/iu);
+  if (income && ratios.length) {
+    const monthlyIncome = moneyAmounts(income[1])[0];
+    const months = [...text.matchAll(/(\d+)\s*tháng/giu)].map((match) => Number(match[1])).filter((value) => value > 0);
+    if (monthlyIncome) {
+      for (const ratio of ratios) {
+        amounts.push(Math.round(monthlyIncome * ratio));
+        for (const month of months) amounts.push(Math.round(monthlyIncome * ratio * month));
+      }
+    }
+  }
   return [...new Set(amounts)];
 }
 
